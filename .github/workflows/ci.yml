@@ -1,0 +1,64 @@
+name: CI
+
+# 全部 job 均为 PR 必过（test-plan §8）。
+# 建议在 GitHub 仓库设置中对 main 启用 branch protection：
+#   Settings → Branches → Add rule → 要求 "frontend" 与 "backend-migrations" 状态检查通过后方可合并。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一 PR 新提交取消旧运行
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PB_VERSION: '0.28.4'
+
+jobs:
+  frontend:
+    name: frontend (lint / typecheck / unit / build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+      - run: npm run build
+
+  backend-migrations:
+    name: backend (pocketbase migrate + hooks 语法检查)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 下载 PocketBase ${{ env.PB_VERSION }}
+        run: |
+          curl -fSL -o /tmp/pocketbase.zip \
+            "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip"
+          unzip -o /tmp/pocketbase.zip -d /tmp/pocketbase
+          /tmp/pocketbase/pocketbase --version
+      - name: 空目录跑通全部迁移
+        run: |
+          /tmp/pocketbase/pocketbase migrate up \
+            --dir /tmp/pb_ci_data \
+            --migrationsDir "${{ github.workspace }}/backend/pb_migrations"
+      - name: pb_hooks 语法检查（node --check）
+        run: |
+          find backend/pb_hooks -name '*.pb.js' -print0 | while IFS= read -r -d '' f; do
+            echo "checking $f"
+            node --check "$f"
+          done

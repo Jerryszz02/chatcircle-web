@@ -1,0 +1,40 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        PB_VERSION: ${PB_VERSION:-0.28.4}
+        VITE_PB_URL: ${VITE_PB_URL:-}
+    ports:
+      - '8090:8090'
+    volumes:
+      - pb_data:/pb/pb_data
+    restart: unless-stopped
+
+  # 备份占位（technical-design §5.8）：每日打包 pb_data 到 backups 卷，滚动保留 30 天。
+  # TODO(M5)：改用 SQLite 一致性备份（PocketBase 备份 API），备份结果写 audit_logs，
+  #           并同步到异地存储（目标与凭据待确认，secrets 只在部署时注入）。
+  backup:
+    image: alpine:3.20
+    volumes:
+      - pb_data:/data:ro
+      - backups:/backups
+    environment:
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+    command: >
+      sh -c "mkdir -p /etc/periodic/daily
+      && cp /deploy/backup.sh /etc/periodic/daily/backup
+      && chmod +x /etc/periodic/daily/backup
+      && crond -f -d 8"
+    configs:
+      - source: backup_script
+        target: /deploy/backup.sh
+    restart: unless-stopped
+
+configs:
+  backup_script:
+    file: ./deploy/backup.sh
+
+volumes:
+  pb_data:
+  backups:

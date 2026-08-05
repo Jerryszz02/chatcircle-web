@@ -1,0 +1,47 @@
+/* 移动端优先基础样式：360px 宽无横向滚动（PRD §13） */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    system-ui,
+    -apple-system,
+    'PingFang SC',
+    'Microsoft YaHei',
+    sans-serif;
+  line-height: 1.5;
+  color: #1a1a1a;
+  background: #ffffff;
+  overflow-x: hidden;
+  word-break: break-word;
+}
+
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.page {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.page-section {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #666;
+}

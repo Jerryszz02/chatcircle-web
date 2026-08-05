@@ -1,0 +1,464 @@
+# Chat Circles — 数据库设计（PocketBase 集合设计草案）
+
+> 本文档将 PRD v0.3 §9 数据模型落地为 PocketBase 集合定义，面向后续实现工程师。阅读本文不需要先读 PRD；涉及 PRD 口径处均注明出处。所有表结构为**设计草案**：字段名、枚举机器码、索引与规则如与实现阶段证据冲突，以实现阶段评审结论为准并回写本文。
+
+## 1. 文档目的
+
+- 给出 PRD §9.1 全部 19 个集合的 PocketBase collection 定义草案：字段名、类型、必填、唯一约束与索引。
+- 固化标识规则（`participant_id` 全平台稳定、`registration_id` 参与者×活动唯一、`question_code` 稳定性、`group_tag` 预留）。
+- 定义多机构隔离在 PocketBase 层面的实现方式：`organization_id` 冗余字段 + API Rules 服务端强制过滤。
+- 汇总全部状态枚举与状态机（活动 7 态、报名 4 态及迁移矩阵、签到场次/记录、问卷 5 态、答卷 3 态、邀请码 4 态），并给出事务与并发约束。
+- 明确迁移策略（`pb_migrations` 版本化、模板版本不可变、无硬删除）与保留策略（审计 ≥1 年、备份 30 天）。
+
+## 2. 适用范围
+
+- 适用：M0~M5 全部后端数据结构设计；PocketBase 集合、API Rules、迁移脚本、导出与看板的数据来源口径。
+- 不适用：前端组件设计、API 路由契约（见 technical-design.md）、审计事件内容清单与隐私文案（见 security-privacy.md）、测试用例（见 test-plan.md）。
+- 环境基线：PocketBase（内嵌 SQLite）单库部署，Docker 卷持久化（PRD §12.1）。
+
+## 3. Plan 或项目证据
+
+| 证据 | 内容 |
+|---|---|
+| 需求基线 | PRD v0.3（评审修订版，2026-08-05），`docs/Chat_Circles_活动与问卷平台_PRD_v0.3.docx`；本文引用其 §9 数据模型、§4 状态模型、§6 功能需求、§10 导出规范、§11 安全审计、§12.3 备份、§14 验收标准、附录 B 命名规范 |
+| 已确认技术决策 | 响应式 Web（React 18 + Vite + TypeScript）+ PocketBase（后端/认证/SQLite）+ Docker；统一入口 `chatcircle.empact.cn`；完整 V1（M0~M5） |
+| 项目现状 | 项目根目录仅有 PRD 文档，无代码、无仓库（GitHub 私有仓库 `chatcircle-web` 待 M0 创建）；本目录规划文档为开发前准备 |
+| 相关文档 | [README.md](README.md)（项目索引与术语）、technical-design.md（架构决策）、security-privacy.md（审计与隐私细则） |
+
+## 4. 非目标
+
+- 不定义 PRD 未写死的**报名标准字段具体内容**（字段清单、必填规则、知情同意文案）——仅提供标准字段库 + 自定义字段的表结构能力，内容列入「待确认」（PRD §8.1、§16.2）。
+- 不定义标准问卷模板的完整题目与锁定题清单——结构按 `survey_template_versions` + `locked` 实现，内容待模板确认（PRD §16.2）。
+- 不设计账号找回/多账号合并、统计分析/LLM/自动报告、独立域名 host 映射的表结构——V1 非范围（PRD §2.2、§16.2），仅按 §5.3 预留扩展位。
+- 不提供任何硬删除能力对应的物理删除方案（FR-AUD-001）。
+- 不承诺 PocketBase 规则语法逐字可执行——规则表达式为示意，实现阶段以所选用 PocketBase 版本文档为准。
+
+## 5. 实现指引
+
+### 5.1 总体约定
+
+| 约定 | 决策草案 | 依据/说明 |
+|---|---|---|
+| 超级管理员载体 | 使用 PocketBase 内置 `_superusers`（全平台仅一个账号，建站时创建；V1 无产品界面管理） | PRD §3、FR-AUTH-009；`_superusers` 天然绕过集合 API Rules，满足全局数据权限 |
+| 管理员/参与者载体 | `admin_accounts`、`participant_accounts` 均为 PocketBase **auth 集合**（用户名+密码认证，密码哈希由 PocketBase 处理） | 满足 FR-AUTH-004（不可逆哈希、无明文）；参与者会话 30 天由 token 有效期配置实现（FR-AUTH-006） |
+| 其余集合 | 均为 **base 集合** | — |
+| 主键 | 一律使用 PocketBase 系统生成随机 `id`（15 位）作为业务标识（`participant_id`、`activity_id`、`registration_id` 等），满足附录 B「系统随机生成、不含身份字段」；附录 B 中的 `pt_`/`act_` 等前缀示例为可选展示形式，不作为存储要求 | PRD 附录 B |
+| 系统字段 | 每个集合自带 `created`/`updated`；业务时间字段（如 `submitted_at`）显式另存 | 审计口径要求精确操作时间（FR-AUD-002） |
+| 用户名唯一性 | `participant_accounts.username` 全局唯一且**字母不区分大小写**：存储时归一化为小写并建唯一索引；注册校验规则 4–20 位、仅字母/数字/下划线 | FR-AUTH-005；PocketBase 唯一约束本身区分大小写，需应用层归一化 |
+| 枚举机器码 | PRD 只定义中文状态名；本文 `select` 枚举值为**草案建议机器码**，入库后不得改值，只允许追加 | PRD §4 |
+| 命名 | 集合名、字段名用 snake_case；可读代码（`activity_code`、`survey_code`、`question_code` 等）遵循附录 B 规则 | PRD 附录 B |
+| 时间格式 | 数据库存储 PocketBase 日期类型；导出统一 ISO 8601 并明确时区（PRD §10.3） | — |
+
+### 5.2 集合定义草案
+
+通用说明：
+
+- 「必填」指创建时 PocketBase 字段级 `required`。
+- 「唯一」指唯一索引（单列或复合）；「索引」指普通查询索引。
+- 每张表的「API Rules 要点」只写该集合特有部分，统一隔离模式见 §5.4。
+- 无任何业务集合开放 deleteRule（无硬删除，见 §5.7）。
+
+#### 5.2.1 organizations — 机构主数据与机构级开关（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| name | text | 是 | — | 机构名称 |
+| status | select(active, disabled) | 是 | 索引 | 停用后其管理员不能进入业务后台，历史数据保留（FR-ORG-001） |
+| require_activity_approval | bool | 是 | — | 活动发布需平台审核开关（FR-ORG-004） |
+| allow_sensitive_export | bool | 是 | — | 允许机构管理员敏感导出开关（FR-ORG-005） |
+| remark | text | 否 | — | 内部备注 |
+
+- API Rules 要点：管理员只读本机构记录（`@request.auth.organization_id = id`）；写操作仅 `_superusers`（V1 机构创建/配置无管理员侧入口）。
+- 机构创建、停用、开关变更均写审计（FR-AUD-004）。
+
+#### 5.2.2 admin_invites — 一次性管理员邀请码（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| organization_id | relation(organizations) | 是 | 索引 | 目标机构 |
+| token_hash | text | 是 | **唯一** | 邀请码哈希；明文只展示一次，不落库（§11.2 精神） |
+| status | select(unused, used, revoked, expired) | 是 | 索引 | 邀请码 4 态，见 §5.5 |
+| expires_at | date | 是 | 索引 | 默认生成后 7 天，可调整（PRD §4.2） |
+| used_by | relation(admin_accounts) | 否 | — | 成功注册的管理员 |
+| used_at | date | 否 | — | 使用时间 |
+| created_by | text | 是 | — | 操作者（超级管理员 id） |
+
+- API Rules 要点：仅 `_superusers` 可 list/create/update；注册接口为自定义服务端逻辑（hooks），在事务内校验 `status=unused` 且 `expires_at > now`，注册成功同事务置 `used`。
+- 生成/撤销/使用均写审计（FR-AUD-004）。
+
+#### 5.2.3 admin_accounts — 机构管理员账号（auth）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| username | text（auth 内置） | 是 | **唯一**（全局） | 登录用户名 |
+| organization_id | relation(organizations) | 是 | 索引 | 所属机构；**参与者账号无此字段**，这是管理员与参与者集合的关键差异（FR-AUTH-003） |
+| status | select(active, disabled) | 是 | — | 机构停用或账号停用时禁止进入后台 |
+| display_name | text | 否 | — | 后台显示名 |
+
+- API Rules 要点：管理员只能 view 本机构同事记录与本人记录；create 仅经邀请码注册接口（服务端）；不允许管理员修改 `organization_id`。
+- 机构 `status=disabled` 时由服务端钩子拒绝其全部管理操作（FR-ORG-001）。
+
+#### 5.2.4 participant_accounts — 全平台通用参与者账号（auth）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| username | text（auth 内置） | 是 | **唯一**（小写归一化后） | 4–20 位字母/数字/下划线；不绑定任何机构（FR-AUTH-003、FR-AUTH-005） |
+| status | select(active, disabled) | 是 | — | 账号停用为可审计事件（PRD §11.3） |
+| （created） | 系统字段 | — | 索引 | 即 PRD §9.1 的 `created_at`；跨活动账号连续性统计可用 |
+
+- **不存**手机号、邮箱、微信等任何联系方式（FR-AUTH-002）；建议注册/报名链路提示用户勿用真实姓名做用户名（PRD §11.1）。
+- API Rules 要点：参与者仅能 view/update 本人记录（`@request.auth.id = id`），且不可改 `username`（机构管理员也不得修改参与者凭据，PRD §3.2）；create 仅经报名链路自动注册接口。
+- 无密码重置/找回入口（任何角色，PRD §5.7）。
+
+#### 5.2.5 activities — 活动主数据与名额（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| organization_id | relation(organizations) | 是 | 复合索引 (organization_id, status) | 机构隔离主键 |
+| title | text | 是 | — | 活动标题（FR-ACT-001） |
+| activity_code | text | 是 | **唯一** | 可读稳定代码，建议机构缩写+日期+序号，如 `CC_SG_202608_01`（附录 B） |
+| description | text | 否 | — | 公开详情页内容 |
+| location | text | 否 | — | 地点 |
+| start_time / end_time | date | 是 | — | PRD §9.1 `times`；单次场次口径（§4.1） |
+| status | select(draft, pending_review, rejected, published, closed, taken_down, archived) | 是 | 索引 | 活动 7 态，见 §5.5 |
+| capacity_total | number | 是 | — | 总名额硬限制；不得低于当前已通过人数（FR-ACT-006） |
+| capacity_speaker | number | 是 | — | 倾诉者名额 |
+| capacity_listener | number | 是 | — | 聆听者名额 |
+| registration_open | bool | 是 | — | 报名手动开关（FR-ACT-005） |
+| registration_start_at / registration_end_at | date | 否 | — | 报名起止时间；超时后不能新提交（FR-ACT-005） |
+| checkin_qr_token | text | 是 | **唯一** | 固定签到二维码 token；全活动周期不变（FR-CHK-001），有效性由 `checkin_sessions` 开放状态控制 |
+| group_tag | text | 否 | 索引 | **预留分组/标签字段（可空）**，V1 不使用，供后续「项目/系列」扩展（PRD §4.1） |
+| form_config_json | json | 否 | — | 草案：活动级报名字段启用/必填配置（见「待确认」D-3） |
+
+- API Rules 要点：**公开详情页**通过 viewRule 实现——未登录可按 id 查看 `status` 为 `published`/`closed` 的活动；listRule 对参与者关闭，保证「无公开广场」（FR-ACT-002、FR-ACT-003）。已归档活动公开链接是否仍可访问 PRD 未明确（「待确认」D-5）。
+- 名额修改、状态变更写审计（PRD §11.3）。
+
+#### 5.2.6 activity_approvals — 活动发布审核历史（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| activity_id | relation(activities) | 是 | 索引 | 目标活动 |
+| reviewer_id | text | 是 | — | 审核人（超级管理员 id）；提交动作时为提交的管理员 id |
+| action | select(submit, approve, reject) | 是 | — | 提交/批准/驳回；**下架不经过本表**，直接改活动状态并写审计 |
+| reason | text | 否 | — | 驳回必填原因（机构可查看原因后修改重提，PRD §4.3） |
+| （created） | 系统字段 | — | — | 即 `created_at` |
+
+- 只追加不修改（历史表）；API Rules：机构管理员只读本机构活动的审核记录，超级管理员全量。
+
+#### 5.2.7 registration_field_defs — 报名字段定义（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| organization_id | relation(organizations) | 否 | 索引 | **null = 平台标准字段**（超级管理员维护）；非 null = 机构自定义字段（PRD §8.1） |
+| field_code | text | 是 | **复合唯一 (organization_id, field_code)**；索引 | 稳定机器代码；标准字段代码不可改（FR-REG-001） |
+| field_type | select(text, number, single_choice, multi_choice, date) | 是 | — | 草案题型集，随标准字段定义确认后定稿 |
+| label | text | 是 | — | 展示文案 |
+| source_type | select(standard, custom) | 是 | 索引 | 导出 `custom_fields.csv` 单独标记自定义内容（PRD §2.3、§10.1） |
+| is_sensitive | bool | 是 | — | **敏感标记；普通导出按此排除/掩码，不依赖字段名判断**（FR-EXP-002） |
+| options_json | json | 否 | — | 选项机器值与显示文本 |
+| required_default | bool | 是 | — | 默认必填建议；活动级覆盖见 `activities.form_config_json` |
+| status | select(active, disabled) | 是 | — | 停用代替删除 |
+
+- 标准字段（`organization_id IS NULL`）仅 `_superusers` 可写；机构只能选启用/必填，不能改代码与类型（PRD §8.1）。
+- 具体标准字段清单 PRD 未写死 → 「待确认」D-1。
+
+#### 5.2.8 registrations — 报名、角色与审核状态（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| activity_id | relation(activities) | 是 | **复合唯一 (activity_id, participant_id)**；复合索引 (activity_id, status) | 报名归属 |
+| participant_id | relation(participant_accounts) | 是 | 索引 | 报名人；「我的」中心按此查本人全部报名（FR-PAR-001） |
+| activity_role | select(speaker, listener) | 是 | 索引 | **活动内角色存于报名，不写入账号**（FR-REG-002）；倾诉者=speaker、聆听者=listener |
+| status | select(pending, approved, rejected, cancelled) | 是 | 索引 | 报名 4 态与迁移矩阵，见 §5.5 |
+| submitted_at | date | 是 | — | 提交时间（幂等判定的参考字段之一，AC-20） |
+| status_reason | text | 否 | — | 最近一次状态变更原因（取消/回退必填，FR-REG-008）；完整历史在 audit_logs |
+
+- **参与者×活动唯一**：复合唯一索引保证同一参与者同一活动仅一条报名记录（FR-REG-003）；重复进入由应用层返回现有状态而非新建。
+- API Rules 要点：参与者只能 create（且服务端强制写入本人 `participant_id`）与 view 本人记录；**不允许参与者 update**（提交后不可改，FR-REG-004）；管理员按机构隔离读写。
+- 所有状态变更走服务端事务（名额硬校验 + 审计），见 §5.6。
+
+#### 5.2.9 registration_answers — 报名字段答案（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| registration_id | relation(registrations) | 是 | **复合唯一 (registration_id, field_def_id)** | 所属报名 |
+| field_def_id | relation(registration_field_defs) | 是 | 索引 | 答案对应的字段定义（`is_sensitive` 由此反查） |
+| value_json | json | 是 | — | 答案值；多选用标准 JSON 数组（PRD §10.3） |
+
+- API Rules 要点：参与者随报名创建写入，之后只读；管理员按机构隔离（经 `registration_id.activity_id.organization_id` 反查，规则中需保证可可靠反查，PRD §9.2）。
+- 日志不得记录完整敏感答案（PRD §11.2）。
+
+#### 5.2.10 checkin_sessions — 签到开放状态（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| activity_id | relation(activities) | 是 | 复合索引 (activity_id, status) | 所属活动 |
+| status | select(open, closed) | 是 | — | 「未开放」不建行：活动无 open session 即为未开放；每次「开放签到」新建一行，关闭时置 `closed`（签到可重复开放/关闭，PRD §5.5） |
+| opened_at | date | 是 | — | 开放时间 |
+| closed_at | date | 否 | — | 关闭时间 |
+| opened_by | text | 是 | — | 操作管理员 id |
+
+- **约束：同一活动同一时间至多一条 `open` 记录**（服务端事务保证）。
+- 固定二维码 token 在 `activities.checkin_qr_token`；本表只表达开放窗口（FR-CHK-001、FR-CHK-002）。
+- 开放/关闭写审计（PRD §11.3）。
+
+#### 5.2.11 checkins — 签到记录（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| activity_id | relation(activities) | 是 | 复合索引 (activity_id, participant_id, status) | 所属活动 |
+| participant_id | relation(participant_accounts) | 是 | 索引 | 签到人 |
+| registration_id | relation(registrations) | 是 | — | 关联报名（签到前置：报名状态=approved，FR-CHK-003） |
+| source | select(self_scan, manual) | 是 | — | 自助扫码 / 管理员补签 |
+| status | select(valid, revoked) | 是 | 索引 | 「已撤销」保留原记录（PRD §4.5）；「未签到」不建行 |
+| checked_in_at | date | 是 | — | 签到时间 |
+| operator_id | text | 否 | — | 补签/撤销操作管理员 id；自助签到为空 |
+| reason | text | 否 | — | 补签/撤销必填原因（FR-CHK-005） |
+| revoked_at | date | 否 | — | 撤销时间 |
+
+- **「每活动每人仅一条有效签到」无法在 SQLite 表达部分唯一索引**（撤销行需保留）：由服务端 hooks 事务校验 + 上述复合索引支撑查询（FR-CHK-004、AC-09、AC-20）；不得以 (activity_id, participant_id) 全量唯一索引实现，否则撤销后无法补签。
+- 实际参与人数/服务人次口径 = `status=valid` 记录数（FR-CHK-006、§7.1）；看板与导出共用此口径。
+
+#### 5.2.12 survey_templates — 标准模板索引（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| template_code | text | 是 | **唯一** | 大写下划线，如 `PARTICIPANT_PRE_V1`（附录 B） |
+| name | text | 是 | — | 模板名称 |
+| description | text | 否 | — | 用途说明 |
+| current_version_id | relation(survey_template_versions) | 是 | — | 指向当前生效版本；复制活动问卷时取此版本（FR-SUR-011） |
+| status | select(active, disabled) | 是 | — | 停用代替删除 |
+
+- 仅 `_superusers` 可写（FR-SUR-001）；机构只读。
+
+#### 5.2.13 survey_template_versions — 不可变模板版本（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| template_id | relation(survey_templates) | 是 | **复合唯一 (template_id, version)** | 所属模板 |
+| version | number | 是 | — | 递增整数版本号 |
+| schema_json | json | 是 | — | 题目完整定义快照（含 question_code、题型、选项、locked、is_sensitive、计分定义） |
+| published_at | date | 是 | — | 发布时间 |
+| published_by | text | 是 | — | 发布的超级管理员 id |
+
+- **不可变**：发布后 update/delete 均禁止（API Rules 关闭，服务端无入口）；模板更新 = 新增版本行 + 移动 `current_version_id`，已有活动问卷固定原版本（FR-SUR-011、AC-13、PRD §13 可维护性）。
+- 模板发布写审计（PRD §11.3）。
+
+#### 5.2.14 activity_surveys — 活动问卷与独立入口（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| activity_id | relation(activities) | 是 | 复合索引 (activity_id, status) | 所属活动；一场活动可多份问卷（FR-SUR-003） |
+| template_version_id | relation(survey_template_versions) | 是 | — | 来源模板版本（复制创建；创建后不再随模板升级） |
+| survey_code | text | 是 | **唯一** | 活动问卷稳定代码，如 `CC_SG_202608_01_PRE`（附录 B） |
+| title | text | 是 | — | 问卷标题 |
+| role_scope | select(speaker, listener, both) | 是 | — | 适用角色；访问时按报名 `activity_role` 校验（FR-SUR-004） |
+| status | select(draft, not_open, open, ended, archived) | 是 | 索引 | 问卷 5 态（未开放/开放中/已结束 + 草稿/已归档），见 §5.5 |
+| qr_token | text | 是 | **唯一** | 独立链接/二维码 token；不可连续可猜（PRD §10.3 同类要求） |
+| opened_at / ended_at | date | 否 | — | 开放/结束时间（管理员手动控制，不由签到或时间点自动强制，PRD §8.2） |
+
+- API Rules 要点：参与者经自定义接口按「登录 + 报名已通过 + 角色匹配 + 状态=open」四条件访问（FR-SUR-006）；不开放参与者直接 list 本表。
+- 开放/结束写审计（PRD §11.3）。
+
+#### 5.2.15 survey_questions — 活动问卷题目（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| activity_survey_id | relation(activity_surveys) | 是 | **复合唯一 (activity_survey_id, question_code)** | 所属问卷 |
+| question_code | text | 是 | 索引 | **稳定机器字段：标准题跨模板/跨活动保持一致；自定义题活动内唯一**，前缀如 `CUS_ORG7_001`（§8.3、附录 B） |
+| source_type | select(standard, custom) | 是 | — | standard=模板核心题；custom=机构新增题 |
+| question_type | select(info, single_choice, multi_choice, scale_1_5, scale_0_10, text_short, text_long) | 是 | — | 说明/单选/多选/1-5/0-10/单行/多行（FR-SUR-007） |
+| title | text | 是 | — | 题干 |
+| required | bool | 是 | — | 机构可对非锁定题调整（FR-SUR-002） |
+| options_json | json | 否 | — | 选项机器值与显示文本 |
+| locked | bool | 是 | — | 核心锁定题：机构不能修改或删除（FR-SUR-001） |
+| is_sensitive | bool | 是 | — | 敏感标记；普通导出过滤依据，进入 data_dictionary（FR-SUR-012） |
+| order_index | number | 是 | — | 显示顺序 |
+| validation_json | json | 否 | — | 范围、长度等校验（如 `min=1,max=5`） |
+
+- 复制模板 = 将 `schema_json` 中题目物化为本表行（复制后题目随活动问卷固化，模板升级不影响，AC-13）。
+- 机构可新增/排序/设必填自定义题；`locked=true` 行对机构只读（FR-SUR-002）。
+
+#### 5.2.16 submissions — 答卷（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| activity_survey_id | relation(activity_surveys) | 是 | **复合唯一 (activity_survey_id, participant_id)**；复合索引 (activity_survey_id, status) | 所属问卷 |
+| participant_id | relation(participant_accounts) | 是 | 索引 | 答卷人 |
+| registration_id | relation(registrations) | 是 | 索引 | 关联报名（同一活动多份问卷可经此关联，PRD §1.3 数据连续性） |
+| status | select(draft, submitted, voided) | 是 | 索引 | 草稿/已提交/已作废 3 态；V1 无退回重填（PRD §4.5、§5.6） |
+| submitted_at | date | 否 | — | 正式提交时间；草稿为空 |
+| voided_by / voided_at / void_reason | text / date / text | 否 | — | 作废操作信息（FR-SUR-010） |
+
+- 一人一问卷一份答卷：草稿到正式提交是**同一行的状态变更**，不产生第二行（FR-SUR-008、AC-20 幂等）；作废后原记录保留，V1 不支持重填，故复合唯一索引安全。
+- API Rules 要点：参与者 create/update 仅限本人 `draft` 行；提交后锁定（服务端拒绝再改）；本人已提交答案只读（FR-SUR-009）；作废仅管理员（服务端接口，写审计）。
+- 问卷完成数口径 = `status=submitted`；完成率分母 = 当前报名已通过且角色符合的人数（PRD §7.1）。
+
+#### 5.2.17 answers — 题目答案（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| submission_id | relation(submissions) | 是 | **复合唯一 (submission_id, question_code)** | 所属答卷 |
+| question_code | text | 是 | 复合索引 (question_code) | 冗余存储题目代码：**导出 answers.csv 直接按 question_code 关联，且保证历史答案不受题目后续调整影响**（PRD §9.2） |
+| value_json | json | 是 | — | 答案值；多选用标准 JSON 数组（PRD §10.3） |
+
+- 随提交事务写入；`is_sensitive` 由 `survey_questions` 按 `question_code` 反查（导出过滤，FR-EXP-002）。
+
+#### 5.2.18 export_jobs — 导出任务与文件（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| organization_id | relation(organizations) | 否 | 索引 | 导出主机构；超级管理员全平台导出时为 null |
+| scope_json | json | 是 | — | 导出范围：`{type: platform\|organization\|activity, activity_id?, date_range?}`；范围校验在服务端执行（FR-EXP-004） |
+| include_pii | bool | 是 | 索引 | 是否敏感导出；为 true 时需机构开关 + 二次确认 + 审计（FR-EXP-003、AC-17） |
+| file_path | text | 是 | — | ZIP 存放路径（受保护目录，仅鉴权后下载，PRD §11.2） |
+| file_checksum | text | 否 | — | 文件校验信息（PRD §10.3） |
+| status | select(running, done, failed) | 是 | — | 任务状态 |
+| created_by | text | 是 | 索引 | 导出人 id（导出记录需保留导出人/范围/时间，PRD §10.3） |
+
+- 导出文件不自动失效；下载 URL 不公开、不连续可猜（FR-EXP-005）。
+- 每次导出（普通/敏感）均写审计（PRD §11.3）。
+
+#### 5.2.19 audit_logs — 不可变审计记录（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| actor_id | text | 是 | 复合索引 (actor_id, created) | 操作者 id；系统任务（备份）用 `system` |
+| actor_role | select(super_admin, admin, participant, system) | 是 | — | 操作者角色 |
+| organization_id | relation(organizations) | 否 | 复合索引 (organization_id, created) | 涉事机构；平台级事件可为 null |
+| action | text | 是 | 索引 | 动作代码（如 `registration.status_revert`、`export.sensitive`、`backup.failed`）；枚举清单见 security-privacy.md，范围至少覆盖 FR-AUD-004 |
+| target_type / target_id | text | 是 | 索引 (target_type, target_id) | 被操作对象 |
+| result | select(success, failure) | 是 | — | 操作结果（FR-AUD-002 要求记录结果） |
+| reason | text | 否 | — | 高风险操作原因（补签/回退/作废等必填） |
+| metadata | json | 否 | — | 前后状态、上下文；**不得含密码或完整敏感答案**（PRD §11.2） |
+| （created） | 系统字段 | — | 索引 | 即 `created_at` |
+
+- **不可变**：仅开放 create（服务端）与按权限 view；update/delete 规则全部关闭，普通管理员不可修改（FR-AUD-002、FR-AUD-005）。
+- 可读权限：机构管理员只读检索本机构（`organization_id` 过滤），超级管理员全局（FR-AUD-005）。
+- 保留 ≥1 年（FR-AUD-003），到期策略后续治理决定。
+
+### 5.3 标识与关联规则
+
+| 标识 | 载体 | 作用域与稳定性 | 导出规则 |
+|---|---|---|---|
+| `participant_id` | `participant_accounts.id` | **全平台稳定**：不随机构、活动变化；凭据丢失重新注册会产生新 id（已知情况，V1 不合并，PRD §5.7） | 普通导出的唯一人员关联键；**不导出用户名**（PRD §9.2、§10.1） |
+| `organization_id` | `organizations.id` | 机构级；所有机构业务表必须带有或可经关系可靠反查（PRD §9.2） | 管理员导出仅本机构；超级管理员可全平台 |
+| `activity_id` | `activities.id` | 全平台唯一 | 报名、签到、问卷、导出均可关联 |
+| `registration_id` | `registrations.id` | **参与者×活动唯一**（复合唯一索引保证）；关联报名答案、角色、审核、签到、答卷 | 进入 registrations.csv / registration_answers.csv |
+| `submission_id` | `submissions.id` | 一次答卷 | 进入 submissions.csv 与 answers.csv |
+| `question_code` | `survey_questions.question_code` / `answers.question_code` | **标准题跨模板、跨活动稳定一致**；自定义题活动内唯一（`CUS_` 前缀） | 进入 answers.csv 与 data_dictionary.csv |
+| `activity_code` / `survey_code` / `template_code` | 各自 text 字段 | 可读稳定代码，遵循附录 B 格式 | 人读追溯用 |
+| `group_tag` | `activities.group_tag` | **预留字段（可空），V1 不使用**；供后续分组/系列/项目层级扩展，禁止 V1 占用语义 | 导出保留该列（可为空） |
+
+外键关系主线：`organizations 1—n activities 1—n (registrations, checkin_sessions, checkins, activity_surveys)`；`activity_surveys 1—n (survey_questions, submissions)`；`submissions 1—n answers`；`registrations 1—n registration_answers`。`checkins.registration_id` 与 `submissions.registration_id` 使签到/答卷可回链审核口径。
+
+### 5.4 多机构隔离在 PocketBase 层面的实现
+
+原则：**隔离由后端规则兜底，前端隐藏只是体验层**（PRD §9.2、§12.2；AC-03 要求自动化越权测试）。
+
+1. **数据冗余**：每个机构业务表直接存 `organization_id`（`activities` 直接带；`registrations`/`checkins`/`activity_surveys` 等经 `activity_id` 一级反查）。对查询频繁的二级表（如 `registrations`）**草案建议冗余 `organization_id` 字段**，使 API Rules 表达式保持单层、可索引；冗余字段由服务端 hooks 在创建时写入，客户端不可写。
+2. **规则注入**（示意语法，以实现阶段 PocketBase 版本为准）：
+   - 管理员侧 list/view：`@request.auth.organization_id = organization_id`（或经 relation 反查：`@request.auth.organization_id = activity.organization_id`）。
+   - 参与者侧：`@request.auth.id = participant_id`（仅本人记录）。
+   - 超级管理员：`_superusers` 身份天然绕过集合规则，无需逐表配置。
+3. **参数防伪**：管理端自定义接口忽略客户端传入的任何机构参数，机构范围一律从 `@request.auth` 推导（PRD §12.2）。
+4. **导出与看板**：聚合查询与导出任务在服务端按登录身份附加同一 `organization_id` 条件；`export_jobs.scope_json` 中的范围须与服务端校验后的身份交集（FR-EXP-004）。
+5. **公开面最小化**：参与者对 `activities` 仅 viewRule（按 id 看详情），listRule 关闭 → 无公开活动广场（FR-ACT-002）。
+6. **验证方式**：每个涉及机构数据的 list/view/export 接口必须有机构 A 访问机构 B 资源 ID 的自动化越权用例（AC-03，详见 test-plan.md）。
+
+### 5.5 状态枚举与状态机
+
+枚举机器码为草案建议（PRD 仅定义中文名）；迁移合法性由服务端统一校验，非法迁移一律拒绝。
+
+| 对象 | 字段 | 枚举（机器码 = 中文） |
+|---|---|---|
+| 邀请码 | `admin_invites.status` | `unused`=未使用；`used`=已使用；`revoked`=已撤销；`expired`=已过期（默认 7 天，生成时可调） |
+| 活动 | `activities.status` | `draft`=草稿；`pending_review`=待平台审核；`rejected`=已驳回；`published`=已发布；`closed`=已关闭；`taken_down`=已下架；`archived`=已归档 |
+| 报名 | `registrations.status` | `pending`=待审核；`approved`=已通过；`rejected`=已拒绝；`cancelled`=已取消（无候补态，PRD §4.4） |
+| 签到场次 | `checkin_sessions.status` | `open`=已开放；`closed`=已关闭（「未开放」= 无 open 记录） |
+| 签到记录 | `checkins.status` | `valid`=已签到；`revoked`=已撤销（「未签到」= 无记录） |
+| 活动问卷 | `activity_surveys.status` | `draft`=草稿；`not_open`=未开放；`open`=开放中；`ended`=已结束；`archived`=已归档 |
+| 答卷 | `submissions.status` | `draft`=草稿；`submitted`=已提交；`voided`=已作废（无退回重填） |
+| 机构/账号 | `*.status` | `active` / `disabled` |
+
+报名状态迁移矩阵（PRD §4.4，**矩阵外迁移一律禁止**）：
+
+| 迁移 | 触发场景 | 服务端要求 |
+|---|---|---|
+| pending → approved | 审核通过 | 事务内校验总名额 + 角色名额；占用名额 |
+| pending → rejected | 审核拒绝 | 不占名额 |
+| approved → cancelled | 线下申请/运营原因 | 释放名额；**原因必填 + 审计** |
+| rejected → approved | 纠正误判 | 事务内**重新**名额硬校验；原因必填 + 审计 |
+| cancelled → approved | 恢复报名 | 事务内**重新**名额硬校验；原因必填 + 审计 |
+
+其他状态机要点：
+
+- 活动：`draft → (pending_review →) published → closed → archived`；`published → taken_down`（仅超级管理员）；`pending_review → rejected → pending_review`（修改重提）。已驳回/已下架不进入公开入口。
+- 签到场次：管理员手动 `open ⇄ closed` 可重复；有效签到仍每活动每人一条。
+- 问卷：`draft → not_open ⇄ open → ended → archived`；开放/结束手动控制，不被签到状态或时间点强制。
+- 答卷：`draft → submitted`（锁定，参与者不可再改）；`submitted → voided`（仅管理员，原因 + 审计）；作废记录常规统计与导出排除。
+- 所有状态变更记录操作者、时间、前后状态与原因，写入 `audit_logs`（FR-REG-008、FR-AUD-002）。
+
+### 5.6 事务与并发约束
+
+| 场景 | 约束 | 实现草案 |
+|---|---|---|
+| 审核通过 / 角色修改 / 状态回退 | 总名额与角色名额硬限制，并发审核不得超额（AC-08） | PocketBase hooks 内单事务：锁定活动行 → 统计当前 `approved` 数（按角色）→ 比对名额 → 更新状态 → 写审计；任一失败整体回滚 |
+| 名额调低 | 新名额不得低于当前已通过人数（FR-ACT-006） | 更新 `activities.capacity_*` 前同事务校验 |
+| 自助签到 / 补签 | 每活动每人仅一条 `valid` 记录；重试/重复扫码幂等（AC-09、AC-20） | 事务内查重 → 插入；重复请求返回已存在的记录而非报错新建 |
+| 报名/问卷提交 | 网络重试、重复点击不产生重复正式记录（AC-20） | 复合唯一索引兜底 + 服务端「已存在则返回现状」语义 |
+| 邀请码注册 | 同一邀请码只能成功注册一次（AC-02） | 事务内校验并置 `used` |
+| 答卷提交 | 草稿→已提交为原子切换，答案行随同事务写入 | 单事务更新 `submissions` + 写 `answers` |
+
+### 5.7 迁移策略
+
+- **版本化**：全部集合结构变更通过 `pb_migrations`（PocketBase 迁移脚本）管理，逐文件递增版本号，随仓库提交；禁止在管理 UI 手工改库后不落迁移脚本（PRD §13 可维护性、§15 M0 退出条件含「迁移」）。
+- **初始化种子**：唯一超级管理员账号、标准问卷模板首个版本随迁移/初始化脚本注入（建站时创建，FR-AUTH-009）。
+- **模板版本不可变**：`survey_template_versions` 发布后禁改；模板演进 = 新版本行 + 切换 `current_version_id`（AC-13）。
+- **无硬删除**：所有业务集合 deleteRule 关闭；停用/归档/作废/撤销均以状态字段表达，历史关系保留（FR-AUD-001、AC-18）。产品界面与普通 API 均不提供永久删除。
+- **演进纪律**：枚举值只增不改；字段下线用停用/废弃标记，不做破坏性 rename/drop（保证历史导出与 data_dictionary 可追溯）。
+
+### 5.8 保留与备份策略（数据库相关部分）
+
+| 项 | V1 规则 | 依据 |
+|---|---|---|
+| 审计日志 | 默认至少保留 **1 年**；到期策略由后续治理决定 | FR-AUD-003、§12.4 |
+| 备份 | 数据库及上传文件**每日自动备份**；默认保留最近 **30 天**；至少一份在异地存储 | PRD §12.3 |
+| 备份审计与告警 | 每次备份结果（成功/失败）写 `audit_logs`（`actor_role=system`）；失败在超级管理后台显著告警（AC-23） | PRD §12.3、§11.3 |
+| 业务数据 | 无产品级硬删除，长期积累风险以归档/状态管理应对，治理政策后续制定 | PRD §16.1、§16.2 |
+| 导出文件 | 不自动失效；受保护目录 + 鉴权下载 + 不可猜 URL | FR-EXP-005、§10.3 |
+| 参与者会话 | token 默认 30 天，主动退出立即失效 | FR-AUTH-006、§12.4 |
+
+备份任务实现与恢复演练属部署侧内容，详见 technical-design.md；本文只约束数据侧口径。
+
+## 6. 验收标准
+
+本设计落地的验收映射（完整 AC 清单与测试分层见 test-plan.md）：
+
+| 验收 | 与本文的关系 | 验证方式 |
+|---|---|---|
+| AC-02 一次性邀请码 | `admin_invites` 4 态 + 事务注册 | 重复使用/过期邀请码注册失败 |
+| AC-03 机构隔离 | §5.4 规则与冗余 `organization_id` | 自动化越权测试全部通过 |
+| AC-06 自动注册/登录 | `participant_accounts` 唯一用户名归一化 | 错误密码不产生重复账号；用户名规则生效 |
+| AC-07 报名审核与回退 | §5.5 迁移矩阵 + `registrations` 约束 | 矩阵外迁移被拒；回退留痕 |
+| AC-08 名额硬限制 | §5.6 事务校验 | 并发审核不超额；名额不可低于已通过数 |
+| AC-09 固定二维码签到 | `checkin_qr_token` + `checkin_sessions` + `checkins` 唯一有效约束 | 仅通过者开放期可签到，一人一条 |
+| AC-12 答卷锁定与作废 | `submissions` 3 态 | 提交后不可改；作废不计统计与导出 |
+| AC-13 模板版本 | `survey_template_versions` 不可变 + 物化复制 | 模板更新不影响已有问卷与历史答卷 |
+| AC-16 规范化导出 | `is_sensitive` 标记链路（字段/题目→答案→导出） | ZIP 含规定 CSV；普通导出按标记过滤 |
+| AC-18 无硬删除 | deleteRule 全关 | 界面与 API 无永久删除入口 |
+| AC-20 幂等提交 | 复合唯一索引 + 服务端查重 | 重试/重复点击无重复正式记录 |
+| AC-23 备份告警 | `audit_logs` 系统事件 | 模拟失败后有审计记录与后台告警 |
+
+## 7. 待确认
+
+| 编号 | 事项 | 缺少什么证据 | 当前处理 |
+|---|---|---|---|
+| D-1 | 报名标准字段的具体内容（`field_code`、类型、必填、敏感标记）与知情同意文案 | PRD §8.1/§16.2 明确「本 PRD 不写死，另行定义」，尚无字段清单文件 | 仅实现标准字段库 + 自定义字段能力（`registration_field_defs`）；`field_type` 题型集为草案 |
+| D-2 | 标准问卷完整题目与哪些题 `locked` | 模板内容未经确认（PRD §16.2） | 结构按版本 + `locked` 实现；题目内容不入库草案 |
+| D-3 | 活动级报名字段「启用/必填」配置的存储位置 | PRD §9.1 未给出对应集合 | 草案暂放 `activities.form_config_json`；若配置复杂度上升，评审后可拆关联表 |
+| D-4 | 全部枚举机器码（活动/报名/签到/问卷/答卷/邀请码状态值） | PRD 只定义中文状态名，无英文机器码约定 | 本文值为草案建议；首个迁移落地后冻结，只增不改 |
+| D-5 | 已归档（archived）活动的公开详情页是否仍可访问 | PRD §4.3 仅述「只读为主、可导出、不进入默认活动列表」，未明确公开入口 | 草案 viewRule 暂不含 `archived`；确认后调整 |
+| D-6 | `audit_logs.action` 动作代码全集与 `metadata` 结构约定 | PRD §11.3/FR-AUD-004 给出事件类别，未给代码表 | 由 security-privacy.md 细化；首版实现时随代码冻结 |
+| D-7 | 二级业务表（`registrations` 等）是否冗余 `organization_id` 字段 | PRD §9.2 允许「带有或可可靠反查」两种实现，未指定 | 本文按「冗余」建议（规则简单、可索引）；实现评审可改纯反查 |
+| D-8 | 参与者多账号合并机制的表结构预留 | PRD §16.2 列入后续版本，无方案 | 仅保持 `participant_id` 稳定口径，不加合并字段 |

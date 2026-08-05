@@ -1,0 +1,28 @@
+# 依赖与构建产物
+node_modules/
+dist/
+coverage/
+
+# PocketBase：二进制与数据不入库（backend/README.md）
+backend/pocketbase
+backend/pb_data/
+pb_data/
+backend/pb_public/
+
+# 环境变量与 secrets：.env.example 入库，真实 .env 不入库
+.env
+.env.*
+!.env.example
+
+# 导出文件与备份
+exports/
+backups/
+*.tar.gz
+*.zip
+!docs/*.zip
+
+# 系统与编辑器
+.DS_Store
+*.log
+.vscode/
+.idea/

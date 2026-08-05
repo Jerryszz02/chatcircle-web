@@ -1,0 +1,15 @@
+.git
+node_modules
+frontend/node_modules
+frontend/dist
+backend/pocketbase
+backend/pb_data
+backend/pb_public
+docs
+*.log
+.env
+.env.*
+!.env.example
+backups
+deploy
+.github
