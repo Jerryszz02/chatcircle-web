@@ -1,0 +1,304 @@
+/* 参与者端页面样式（移动优先，配合 shared/styles/global.css 的 .cc-* 基件使用）。
+ * 仅新增本端需要的展示类；不改 shared 全局样式。 */
+
+/* ---------- 状态标签 ---------- */
+
+.cc-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-left: 6px;
+}
+
+.cc-tag-success {
+  background: #e6f4ec;
+  color: #067647;
+}
+
+.cc-tag-warning {
+  background: #fdf2e3;
+  color: #b54708;
+}
+
+.cc-tag-danger {
+  background: #fdecea;
+  color: #d92d20;
+}
+
+.cc-tag-muted {
+  background: #f0f0f0;
+  color: #666;
+}
+
+.cc-tag-info {
+  background: #e8effc;
+  color: #1a56db;
+}
+
+/* ---------- 提示与说明 ---------- */
+
+.cc-notice {
+  margin: 0 0 16px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f5f8ff;
+  border: 1px solid #dbe6fd;
+  font-size: 14px;
+  color: #333;
+}
+
+.cc-notice-privacy {
+  background: #fff8ed;
+  border-color: #f5e2b8;
+}
+
+.cc-hint-inline {
+  font-size: 13px;
+  color: #666;
+  font-weight: 400;
+}
+
+.cc-hint-sensitive {
+  color: #b54708;
+}
+
+.cc-closed-title {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+/* ---------- 选择项（radio/checkbox 行，触控高度 ≥44px） ---------- */
+
+.cc-fieldset {
+  margin: 0 0 16px;
+  padding: 0;
+  border: none;
+}
+
+.cc-choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cc-scale-list {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.cc-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.cc-choice input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.cc-choice:has(input:checked) {
+  border-color: #1a56db;
+  background: #f5f8ff;
+}
+
+.cc-choice:has(input:disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.cc-scale-list .cc-choice {
+  min-width: 52px;
+  justify-content: center;
+}
+
+.cc-textarea {
+  resize: vertical;
+  min-height: 96px;
+}
+
+/* ---------- 活动详情 / 元信息 ---------- */
+
+.cc-meta {
+  margin: 0 0 8px;
+}
+
+.cc-meta-row {
+  display: flex;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 14px;
+}
+
+.cc-meta-row dt {
+  color: #666;
+  flex-shrink: 0;
+  min-width: 60px;
+}
+
+.cc-meta-row dd {
+  margin: 0;
+}
+
+.cc-activity-desc {
+  margin: 12px 0 0;
+  font-size: 15px;
+  white-space: pre-wrap;
+}
+
+.cc-capacity {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.cc-capacity-detail {
+  margin: 0 0 16px;
+  padding-left: 20px;
+  font-size: 14px;
+  color: #666;
+}
+
+/* ---------- 列表项（我的中心） ---------- */
+
+.cc-item-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cc-item {
+  padding: 12px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.cc-item:last-child {
+  border-bottom: none;
+}
+
+.cc-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.cc-item-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.cc-item-meta {
+  margin: 2px 0 8px;
+  font-size: 13px;
+  color: #666;
+}
+
+.cc-empty {
+  margin: 0;
+  font-size: 14px;
+  color: #888;
+}
+
+/* ---------- 结果页 / 原因列表 / 只读答案 ---------- */
+
+.cc-result-title {
+  margin: 0 0 8px;
+  font-size: 19px;
+  font-weight: 700;
+  color: #067647;
+}
+
+.cc-result-failed {
+  color: #d92d20;
+}
+
+.cc-guide-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 14px;
+}
+
+.cc-guide-list li {
+  margin-bottom: 8px;
+}
+
+.cc-reason-list {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.cc-reason-list li {
+  padding: 8px 0;
+  border-bottom: 1px dashed #eee;
+}
+
+.cc-reason-title {
+  margin: 0 0 2px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.cc-survey-info {
+  padding: 12px;
+  border-radius: 8px;
+  background: #f7f7f7;
+}
+
+.cc-survey-info-text {
+  margin: 0;
+  font-size: 15px;
+  white-space: pre-wrap;
+}
+
+.cc-answer-list {
+  margin: 0 0 16px;
+}
+
+.cc-answer-item {
+  padding: 10px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.cc-answer-question {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.cc-answer-value {
+  margin: 0;
+  font-size: 16px;
+  white-space: pre-wrap;
+}
+
+/* ---------- 操作区 ---------- */
+
+.cc-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+/* Link 复用按钮样式时的对齐（.cc-btn 基样式在 global.css）。 */
+a.cc-btn {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  box-sizing: border-box;
+}

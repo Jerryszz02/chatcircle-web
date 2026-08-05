@@ -1,35 +1,14 @@
-import { PlaceholderPage } from '../../shared/ui/PlaceholderPage';
+/**
+ * 超级管理端页面出口（technical-design §5.3 /super 路由分区）。
+ * router.tsx 仅依赖本文件的组件导出；各页面实现见 pages/ 目录。
+ */
+import './superadmin.css';
 
-const SECTION = '超级管理端';
-
-export function SuperLoginPage() {
-  return <PlaceholderPage section={SECTION} title="超级管理员登录" />;
-}
-
-export function SuperOrganizationsPage() {
-  return <PlaceholderPage section={SECTION} title="机构管理与邀请码" />;
-}
-
-export function SuperApprovalsPage() {
-  return <PlaceholderPage section={SECTION} title="活动发布审批" />;
-}
-
-export function SuperActivitiesPage() {
-  return <PlaceholderPage section={SECTION} title="全部活动监管" />;
-}
-
-export function SuperDashboardPage() {
-  return <PlaceholderPage section={SECTION} title="全局看板" />;
-}
-
-export function SuperExportsPage() {
-  return <PlaceholderPage section={SECTION} title="全局导出" />;
-}
-
-export function SuperAuditPage() {
-  return <PlaceholderPage section={SECTION} title="全局审计" />;
-}
-
-export function SuperSystemPage() {
-  return <PlaceholderPage section={SECTION} title="系统状态（备份告警）" />;
-}
+export { SuperLoginPage } from './pages/LoginPage';
+export { SuperOrganizationsPage } from './pages/OrganizationsPage';
+export { SuperApprovalsPage } from './pages/ApprovalsPage';
+export { SuperActivitiesPage } from './pages/ActivitiesPage';
+export { SuperDashboardPage } from './pages/DashboardPage';
+export { SuperExportsPage } from './pages/ExportsPage';
+export { SuperAuditPage } from './pages/AuditPage';
+export { SuperSystemPage } from './pages/SystemPage';

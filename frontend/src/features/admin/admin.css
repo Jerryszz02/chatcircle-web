@@ -1,0 +1,309 @@
+/*
+ * 机构管理端样式（仅 features/admin 分区使用；shared 基础样式见 shared/styles/global.css）。
+ * 管理端桌面为主、响应式（technical-design §5.3）；窄屏下导航与表格可横向滚动。
+ */
+
+.admin-shell {
+  min-height: 100vh;
+  background: #f6f7f9;
+}
+
+.admin-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 16px;
+  background: #1f2937;
+  overflow-x: auto;
+}
+
+.admin-nav-link {
+  padding: 8px 14px;
+  border-radius: 6px;
+  color: #cbd5e1;
+  text-decoration: none;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.admin-nav-link:hover {
+  color: #fff;
+  background: #374151;
+}
+
+.admin-nav-link-active,
+.admin-nav-link-active:hover {
+  color: #fff;
+  background: #2563eb;
+}
+
+.admin-nav-spacer {
+  flex: 1;
+}
+
+.admin-nav-user {
+  color: #cbd5e1;
+  font-size: 13px;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+
+/* 状态标签 */
+.cc-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.cc-tag-neutral {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.cc-tag-info {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.cc-tag-success {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.cc-tag-warning {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.cc-tag-danger {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+/* 二维码展示 */
+.cc-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 320px;
+}
+
+.cc-qr-image {
+  width: 140px;
+  height: 140px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.cc-qr-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #9ca3af;
+  text-align: center;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.cc-qr-caption {
+  margin: 0;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.cc-qr-url {
+  margin: 0;
+  word-break: break-all;
+  font-size: 12px;
+  background: #f3f4f6;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+/* 表单补充 */
+.cc-textarea {
+  resize: vertical;
+  min-height: 72px;
+}
+
+.cc-hint-inline {
+  font-size: 12px;
+  color: #9ca3af;
+  font-weight: normal;
+}
+
+.admin-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px 16px;
+}
+
+.admin-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 14px;
+}
+
+.admin-checkbox-row input[type='checkbox'],
+.admin-checkbox-row input[type='radio'] {
+  width: 18px;
+  height: 18px;
+}
+
+/* 表格 */
+.admin-table-wrap {
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.admin-table th,
+.admin-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e5e7eb;
+  vertical-align: top;
+}
+
+.admin-table th {
+  color: #6b7280;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.admin-row-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-row-actions .cc-btn {
+  min-height: 36px;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+/* 工具行与筛选条 */
+.admin-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.admin-toolbar .cc-field {
+  margin-bottom: 0;
+  min-width: 160px;
+}
+
+.admin-select {
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 16px;
+  background: #fff;
+  width: 100%;
+}
+
+/* 页内标签页 */
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #e5e7eb;
+  margin: 16px 0;
+  overflow-x: auto;
+}
+
+.admin-tab {
+  padding: 10px 16px;
+  border: none;
+  background: none;
+  font-size: 14px;
+  color: #6b7280;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  min-height: 44px;
+}
+
+.admin-tab-active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+  font-weight: 600;
+}
+
+/* 统计与辅助文本 */
+.admin-stats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 14px;
+  color: #374151;
+}
+
+.admin-stats strong {
+  font-size: 18px;
+  margin-left: 4px;
+}
+
+.admin-muted {
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.admin-empty {
+  padding: 24px;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 14px;
+}
+
+.admin-section {
+  margin-top: 16px;
+}
+
+.admin-field-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px dashed #e5e7eb;
+  flex-wrap: wrap;
+}
+
+.admin-field-row .admin-field-label {
+  flex: 1;
+  min-width: 160px;
+}
+
+.admin-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.admin-metric-grid .cc-metric {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+@media (max-width: 640px) {
+  .admin-nav-user {
+    display: none;
+  }
+}

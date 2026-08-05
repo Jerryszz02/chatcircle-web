@@ -1,18 +1,50 @@
+import { useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
-import type { Role } from './auth';
-import { currentRole } from './auth';
+import { Navigate, useLocation } from 'react-router-dom';
+import type { Role } from './pocketbase';
+import { LOGIN_PATHS, authFor, hasAnySession } from './auth';
+import { pbClients } from './pocketbase';
+import { ForbiddenPage } from './ui/ForbiddenPage';
 
 /**
- * 路由守卫占位（technical-design §5.3）。
- * 守卫只是 UX 引导，真正的权限隔离在 PocketBase collection API rules 与 pb_hooks。
- * TODO(M1+)：认证端点落地后，角色不匹配时重定向到对应端的登录页
- * （参与者 /login、机构 /admin/login、超级 /super/login，登录后回跳原目标）。
+ * 路由守卫（technical-design §5.3）。
+ *
+ * - 未登录：跳对应端登录页（参与者 /login、机构 /admin/login、超级 /super/login）；
+ *   参与者端记录 redirect 回跳地址，登录后回到原目标（§5.3 路由表 /login 约定、AC-22）。
+ * - 已登录但角色不符：渲染 403 占位页。
+ *
+ * 守卫只是 UX 引导，真正的权限隔离在 collection API rules 与 pb_hooks（§5.5）。
  */
+
+/** 订阅三个角色 authStore 的变化，使守卫在登录/登出后自动重渲染。 */
+function useSessionSnapshot(): string {
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      const unsubs = Object.values(pbClients).map((c) => c.authStore.onChange(onStoreChange));
+      return () => unsubs.forEach((unsub) => unsub());
+    },
+    () =>
+      (['participant', 'admin', 'super'] as const)
+        .map((r) => `${r}:${pbClients[r].authStore.isValid ? 1 : 0}`)
+        .join(','),
+  );
+}
+
 export function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
-  const current = currentRole();
-  if (current !== role) {
-    // M0 骨架阶段放行，保证占位页面可直接访问。
+  const location = useLocation();
+  useSessionSnapshot();
+
+  if (authFor(role).isValid()) {
     return <>{children}</>;
   }
-  return <>{children}</>;
+  // 已登录其它角色 → 角色不符，403 占位页。
+  if (hasAnySession()) {
+    return <ForbiddenPage requiredRole={role} />;
+  }
+  const loginPath = LOGIN_PATHS[role];
+  if (role === 'participant') {
+    const redirect = location.pathname + location.search;
+    return <Navigate to={`${loginPath}?redirect=${encodeURIComponent(redirect)}`} replace />;
+  }
+  return <Navigate to={loginPath} replace />;
 }

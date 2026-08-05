@@ -1,0 +1,224 @@
+/**
+ * 超级管理端局部样式（桌面为主、响应式，technical-design §5.3）。
+ * 通用组件样式在 shared/styles/global.css；此处仅补充本端布局/表格/徽标/告警，
+ * 类名统一 sa- 前缀避免与共享层及其它端冲突。
+ */
+
+.sa-layout-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  padding: 0.5rem;
+  background: #f4f5f7;
+  border-radius: 8px;
+}
+
+.sa-nav-link {
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  color: #374151;
+  text-decoration: none;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.sa-nav-link:hover {
+  background: #e5e7eb;
+}
+
+.sa-nav-link.active {
+  background: #1f2937;
+  color: #fff;
+}
+
+.sa-account {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+/* 显著告警横幅（备份失败，AC-23） */
+.sa-banner {
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-weight: 600;
+}
+
+.sa-banner-danger {
+  background: #fef2f2;
+  border: 2px solid #dc2626;
+  color: #991b1b;
+}
+
+.sa-table-wrap {
+  overflow-x: auto;
+}
+
+.sa-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.sa-table th,
+.sa-table td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #e5e7eb;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.sa-table th {
+  color: #6b7280;
+  font-weight: 600;
+  background: #f9fafb;
+}
+
+.sa-table td.sa-cell-wrap {
+  white-space: normal;
+  min-width: 12rem;
+}
+
+.sa-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.sa-badge-success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.sa-badge-warn {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.sa-badge-danger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.sa-badge-info {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.sa-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-bottom: 1rem;
+}
+
+.sa-filter-bar .cc-field {
+  margin-bottom: 0;
+  min-width: 10rem;
+}
+
+.sa-select {
+  font-size: 1rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  min-height: 44px;
+}
+
+.sa-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.sa-muted {
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
+.sa-invite-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.05rem;
+  letter-spacing: 0.05em;
+  background: #f3f4f6;
+  border: 1px dashed #9ca3af;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  word-break: break-all;
+}
+
+.sa-pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.sa-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.sa-question-item {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 0.5rem 0;
+}
+
+.sa-question-item:last-child {
+  border-bottom: none;
+}
+
+.sa-confirm-warning {
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  margin: 0.5rem 0;
+  background: #fffbeb;
+  border: 1px solid #f59e0b;
+  color: #92400e;
+  font-size: 0.9rem;
+}
+
+.sa-confirm-warning-high {
+  background: #fef2f2;
+  border: 2px solid #dc2626;
+  color: #991b1b;
+  font-weight: 600;
+}
+
+.sa-json-preview {
+  max-height: 16rem;
+  overflow: auto;
+  background: #f9fafb;
+  border-radius: 6px;
+  padding: 0.5rem;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.sa-textarea {
+  width: 100%;
+  min-height: 12rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 0.5rem;
+  box-sizing: border-box;
+}

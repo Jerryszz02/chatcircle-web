@@ -98,7 +98,9 @@ chatcircle-web/
 │   │   ├── surveys.pb.js           # 问卷资格校验、草稿/提交/作废
 │   │   ├── exports.pb.js           # 导出任务、范围校验、文件下载鉴权
 │   │   ├── metrics.pb.js           # 看板聚合查询
-│   │   └── lib/                    # writeAudit、quota 校验、guards 等共享函数
+│   │   └── lib/                    # 共享函数的「契约标准源」（jsonError/requireAuth/writeAudit 等）：
+│   │                               #   PocketBase 0.28 JSVM 各 hooks 文件作用域完全隔离（无跨文件
+│   │                               #   共享、无 ES module），各 handler 自包含、将所需函数原样内联使用
 │   └── pb_public/                  # 前端 build 产物（部署期填充，由 PocketBase 同源伺服）
 ├── deploy/
 │   ├── docker-compose.yml          # base + 各环境 override
@@ -112,7 +114,7 @@ chatcircle-web/
 - **schema 只能经由 `pb_migrations` 变更**，禁止在生产环境手工用 admin UI 改结构（PRD §13"数据库结构通过迁移版本化"；标准模板版本不可变）。
 - **业务规则只能写在 `pb_hooks` / collection API rules**。前端可以做同样的校验以改善体验，但不得成为唯一防线。
 - 共享类型（集合 record 类型、状态枚举、`metric_key`）放 `src/shared/`，与 `pb_migrations` 的 schema 手工保持同步；是否引入类型生成工具见「待确认」。
-- hooks 文件名仅为建议切分，实现时可调整，但"按领域分文件 + 共享函数入 `lib/`"的边界不变。
+- hooks 文件名仅为建议切分，实现时可调整，但"按领域分文件 + 共享逻辑以 `lib/` 为契约标准源"的边界不变。注意（0.28 JSVM 实测）：`lib/` 不能跨文件引用——各 hooks 文件作用域隔离，handler 只能使用自身闭包内标识符与 JSVM 内建全局，共享函数须在 handler 内内联（与 `lib/` 同源，勿手工改副本）。
 
 ### 5.3 三个角色端：职责与路由分区
 

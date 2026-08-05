@@ -1,0 +1,67 @@
+name: E2E
+
+# L4 主链路（test-plan §5/§8）。实测本地全量 < 10s、CI 冷启动约 3 分钟（< 5 分钟阈值），
+# 按 test-plan §8 建议纳入 PR 必过；push 到 main 与每日夜间全量跑，发版前必须全绿。
+# 与 ci.yml 相互独立（本文件由 E2E 负责人维护，勿并入其他 workflow）。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # 每日 UTC 18:00（≈ 北京时间 02:00）夜间回归
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+# 同一 PR 新提交取消旧运行
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PB_VERSION: '0.28.4'
+
+jobs:
+  e2e:
+    name: e2e (playwright 主链路 / chromium 360x740)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/package-lock.json
+      - name: 下载 PocketBase ${{ env.PB_VERSION }}
+        run: |
+          curl -fSL -o /tmp/pocketbase.zip \
+            "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip"
+          unzip -o /tmp/pocketbase.zip -d /tmp/pocketbase
+          /tmp/pocketbase/pocketbase --version
+      - name: 安装前端与 E2E 依赖
+        run: |
+          npm ci --prefix frontend
+          npm ci --prefix e2e
+      - name: 安装 Playwright Chromium（含系统依赖）
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+      - name: 运行 E2E 主链路
+        # 环境由 globalSetup 自举：临时 pb_data + 全部迁移 + fixture + PocketBase + 前端构建 + vite preview
+        working-directory: e2e
+        env:
+          PB_BINARY: /tmp/pocketbase/pocketbase
+        run: npx playwright test
+      - name: 上传失败截图 / trace / 环境日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-artifacts
+          path: |
+            e2e/test-results/
+            e2e/playwright-report/
+            e2e/.runtime/*.log
+          if-no-files-found: ignore
+          retention-days: 7

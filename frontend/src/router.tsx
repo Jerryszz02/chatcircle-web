@@ -37,14 +37,36 @@ import {
 export function AppRoutes() {
   return (
     <Routes>
-      {/* 参与者端 */}
+      {/* 参与者端（公开页：活动详情、报名链路、登录） */}
       <Route path="/" element={<HomePage />} />
       <Route path="/a/:activityId" element={<ActivityDetailPage />} />
       <Route path="/a/:activityId/register" element={<RegisterPage />} />
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/me" element={<MePage />} />
-      <Route path="/checkin/:activityId" element={<CheckinPage />} />
-      <Route path="/survey/:qrToken" element={<SurveyPage />} />
+      {/* 参与者端（需参与者会话；未登录跳 /login 并记录 redirect 回跳地址） */}
+      <Route
+        path="/me"
+        element={
+          <RequireRole role="participant">
+            <MePage />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="/checkin/:activityId"
+        element={
+          <RequireRole role="participant">
+            <CheckinPage />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="/survey/:qrToken"
+        element={
+          <RequireRole role="participant">
+            <SurveyPage />
+          </RequireRole>
+        }
+      />
 
       {/* 机构管理端 */}
       <Route path="/admin/login" element={<AdminLoginPage />} />

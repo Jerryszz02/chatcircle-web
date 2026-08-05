@@ -1,31 +1,13 @@
-import { PlaceholderPage } from '../../shared/ui/PlaceholderPage';
+/**
+ * 机构管理端页面统一出口（router.tsx 按既有命名从此导入，路由表见 technical-design §5.3）。
+ * 分区样式随页面一并加载（仅本分区生效）。
+ */
+import './admin.css';
 
-const SECTION = '机构管理端';
-
-export function AdminLoginPage() {
-  return <PlaceholderPage section={SECTION} title="管理员登录" />;
-}
-
-export function AdminRegisterPage() {
-  return <PlaceholderPage section={SECTION} title="邀请码注册" />;
-}
-
-export function AdminActivitiesPage() {
-  return <PlaceholderPage section={SECTION} title="活动列表" />;
-}
-
-export function AdminActivityDetailPage() {
-  return <PlaceholderPage section={SECTION} title="活动详情（报名审核 / 签到控制台 / 问卷管理）" />;
-}
-
-export function AdminDashboardPage() {
-  return <PlaceholderPage section={SECTION} title="本机构看板" />;
-}
-
-export function AdminExportsPage() {
-  return <PlaceholderPage section={SECTION} title="本机构导出" />;
-}
-
-export function AdminAuditPage() {
-  return <PlaceholderPage section={SECTION} title="本机构审计日志" />;
-}
+export { AdminLoginPage } from './pages/AdminLoginPage';
+export { AdminRegisterPage } from './pages/AdminRegisterPage';
+export { AdminActivitiesPage } from './pages/AdminActivitiesPage';
+export { AdminActivityDetailPage } from './pages/AdminActivityDetailPage';
+export { AdminDashboardPage } from './pages/AdminDashboardPage';
+export { AdminExportsPage } from './pages/AdminExportsPage';
+export { AdminAuditPage } from './pages/AdminAuditPage';

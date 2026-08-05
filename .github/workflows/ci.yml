@@ -2,7 +2,8 @@ name: CI
 
 # 全部 job 均为 PR 必过（test-plan §8）。
 # 建议在 GitHub 仓库设置中对 main 启用 branch protection：
-#   Settings → Branches → Add rule → 要求 "frontend" 与 "backend-migrations" 状态检查通过后方可合并。
+#   Settings → Branches → Add rule → 要求 "frontend"、"backend-migrations" 与
+#   "backend-integration" 状态检查通过后方可合并。
 
 on:
   push:
@@ -62,3 +63,20 @@ jobs:
             echo "checking $f"
             node --check "$f"
           done
+
+  backend-integration:
+    # L3 服务端集成套件（test-plan §3/§8，integration job；越权矩阵 AC-03 含在其中独立成组）。
+    # 套件自举临时 PocketBase 实例（临时数据目录 → 全部迁移 → 测试超管 → 模板 SQL fixture →
+    # 显式三目录参数 serve），只断言 API 行为与数据终态；任一断言失败退出码非零。
+    name: backend (集成测试：越权 AC-03 / 名额并发 AC-08 / 状态机 AC-07 / 签到 AC-09 / 问卷 / 导出 AC-16/17 / 限流 AC-21 / 备份 AC-23 / 无硬删除 AC-18)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 下载 PocketBase ${{ env.PB_VERSION }}
+        run: |
+          curl -fSL -o /tmp/pocketbase.zip \
+            "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip"
+          unzip -o /tmp/pocketbase.zip -d backend/
+          backend/pocketbase --version
+      - name: 运行后端集成测试套件（runner 已有 python3，无其他系统依赖）
+        run: bash backend/tests/run_integration.sh

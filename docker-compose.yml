@@ -10,16 +10,33 @@ services:
     volumes:
       - pb_data:/pb/pb_data
     restart: unless-stopped
+    # 供 backup 服务 depends_on(service_healthy) 使用；镜像为 alpine 自带 busybox wget
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8090/api/health']
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
 
-  # 备份占位（technical-design §5.8）：每日打包 pb_data 到 backups 卷，滚动保留 30 天。
-  # TODO(M5)：改用 SQLite 一致性备份（PocketBase 备份 API），备份结果写 audit_logs，
-  #           并同步到异地存储（目标与凭据待确认，secrets 只在部署时注入）。
+  # 每日一致性备份（technical-design §5.8）：crond 每日执行 deploy/backup.sh，
+  # 调 PocketBase 备份 API 生成 SQLite 一致快照（含 data.db + 上传文件），下载到
+  # backups 卷滚动保留 ${BACKUP_RETENTION_DAYS} 天，结果写 backups 卷内 last_backup.json
+  # 标记文件（与 super.pb.js backup/run 的分工见 deploy/README.md「备份分工」）。
+  # TODO(待确认)：异地同步目标存储与凭据下发方式（§5.8，secrets 只在部署时注入）。
   backup:
     image: alpine:3.20
+    depends_on:
+      app:
+        condition: service_healthy
     volumes:
-      - pb_data:/data:ro
+      # 备份 API 先把 ZIP 落盘 pb_data/backups，脚本下载成功后会删除该服务端副本，
+      # 故本卷需可写；脚本不触碰 pb_data 内除 backups/ 副本外的任何文件
+      - pb_data:/pbdata
       - backups:/backups
     environment:
+      PB_URL: ${PB_BACKUP_URL:-http://app:8090}
+      PB_SUPERUSER_EMAIL: ${PB_SUPERUSER_EMAIL:?backup 服务需要超管邮箱（.env 注入，不入库）}
+      PB_SUPERUSER_PASSWORD: ${PB_SUPERUSER_PASSWORD:?backup 服务需要超管密码（.env 注入，不入库）}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
     command: >
       sh -c "mkdir -p /etc/periodic/daily
@@ -35,6 +52,11 @@ configs:
   backup_script:
     file: ./deploy/backup.sh
 
+# 恢复说明（AC-19，详细演练步骤见 deploy/README.md「恢复演练」）：
+#   1) docker compose stop app（停机，二次确认为运维流程要求，V1 不做产品化一键恢复）；
+#   2) 从 backups 卷取最近 cc_daily_*.zip，解压后以其中 data.db（及 storage/）覆盖 pb_data 卷；
+#      也可反向使用 PocketBase 恢复：上传 ZIP 到 pb_data/backups 后用 POST /api/backups/{key}/restore；
+#   3) docker compose start app，校验三端与数据完整性，并按 §5.8 要求补写恢复审计。
 volumes:
   pb_data:
   backups:

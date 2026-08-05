@@ -1,0 +1,8 @@
+# Playwright 产物
+node_modules/
+test-results/
+playwright-report/
+blob-report/
+
+# 测试运行时（临时 pb_data、日志、状态文件），每次运行重建
+.runtime/
