@@ -7,7 +7,7 @@
 **Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。V1 交付范围（PRD §2.1）：
 
 - 多机构集中管理：Empact 集中式平台，统一数据库，机构间按 `organization_id` 逻辑隔离。
-- 活动全生命周期：活动创建/发布/传播（链接与二维码，无公开广场）→ 报名与人工审核（角色名额硬限制、误判回退）→ 现场固定二维码签到（含补签/撤销）→ 多份问卷发布与填写 → 基础项目管理看板 → 规范化 ZIP/CSV 数据导出。
+- 活动全生命周期：活动创建/发布/传播（链接与二维码；首页另设公开活动广场，仅展示已发布/已关闭活动）→ 报名与人工审核（角色名额硬限制、误判回退）→ 现场固定二维码签到（含补签/撤销）→ 多份问卷发布与填写 → 基础项目管理看板 → 规范化 ZIP/CSV 数据导出。
 - 三级账号权限：超级管理员（全平台仅一个，建站时创建）、机构管理员（一次性邀请码注册，仅限本机构）、参与者（全平台通用账号，仅用户名+密码，无需微信/手机号/邮箱）。
 
 正式入口域名：`chatcircle.empact.cn`。
@@ -41,7 +41,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | 生成请求 | 正式开发前的文档准备阶段：基于已确认的需求基线与技术决策，为后续实现工程师生成项目规划文档，写清前提、术语、输入输出、约束、步骤与验收方式 |
 | 生成时间 | 2026-08-05 |
 | 已检查的项目根目录 | 项目根目录仅含 `docs/`（三份 PRD docx）与 `.DS_Store`；尚无代码、构建配置或 GitHub 仓库（私有仓库 `chatcircle-web` 尚未创建） |
-| 关键证据 | `docs/` 下三份 PRD：`Chat_Circles_活动与问卷平台_PRD_v0.1.docx`、`_v0.2.docx`、`_v0.3.docx`；以 **v0.3（评审修订版，2026-08-05）为需求基线** |
+| 关键证据 | `docs/` 下三份 PRD：`Chat_Circles_活动与问卷平台_PRD_v0.1.docx`、`_v0.2.docx`、`_v0.3.docx`；以 **v0.3（评审修订版，2026-08-05）为需求基线**。2026-08-05 增补：`docs/ChatCircle_Web_UI_Design_Spec_v1.0.docx`（UI 设计规范，仅其纯视觉部分纳入 [ui-design.md](ui-design.md)，业务口径仍以本目录规划文档为准）；`frontend/src/shared/styles/global.css` 与 `shared/ui/` 组件库现状 |
 | 已确认技术决策 | 响应式 Web（React 18 + Vite + TypeScript，手机优先）+ PocketBase（后端/认证/SQLite）+ Docker 部署；完整 V1 范围（M0~M5） |
 
 ## 已生成文档
@@ -52,6 +52,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | [database-design.md](database-design.md) | 数据模型落地：PocketBase 集合设计、字段与关系、机构隔离规则、状态机与事务约束 |
 | [security-privacy.md](security-privacy.md) | 安全、隐私与审计要求：认证与会话策略、权限边界、审计事件清单、敏感数据处理与隐私表述 |
 | [test-plan.md](test-plan.md) | 测试与 CI 策略：测试分层、AC-01~23 验收映射、越权自动化测试与 CI 流水线 |
+| [ui-design.md](ui-design.md) | 前端视觉与交互规范：色彩/字体/间距/动效 token、组件规则、响应式与无障碍基线、文案语气、图表样式；仅含纯前端 UI，业务口径以 PRD 与本目录其他文档为准 |
 
 ## 有意跳过的目录文档
 
@@ -140,3 +141,4 @@ docker compose up
 | operations-runbook.md（运维手册） | M5 阶段产物，现阶段无内容来源 | 本索引「有意跳过」表 |
 | License | Empact 对许可条款的决定 | 见上文 License 节 |
 | GitHub 私有仓库 `chatcircle-web` | 仓库尚未创建 | M0 工作 |
+| UI 设计稿与规划文档的业务冲突项 | 设计稿中的 Skill 入口、活动列表/推荐、通知中心等不作为实现依据；如需采纳须先回 PRD 评审 | 见 [ui-design.md](ui-design.md)「非目标」 |

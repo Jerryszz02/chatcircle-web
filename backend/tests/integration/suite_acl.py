@@ -249,3 +249,11 @@ def run(ctx):
     rep.check('ACL-66 未认证看草稿活动 → 404', s == 404, r)
     s, r = call(base, 'GET', '/api/cc/metrics/applications')
     rep.check('ACL-67 未认证调用看板 → 401', s == 401, r)
+
+    # ---------- 7. 补签候选人名单（含用户名，按机构隔离） ----------
+    s, r = call(base, 'GET', '/api/cc/activities/%s/checkin/manual-candidates' % act_b_pub, token=AT_A)
+    rep.check('ACL-68 机构A管理员读机构B补签候选人 → 404', s == 404, r)
+    s, r = call(base, 'GET', '/api/cc/activities/%s/checkin/manual-candidates' % act_a, token=PT_A)
+    rep.check('ACL-69 参与者读补签候选人 → 401/403', s in (401, 403), r)
+    s, r = call(base, 'GET', '/api/cc/activities/%s/checkin/manual-candidates' % act_b_pub)
+    rep.check('ACL-70 未认证读补签候选人 → 401', s == 401, r)

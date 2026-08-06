@@ -1,32 +1,32 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { collectionsForRole } from '../../../shared/api/collections';
 import { normalizeApiError } from '../../../shared/api/http';
-import { superAuth } from '../../../shared/auth';
 import type {
   SurveyTemplateRecord,
   SurveyTemplateVersionRecord,
 } from '../../../shared/api/types';
-import { Button, Card, Loading, Modal } from '../../../shared/ui';
+import { Button, Card, Input, Loading, Modal } from '../../../shared/ui';
 import { SuperLayout } from '../SuperLayout';
 import { useSuperToast } from '../hooks';
-import { runBackup } from '../api';
+import { createSurveyTemplate, publishTemplateVersion, runBackup } from '../api';
 import { BackupAlarmBanner } from '../components/BackupAlarmBanner';
+import { TemplateSchemaEditor } from '../components/TemplateSchemaEditor';
 import { useBackupStatus } from '../hooks';
-import { formatDateTime, nowPbDateTime } from '../lib/format';
+import { formatDateTime } from '../lib/format';
 import { ACTIVE_STATUS_LABELS } from '../lib/labels';
 import {
   countLockedQuestions,
   extractTemplateQuestions,
-  validateSchemaJsonText,
   type TemplateQuestionView,
 } from '../lib/templates';
 
 /**
  * 系统与模板（/super/system）。
  * - 备份状态卡片：最近备份时间/结果；失败显著告警横幅（AC-23）；手动触发备份（写审计）；
- * - 标准问卷模板管理：模板与版本列表、新版本发布（FR-SUR-001/011）、锁定题目标识。
+ * - 标准问卷模板管理：模板与版本列表、新建模板、新版本发布（FR-SUR-001/011）、锁定题目标识。
  *   模板具体题目内容 PRD 未写死（technical-design 待确认 #5），本页按能力层实现：
- *   版本 schema 以 JSON 编辑，已发布版本不可变（database-design §5.2.13）。
+ *   版本 schema 由可视化编辑器（TemplateSchemaEditor）产出，已发布版本不可变
+ *   （database-design §5.2.13）；新建/发布走后端事务端点并写审计（PRD §11.3）。
  */
 export function SuperSystemPage() {
   const { toast } = useSuperToast();
@@ -41,11 +41,11 @@ export function SuperSystemPage() {
   const [versions, setVersions] = useState<SurveyTemplateVersionRecord[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
 
-  // 版本题目预览 / 发布新版本
+  // 版本题目预览 / 发布新版本 / 新建模板
   const [previewVersion, setPreviewVersion] = useState<SurveyTemplateVersionRecord | null>(null);
   const [publishTemplate, setPublishTemplate] = useState<SurveyTemplateRecord | null>(null);
-  const [schemaText, setSchemaText] = useState('');
-  const [schemaError, setSchemaError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newTemplate, setNewTemplate] = useState({ template_code: '', name: '', description: '' });
   const [saving, setSaving] = useState(false);
 
   const loadTemplates = useCallback(async () => {
@@ -121,34 +121,45 @@ export function SuperSystemPage() {
     }
   };
 
-  const openPublish = (template: SurveyTemplateRecord) => {
-    const current = currentVersionOf(template);
-    setPublishTemplate(template);
-    setSchemaText(current ? JSON.stringify(current.schema_json, null, 2) : '{\n  "questions": []\n}');
-    setSchemaError(null);
-  };
-
-  const onPublishVersion = async () => {
+  const onPublishVersion = async (schema: { questions: Record<string, unknown>[] }) => {
     if (!publishTemplate) return;
-    const error = validateSchemaJsonText(schemaText);
-    setSchemaError(error);
-    if (error) return;
     setSaving(true);
     try {
-      const nextVersion = Math.max(0, ...versionsOf(publishTemplate.id).map((v) => v.version)) + 1;
-      const created = await cc.surveyTemplateVersions.create({
-        template_id: publishTemplate.id,
-        version: nextVersion,
-        schema_json: JSON.parse(schemaText) as unknown,
-        published_at: nowPbDateTime(),
-        published_by: superAuth.record?.id ?? '',
-      });
-      await cc.surveyTemplates.update(publishTemplate.id, { current_version_id: created.id });
-      toast(`已发布版本 v${nextVersion}，仅影响之后新建的活动问卷`, 'success');
+      const res = await publishTemplateVersion(publishTemplate.id, schema);
+      toast(`已发布版本 v${res.version.version}，仅影响之后新建的活动问卷`, 'success');
       setPublishTemplate(null);
       await loadTemplates();
     } catch (err) {
-      toast(normalizeApiError(err).message, 'error');
+      // 编辑器内联展示错误、保持打开
+      throw normalizeApiError(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onCreateTemplate = async (schema: { questions: Record<string, unknown>[] }) => {
+    const templateCode = newTemplate.template_code.trim();
+    const name = newTemplate.name.trim();
+    if (!/^[A-Z][A-Z0-9_]{1,49}$/.test(templateCode)) {
+      throw new Error('模板代码必填，须为大写字母开头的 2~50 位大写字母/数字/下划线');
+    }
+    if (!name) {
+      throw new Error('模板名称必填');
+    }
+    setSaving(true);
+    try {
+      await createSurveyTemplate({
+        template_code: templateCode,
+        name,
+        description: newTemplate.description.trim(),
+        schema_json: schema,
+      });
+      toast(`模板 ${templateCode} 已创建（v1）`, 'success');
+      setCreateOpen(false);
+      setNewTemplate({ template_code: '', name: '', description: '' });
+      await loadTemplates();
+    } catch (err) {
+      throw normalizeApiError(err);
     } finally {
       setSaving(false);
     }
@@ -219,11 +230,18 @@ export function SuperSystemPage() {
         </div>
       </Card>
 
-      <Card title="标准问卷模板">
+      <Card
+        title="标准问卷模板"
+        actions={
+          <Button variant="secondary" onClick={() => setCreateOpen(true)}>
+            新建模板
+          </Button>
+        }
+      >
         {templates === null ? (
           <Loading />
         ) : templates.length === 0 ? (
-          <p className="sa-muted">暂无模板；初始模板由后端迁移注入（FR-SUR-001）。</p>
+          <p className="sa-muted">暂无模板，可点击右上角「新建模板」创建（FR-SUR-001）。</p>
         ) : (
           <div className="sa-table-wrap">
             <table className="sa-table">
@@ -270,7 +288,7 @@ export function SuperSystemPage() {
                           <Button
                             variant="secondary"
                             disabled={tpl.status !== 'active'}
-                            onClick={() => openPublish(tpl)}
+                            onClick={() => setPublishTemplate(tpl)}
                           >
                             发布新版本
                           </Button>
@@ -394,49 +412,61 @@ export function SuperSystemPage() {
         </p>
       </Modal>
 
-      {/* 发布新版本 */}
+      {/* 发布新版本（可视化编辑器；已发布版本不可变，FR-SUR-011） */}
       <Modal
         open={publishTemplate !== null}
         title={`发布新版本：${publishTemplate?.name ?? ''}`}
         onClose={() => setPublishTemplate(null)}
-        footer={
-          <>
-            <Button loading={saving} onClick={() => void onPublishVersion()}>
-              发布
-            </Button>
-            <Button variant="secondary" onClick={() => setPublishTemplate(null)}>
-              取消
-            </Button>
-          </>
-        }
       >
         <p className="sa-confirm-warning">
           新版本发布后即不可修改，且只影响之后新建的活动问卷；已复制的活动问卷固定在原版本，不受影响（FR-SUR-011）。
+          发布将写入审计日志（PRD §11.3）。
         </p>
-        <div className="cc-field">
-          <label className="cc-label" htmlFor="sa-schema-json">
-            题目定义 JSON（schema_json）
-          </label>
-          <textarea
-            id="sa-schema-json"
-            className="sa-textarea"
-            value={schemaText}
-            onChange={(e) => {
-              setSchemaText(e.target.value);
-              if (schemaError) setSchemaError(validateSchemaJsonText(e.target.value));
-            }}
-            aria-invalid={schemaError ? true : undefined}
+        {publishTemplate ? (
+          <TemplateSchemaEditor
+            key={publishTemplate.id}
+            initialSchema={currentVersionOf(publishTemplate)?.schema_json ?? null}
+            saving={saving}
+            submitLabel="发布"
+            onSubmit={onPublishVersion}
+            onCancel={() => setPublishTemplate(null)}
           />
-          {schemaError ? (
-            <p className="cc-error" role="alert">
-              {schemaError}
-            </p>
-          ) : null}
-          <p className="cc-hint">
-            已预填当前版本内容便于修改；建议包含 questions 数组（question_code、question_type、title、
-            locked、is_sensitive、required、options）。模板发布将写入审计日志（PRD §11.3）。
-          </p>
-        </div>
+        ) : null}
+      </Modal>
+
+      {/* 新建模板（含首个版本；后端事务回补 current_version_id） */}
+      <Modal
+        open={createOpen}
+        title="新建问卷模板"
+        onClose={() => setCreateOpen(false)}
+      >
+        <Input
+          label="模板代码（template_code）"
+          required
+          value={newTemplate.template_code}
+          hint="大写字母开头的 2~50 位大写字母/数字/下划线，全平台唯一（PRD 附录 B）"
+          onChange={(e) => setNewTemplate({ ...newTemplate, template_code: e.target.value })}
+        />
+        <Input
+          label="模板名称"
+          required
+          value={newTemplate.name}
+          onChange={(e) => setNewTemplate({ ...newTemplate, name: e.target.value })}
+        />
+        <Input
+          label="描述（可选）"
+          value={newTemplate.description}
+          onChange={(e) => setNewTemplate({ ...newTemplate, description: e.target.value })}
+        />
+        {createOpen ? (
+          <TemplateSchemaEditor
+            initialSchema={null}
+            saving={saving}
+            submitLabel="创建模板"
+            onSubmit={onCreateTemplate}
+            onCancel={() => setCreateOpen(false)}
+          />
+        ) : null}
       </Modal>
     </SuperLayout>
   );

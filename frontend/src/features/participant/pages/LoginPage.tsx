@@ -1,5 +1,5 @@
-import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
-import { participantAuth } from '../../../shared/auth';
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { hasAnySession, participantAuth } from '../../../shared/auth';
 import { Card, PageLayout } from '../../../shared/ui';
 import { ParticipantAuthForm } from '../components/ParticipantAuthForm';
 import { sanitizeRedirect } from '../lib/redirect';
@@ -19,9 +19,26 @@ export function LoginPage() {
   if (participantAuth.isValid()) {
     return <Navigate to={target} replace />;
   }
+  // 单会话互斥：已登录其它身份（机构/超管）时须先退出，回首页进入对应面板。
+  if (hasAnySession()) {
+    return <Navigate to="/" replace />;
+  }
 
   return (
-    <PageLayout section="参与者端" title="平台通用登录">
+    <PageLayout
+      section="参与者端"
+      title="平台通用登录"
+      className="ccp-root"
+      actions={
+        <Link to="/" className="cc-btn cc-btn-secondary">
+          返回首页
+        </Link>
+      }
+    >
+      <div className="ccp-auth-mark" aria-hidden="true">
+        <span />
+        <span />
+      </div>
       <Card>
         <ParticipantAuthForm
           submitLabel="登录"

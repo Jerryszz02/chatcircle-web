@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { normalizeApiError } from '../../../shared/api/http';
-import { superAuth } from '../../../shared/auth';
+import { hasAnySession, superAuth } from '../../../shared/auth';
 import { Button, Card, Input, PageLayout } from '../../../shared/ui';
 
 /**
@@ -21,6 +21,10 @@ export function SuperLoginPage() {
   if (superAuth.isValid()) {
     return <Navigate to="/super/dashboard" replace />;
   }
+  // 单会话互斥：已登录其它身份（参与者/机构管理员）时须先退出，回首页进入对应面板。
+  if (hasAnySession()) {
+    return <Navigate to="/" replace />;
+  }
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -37,7 +41,14 @@ export function SuperLoginPage() {
   };
 
   return (
-    <PageLayout section="超级管理端">
+    <PageLayout
+      section="超级管理端"
+      actions={
+        <Link to="/" className="cc-btn cc-btn-secondary">
+          返回首页
+        </Link>
+      }
+    >
       <Card>
         <h1 className="page-title">超级管理员登录</h1>
         <form onSubmit={(e) => void onSubmit(e)}>

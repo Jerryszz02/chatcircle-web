@@ -142,7 +142,11 @@ export function SurveyPage() {
   }
 
   return (
-    <PageLayout section="参与者端" title={meta ? meta.survey.title : '问卷填写'}>
+    <PageLayout
+      section="参与者端"
+      title={meta ? meta.survey.title : '问卷填写'}
+      className="ccp-root"
+    >
       {phase.kind === 'loading' ? <Loading fullscreen /> : null}
 
       {phase.kind === 'error' ? (

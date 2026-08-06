@@ -112,9 +112,11 @@ def main():
     import suite_auth
     import suite_backup
     import suite_nodelete
+    import suite_templates
 
     for mod in (suite_flow, suite_acl, suite_capacity, suite_transitions, suite_checkins,
-                suite_surveys, suite_exports, suite_auth, suite_backup, suite_nodelete):
+                suite_surveys, suite_exports, suite_auth, suite_backup, suite_nodelete,
+                suite_templates):
         mod.run(ctx)
 
     ok = rep.summary()

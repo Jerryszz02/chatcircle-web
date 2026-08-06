@@ -4,6 +4,7 @@
 // - POST /api/cc/checkin/{activityId}/self              参与者自助签到（幂等，重复扫码返回已有记录）
 // - POST /api/cc/activities/{id}/checkin/open|close    管理员开放/关闭签到（可重复开放/关闭）
 // - POST /api/cc/checkins/manual {activity_id, participant_id, reason}   管理员补签（原因必填）
+// - GET  /api/cc/activities/{id}/checkin/manual-candidates               补签候选人名单（按用户名选择）
 // - POST /api/cc/checkins/{id}/revoke {reason}         管理员撤销签到（原因必填）
 //
 // 关键规则：
@@ -462,6 +463,77 @@ routerAdd('POST', '/api/cc/checkins/manual', (e) => {
   });
 
   return e.json(200, { checkin: checkin, existing: !created });
+  } catch (err) {
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/cc/activities/{id}/checkin/manual-candidates — 补签候选人名单
+// 管理员不可读 participant_accounts 集合（listRule 关闭，无参与者名录），
+// 补签下拉需要按用户名选择，故由服务端按本机构活动注入已通过报名的
+// { participant_id, username } 名单（仅本机构活动，不暴露其他参与者信息）。
+// ---------------------------------------------------------------------------
+routerAdd('GET', '/api/cc/activities/{id}/checkin/manual-candidates', (e) => {
+  try {
+  const ccIsNoRows = (err) => !!err && typeof err.message === 'string' && err.message.indexOf('no rows') >= 0;
+  const ccById = (app, collection, id) => {
+    try { return app.findRecordById(collection, id); } catch (err) { if (ccIsNoRows(err)) return null; throw err; }
+  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
+  // 身份守卫（与 lib/http.pb.js 同源）；admin 同时校验账号与所属机构 status（FR-ORG-001）
+  const requireAuth = (e, role) => {
+    const auth = e.auth;
+    if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
+    const collectionName = auth.collection().name;
+    if (role === 'participant') {
+      if (collectionName !== 'participant_accounts') ccError(403, 'FORBIDDEN', '无权限：需要参与者身份');
+      if (auth.get('status') !== 'active') ccError(403, 'ACCOUNT_DISABLED', '账号已停用');
+      return auth;
+    }
+    if (role === 'admin') {
+      if (collectionName !== 'admin_accounts') ccError(403, 'FORBIDDEN', '无权限：需要机构管理员身份');
+      if (auth.get('status') !== 'active') ccError(403, 'ACCOUNT_DISABLED', '账号已停用');
+      const org = ccById(e.app, 'organizations', auth.get('organization_id'));
+      if (!org || org.get('status') !== 'active') ccError(403, 'ORG_DISABLED', '所属机构已停用');
+      return auth;
+    }
+    if (role === 'super') {
+      if (collectionName !== '_superusers') ccError(403, 'FORBIDDEN', '无权限：需要超级管理员身份');
+      return auth;
+    }
+    ccError(500, 'INVALID_ROLE', '内部错误：未知的身份角色要求');
+  };
+  const admin = requireAuth(e, 'admin');
+  const orgId = admin.get('organization_id');
+  const activity = ccById($app, 'activities', e.request.pathValue('id'));
+  if (!activity || activity.get('organization_id') !== orgId) {
+    ccError(404, 'ACTIVITY_NOT_FOUND', '活动不存在');
+  }
+
+  const registrations = $app.findRecordsByFilter(
+    'registrations', "activity_id = {:a} && status = 'approved'", '', 500, 0,
+    { a: activity.id },
+  );
+  const candidates = [];
+  registrations.forEach((reg) => {
+    const participant = ccById($app, 'participant_accounts', reg.get('participant_id'));
+    if (!participant) return; // 账号异常缺失时跳过，不阻断名单
+    candidates.push({
+      participant_id: participant.id,
+      username: participant.get('username'),
+      activity_role: reg.get('activity_role'),
+    });
+  });
+  candidates.sort((a, b) => (a.username < b.username ? -1 : a.username > b.username ? 1 : 0));
+
+  return e.json(200, { candidates: candidates });
   } catch (err) {
     // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
     if (err && err.__ccError === true) {

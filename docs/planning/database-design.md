@@ -121,16 +121,16 @@
 | location | text | 否 | — | 地点 |
 | start_time / end_time | date | 是 | — | PRD §9.1 `times`；单次场次口径（§4.1） |
 | status | select(draft, pending_review, rejected, published, closed, taken_down, archived) | 是 | 索引 | 活动 7 态，见 §5.5 |
-| capacity_total | number | 是 | — | 总名额硬限制；不得低于当前已通过人数（FR-ACT-006） |
-| capacity_speaker | number | 是 | — | 倾诉者名额 |
-| capacity_listener | number | 是 | — | 聆听者名额 |
+| capacity_total | number | 是 | — | 总名额硬限制；须为正偶数，且不得低于当前已通过人数（FR-ACT-006） |
+| capacity_speaker | number | 是 | — | 倾诉者名额；由 capacity_total 对半派生，不可单独设置 |
+| capacity_listener | number | 是 | — | 聆听者名额；由 capacity_total 对半派生，不可单独设置 |
 | registration_open | bool | 是 | — | 报名手动开关（FR-ACT-005） |
 | registration_start_at / registration_end_at | date | 否 | — | 报名起止时间；超时后不能新提交（FR-ACT-005） |
 | checkin_qr_token | text | 是 | **唯一** | 固定签到二维码 token；全活动周期不变（FR-CHK-001），有效性由 `checkin_sessions` 开放状态控制 |
 | group_tag | text | 否 | 索引 | **预留分组/标签字段（可空）**，V1 不使用，供后续「项目/系列」扩展（PRD §4.1） |
 | form_config_json | json | 否 | — | 草案：活动级报名字段启用/必填配置（见「待确认」D-3） |
 
-- API Rules 要点：**公开详情页**通过 viewRule 实现——未登录可按 id 查看 `status` 为 `published`/`closed` 的活动；listRule 对参与者关闭，保证「无公开广场」（FR-ACT-002、FR-ACT-003）。已归档活动公开链接是否仍可访问 PRD 未明确（「待确认」D-5）。
+- API Rules 要点：**公开详情页**通过 viewRule 实现——未登录可按 id 查看 `status` 为 `published`/`closed` 的活动；listRule 对参与者保持关闭，公开列表不走集合 API，而由 hook 端点 `GET /api/cc/public/activities` 提供（首页活动广场，仅下发 `published`/`closed`，按开始时间倒序；系对 FR-ACT-002「无公开广场」的实现期偏离，随首页落地）。已归档活动公开链接是否仍可访问 PRD 未明确（「待确认」D-5）。
 - 名额修改、状态变更写审计（PRD §11.3）。
 
 #### 5.2.6 activity_approvals — 活动发布审核历史（base）
@@ -363,7 +363,7 @@
    - 超级管理员：`_superusers` 身份天然绕过集合规则，无需逐表配置。
 3. **参数防伪**：管理端自定义接口忽略客户端传入的任何机构参数，机构范围一律从 `@request.auth` 推导（PRD §12.2）。
 4. **导出与看板**：聚合查询与导出任务在服务端按登录身份附加同一 `organization_id` 条件；`export_jobs.scope_json` 中的范围须与服务端校验后的身份交集（FR-EXP-004）。
-5. **公开面最小化**：参与者对 `activities` 仅 viewRule（按 id 看详情），listRule 关闭 → 无公开活动广场（FR-ACT-002）。
+5. **公开面最小化**：参与者对 `activities` 仅 viewRule（按 id 看详情），listRule 关闭；唯一的公开列表是 hook 端点 `GET /api/cc/public/activities`（首页活动广场，仅 `published`/`closed`），不开放集合级 list。
 6. **验证方式**：每个涉及机构数据的 list/view/export 接口必须有机构 A 访问机构 B 资源 ID 的自动化越权用例（AC-03，详见 test-plan.md）。
 
 ### 5.5 状态枚举与状态机

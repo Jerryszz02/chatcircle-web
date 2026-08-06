@@ -167,32 +167,31 @@ export function isRoleFull(remaining: RemainingCapacity, role: ActivityRole): bo
 
 export interface CapacityEditErrors {
   capacity_total?: string;
-  capacity_speaker?: string;
-  capacity_listener?: string;
 }
 
 /**
- * 名额编辑校验（FR-ACT-006 体验层镜像）：
- * - 必须为不小于 0 的整数；
- * - 各名额不得低于当前已通过人数（服务端在 hooks 内硬校验，此处仅做提示）。
+ * 名额编辑校验（FR-ACT-006 体验层镜像 + 对半派生不变量）：
+ * - 总名额须为正偶数；倾诉者/聆听者名额由总名额对半派生，不在表单单独填写；
+ * - 总名额不得低于当前已通过总人数，对半后不得低于单一角色已通过人数
+ *   （服务端在 hooks 内硬校验，此处仅做提示）。
  */
 export function validateCapacityEdit(
-  input: CapacityInput,
+  capacityTotal: number,
   counts: ApprovedCounts,
 ): CapacityEditErrors {
   const errors: CapacityEditErrors = {};
-  const rules: Array<[keyof CapacityInput, number, string]> = [
-    ['capacity_total', counts.total, '总名额'],
-    ['capacity_speaker', counts.speaker, '倾诉者名额'],
-    ['capacity_listener', counts.listener, '聆听者名额'],
-  ];
-  for (const [field, approved, label] of rules) {
-    const value = input[field];
-    if (!Number.isInteger(value) || value < 0) {
-      errors[field] = `${label}须为不小于 0 的整数`;
-    } else if (value < approved) {
-      errors[field] = `${label}不得低于当前已通过人数（${approved} 人）`;
-    }
+  if (!Number.isInteger(capacityTotal) || capacityTotal <= 0 || capacityTotal % 2 !== 0) {
+    errors.capacity_total = '总名额须为正偶数（倾诉者/聆听者名额自动对半分配）';
+    return errors;
+  }
+  if (capacityTotal < counts.total) {
+    errors.capacity_total = `总名额不得低于当前已通过人数（${counts.total} 人）`;
+    return errors;
+  }
+  const half = capacityTotal / 2;
+  const maxRoleApproved = Math.max(counts.speaker, counts.listener);
+  if (half < maxRoleApproved) {
+    errors.capacity_total = `总名额对半后为 ${half} 人，不得低于单一角色已通过人数（${maxRoleApproved} 人）`;
   }
   return errors;
 }

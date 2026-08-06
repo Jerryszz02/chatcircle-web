@@ -186,8 +186,55 @@ export async function downloadExportFile(job: Pick<ExportJobRecord, 'id'>): Prom
   URL.revokeObjectURL(url);
 }
 
-// ---------- 备份（PRD §12.3、AC-23） ----------
+// ---------- 问卷模板（FR-SUR-001/011、PRD §11.3 模板发布审计） ----------
 
+/** 新建模板的响应（已核对后端 super.pb.js 实际形态：{ template, version }）。 */
+export interface CreateTemplateResponse {
+  template: {
+    id: string;
+    template_code: string;
+    name: string;
+    status: string;
+    current_version_id: string;
+  };
+  version: { id: string; version: number; question_count: number };
+}
+
+/**
+ * 新建问卷模板 + 首个版本（后端事务：建模板 → 建首版 → 回补 current_version_id，
+ * 写审计 template.create）。schema_json 由 TemplateSchemaEditor 产出规范化结构。
+ */
+export function createSurveyTemplate(input: {
+  template_code: string;
+  name: string;
+  description?: string;
+  schema_json: unknown;
+}): Promise<CreateTemplateResponse> {
+  return apiPost<CreateTemplateResponse>(superClient(), '/api/cc/super/templates', input);
+}
+
+/** 发布模板新版本的响应（version = 当前最大版本 + 1）。 */
+export interface PublishTemplateVersionResponse {
+  template_id: string;
+  version: { id: string; version: number; question_count: number };
+}
+
+/**
+ * 发布模板新版本（后端事务：校验并规范化 schema → 建版本 → 移动 current_version_id，
+ * 写审计 template.publish；已发布版本不可变、只影响之后新建问卷，FR-SUR-011）。
+ */
+export function publishTemplateVersion(
+  templateId: string,
+  schemaJson: unknown,
+): Promise<PublishTemplateVersionResponse> {
+  return apiPost<PublishTemplateVersionResponse>(
+    superClient(),
+    `/api/cc/super/templates/${templateId}/publish`,
+    { schema_json: schemaJson },
+  );
+}
+
+// ---------- 备份（PRD §12.3、AC-23） ----------
 /** 读取最近备份状态与失败告警标记。 */
 export async function fetchBackupStatus(): Promise<BackupStatus> {
   const raw = await apiGet<unknown>(superClient(), '/api/cc/super/backup-status');

@@ -44,6 +44,8 @@ import type {
  * 6. 答卷答案出参元素统一为 { question_code, value }【已核对】
  *    （GET /api/cc/submissions/:id、surveys/:qrToken 的 my_answers、draft/submit 响应）；
  *    提交入参同为 { question_code, value }。
+ * 7. GET /api/cc/public/activities → PublicActivityList（首页活动广场，未登录可看；
+ *    仅 published/closed，按开始时间倒序，registration 口径同详情端点）
  */
 
 /** 报名未开放原因（registration.open=false 时服务端给出）。 */
@@ -101,6 +103,30 @@ export interface PublicActivityDetail {
 /** 公开活动详情（FR-ACT-003：未登录可看；仅 published/closed 可见）。 */
 export function getPublicActivity(activityId: string): Promise<PublicActivityDetail> {
   return apiGet(pbClients.participant, `/api/cc/public/activities/${activityId}`);
+}
+
+/** 公开活动列表项（首页活动广场；GET /api/cc/public/activities）。 */
+export interface PublicActivityListItem {
+  id: string;
+  title: string;
+  activity_code: string;
+  description?: string;
+  location?: string;
+  start_time: string;
+  end_time: string;
+  status: ActivityStatus;
+  capacity_total: number;
+  registration: Pick<PublicRegistrationInfo, 'open' | 'reason' | 'remaining_total'>;
+}
+
+/** GET /api/cc/public/activities 响应。 */
+export interface PublicActivityList {
+  activities: PublicActivityListItem[];
+}
+
+/** 公开活动列表（首页活动广场：未登录可看；仅 published/closed，按开始时间倒序）。 */
+export function getPublicActivities(): Promise<PublicActivityList> {
+  return apiGet(pbClients.participant, '/api/cc/public/activities');
 }
 
 /** 报名答案项（POST /api/cc/activities/:id/register 的 answers 元素）。 */

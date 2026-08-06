@@ -13,11 +13,13 @@ import { StatusTag } from '../../components/StatusTag';
 import {
   adminCollections,
   closeCheckin,
+  fetchManualCheckinCandidates,
   manualCheckin,
   openCheckin,
   revokeCheckin,
+  type ManualCheckinCandidate,
 } from '../../lib/api';
-import { CHECKIN_SOURCE_LABELS, CHECKIN_STATUS_LABELS } from '../../lib/labels';
+import { CHECKIN_SOURCE_LABELS, CHECKIN_STATUS_LABELS, ACTIVITY_ROLE_LABELS } from '../../lib/labels';
 import { formatDateTime, shortId } from '../../lib/format';
 
 /**
@@ -39,6 +41,7 @@ export function CheckinPanel({
   const [session, setSession] = useState<CheckinSessionRecord | null>(null);
   const [checkins, setCheckins] = useState<CheckinRecord[] | null>(null);
   const [approved, setApproved] = useState<RegistrationRecord[]>([]);
+  const [candidates, setCandidates] = useState<ManualCheckinCandidate[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<CheckinRecord | null>(null);
@@ -50,7 +53,7 @@ export function CheckinPanel({
     setError('');
     try {
       const cc = adminCollections();
-      const [sessions, checkinList, approvedList] = await Promise.all([
+      const [sessions, checkinList, approvedList, candidateList] = await Promise.all([
         cc.checkinSessions.getFullList({
           filter: `activity_id = "${activity.id}" && status = "open"`,
         }),
@@ -62,11 +65,13 @@ export function CheckinPanel({
           filter: `activity_id = "${activity.id}" && status = "approved"`,
           fields: 'id,participant_id,activity_role',
         }),
+        fetchManualCheckinCandidates(activity.id),
       ]);
       // 同一活动同一时间至多一条 open 记录（服务端事务保证）
       setSession(sessions[0] ?? null);
       setCheckins(checkinList);
       setApproved(approvedList);
+      setCandidates(candidateList);
     } catch (err) {
       setError(normalizeApiError(err).message);
     }
@@ -77,9 +82,9 @@ export function CheckinPanel({
   }, [load]);
 
   const validCheckins = (checkins ?? []).filter((c) => c.status === 'valid');
-  // 补签候选：已通过且当前无有效签到
-  const manualCandidates = approved.filter(
-    (reg) => !validCheckins.some((c) => c.participant_id === reg.participant_id),
+  // 补签候选：已通过且当前无有效签到（按用户名展示，候选人名单由服务端注入）
+  const manualCandidates = candidates.filter(
+    (cand) => !validCheckins.some((c) => c.participant_id === cand.participant_id),
   );
 
   const toggleSession = async () => {
@@ -146,6 +151,7 @@ export function CheckinPanel({
           <QrDisplay
             url={checkinUrl}
             caption="二维码内容固定不变；未开放签到时扫码无效（FR-CHK-001/002）"
+            downloadName={`签到二维码-${activity.activity_code}.png`}
           />
         </Card>
         <Card
@@ -290,9 +296,9 @@ export function CheckinPanel({
             onChange={(e) => setManualParticipant(e.target.value)}
           >
             <option value="">请选择</option>
-            {manualCandidates.map((reg) => (
-              <option key={reg.id} value={reg.participant_id}>
-                {reg.participant_id}
+            {manualCandidates.map((cand) => (
+              <option key={cand.participant_id} value={cand.participant_id}>
+                {cand.username}（{ACTIVITY_ROLE_LABELS[cand.activity_role]}）
               </option>
             ))}
           </select>

@@ -112,12 +112,15 @@ def run(ctx):
 
     # ---------- 5. 回退重新执行名额硬校验 ----------
     act2 = fx.create_activity(base, AT, org, 'CC_IT_TRAN_02', '回退名额校验场',
-                              fields=fx.nick_field_cfg(fields), caps=(1, 1, 1))
+                              fields=fx.nick_field_cfg(fields), caps=(2, 1, 1))
     _, pt_a, _ = fx.create_participant(base, 'tran_fill')
+    _, pt_a2, _ = fx.create_participant(base, 'tran_fill2')
     _, pt_b, _ = fx.create_participant(base, 'tran_rev')
     reg_fill = fx.register(base, pt_a, act2, 'speaker', fx.field_answers(fields, '占位'))
+    reg_fill2 = fx.register(base, pt_a2, act2, 'listener', fx.field_answers(fields, '占位2'))
     reg_rev = fx.register(base, pt_b, act2, 'listener', fx.field_answers(fields, '回退'))
-    fx.transition(base, AT, reg_fill, 'approved')  # 占满唯一名额
+    fx.transition(base, AT, reg_fill, 'approved')   # 占满倾诉者名额
+    fx.transition(base, AT, reg_fill2, 'approved')  # 占满总名额 2/2
     fx.transition(base, AT, reg_rev, 'rejected')
     s, r = fx.transition(base, AT, reg_rev, 'approved', reason='纠正误判')
     rep.check('TRAN-18 名额满时回退（rejected→approved）→ 409 CAPACITY_FULL',

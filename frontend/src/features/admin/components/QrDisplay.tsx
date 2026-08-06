@@ -11,7 +11,16 @@ import { Button } from '../../../shared/ui';
  *
  * 实现：qrcode 库本地生成 dataURL（无网络依赖），生成失败时回退为可复制链接。
  */
-export function QrDisplay({ url, caption }: { url: string; caption?: string }) {
+export function QrDisplay({
+  url,
+  caption,
+  downloadName,
+}: {
+  url: string;
+  caption?: string;
+  /** 「下载二维码图片」的文件名（缺省 qrcode.png）。 */
+  downloadName?: string;
+}) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -33,6 +42,16 @@ export function QrDisplay({ url, caption }: { url: string; caption?: string }) {
       cancelled = true;
     };
   }, [url]);
+
+  const download = () => {
+    if (!dataUrl) return;
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = downloadName ?? 'qrcode.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
 
   const copy = async () => {
     try {
@@ -60,6 +79,9 @@ export function QrDisplay({ url, caption }: { url: string; caption?: string }) {
       </p>
       <Button variant="secondary" onClick={copy}>
         {copied ? '已复制' : '复制链接'}
+      </Button>
+      <Button variant="secondary" onClick={download} disabled={!dataUrl}>
+        下载二维码图片
       </Button>
     </div>
   );
