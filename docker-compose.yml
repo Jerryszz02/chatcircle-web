@@ -6,7 +6,8 @@ services:
         PB_VERSION: ${PB_VERSION:-0.28.4}
         VITE_PB_URL: ${VITE_PB_URL:-}
     ports:
-      - '8090:8090'
+      # 只绑回环：对外流量一律走 caddy（HTTPS）；8090 仅保留本机调试入口
+      - '127.0.0.1:8090:8090'
     volumes:
       - pb_data:/pb/pb_data
     restart: unless-stopped
@@ -48,6 +49,28 @@ services:
         target: /deploy/backup.sh
     restart: unless-stopped
 
+  # HTTPS 反代（technical-design §5.7 / deploy/README.md §5）：Caddy 终止 TLS，
+  # 经阿里云 DNS-01 挑战自动签发/续期 Let's Encrypt 证书（未备案期间 80/443 被
+  # 拦截，HTTP-01 不可用，故走 DNS 验证；插件编译见 deploy/caddy.Dockerfile）。
+  # 未备案期间对外端口为 8443，备案后改为 443 并去掉 Caddyfile 站点地址中的端口。
+  caddy:
+    build:
+      context: ./deploy
+      dockerfile: caddy.Dockerfile
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - '8443:8443'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # 证书与 ACME 账户持久化，避免重启重复签发触发 CA 限流
+      - caddy_data:/data
+    environment:
+      ALIYUN_ACCESS_KEY_ID: ${ALIYUN_ACCESS_KEY_ID:?caddy 需要阿里云 AccessKey ID 做 DNS-01 验证（.env 注入，不入库）}
+      ALIYUN_ACCESS_KEY_SECRET: ${ALIYUN_ACCESS_KEY_SECRET:?caddy 需要阿里云 AccessKey Secret 做 DNS-01 验证（.env 注入，不入库）}
+    restart: unless-stopped
+
 configs:
   backup_script:
     file: ./deploy/backup.sh
@@ -60,3 +83,4 @@ configs:
 volumes:
   pb_data:
   backups:
+  caddy_data:

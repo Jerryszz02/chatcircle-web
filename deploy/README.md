@@ -83,9 +83,18 @@ docker compose start app
 
 ## 5. HTTPS 与反向代理
 
-- 生产禁止明文 HTTP（PRD §11.2）：反向代理终止 TLS，转发到 app:8090，全站 HTTPS。
-- **待确认**：TLS 证书签发方式与代理选型（Nginx/Caddy）、`chatcircle.empact.cn` 解析与
-  证书自动化（technical-design「待确认」）；确认前本段仅为占位，不得据此上线。
+- 生产禁止明文 HTTP（PRD §11.2）：compose `caddy` 服务终止 TLS，转发到 app:8090，
+  全站 HTTPS；app 的 8090 只绑 `127.0.0.1` 作本机调试入口。
+- 反代选型 **Caddy**（镜像 `deploy/caddy.Dockerfile` 编译进 `caddy-dns/alidns` 插件），
+  配置 `deploy/Caddyfile`，站点 `chatcircle.empact.cn`。
+- **未备案期间的特殊处置（2026-08 首次部署）**：境内 ECS（上海）80/443 被阿里云拦截，
+  故 ① 对外端口临时用 **8443**（访问 `https://chatcircle.empact.cn:8443`，安全组放行 8443）；
+  ② 证书签发改走 **DNS-01 挑战**（HTTP-01/TLS-ALPN-01 依赖 80/443，不可用），凭据为
+  仅授 `AliyunDNSFullAccess` 的 RAM AccessKey，经 `.env` 的
+  `ALIYUN_ACCESS_KEY_ID/SECRET` 注入。
+- **备案完成后的切换步骤**：Caddyfile 站点地址去掉 `:8443` → compose 端口映射改
+  `443:443`（可加 `80:80` 让 Caddy 自动跳 HTTPS）→ 安全组放行 80/443 →
+  `docker compose up -d` 重建 caddy；证书会自动按新地址重签，无需其他改动。
 
 ## 6. 验证记录（如实声明）
 
