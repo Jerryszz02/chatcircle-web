@@ -46,7 +46,7 @@ def run(ctx):
         'organization_id': org_a, 'activity_code': 'CC_IT_FLOW_01', 'title': '八月倾诉茶话会',
         'description': '测试活动', 'location': '线上',
         'start_time': '2026-08-10 12:00:00Z', 'end_time': '2026-08-10 14:00:00Z',
-        'status': 'draft', 'capacity_total': 10, 'capacity_speaker': 4, 'capacity_listener': 6,
+        'status': 'draft', 'capacity_total': 10, 'capacity_speaker': 5, 'capacity_listener': 5,
         'registration_open': True,
         'registration_start_at': '2026-08-01 00:00:00Z', 'registration_end_at': '2026-12-31 23:59:59Z',
         'checkin_qr_token': 'ckqr_cc_it_flow_01', 'group_tag': '',
@@ -86,6 +86,17 @@ def run(ctx):
               and det.get('registration', {}).get('reason') is None
               and nick.get('required') is True and nick.get('source_type') == 'standard'
               and nick.get('is_sensitive') is False and bool(nick.get('id')))
+
+    # 首页活动广场：公开活动列表（未登录可看，仅 published/closed）
+    s, lst = call(base, 'GET', '/api/cc/public/activities')
+    items = lst.get('activities') or []
+    mine = next((a for a in items if a.get('id') == AID), None)
+    rep.check('D3b 公开列表含已发布活动且报名口径与详情一致',
+              s == 200 and bool(mine)
+              and mine.get('registration', {}).get('open') is True
+              and mine.get('registration', {}).get('remaining_total') == 10
+              and mine.get('title') == '八月倾诉茶话会',
+              lst if s != 200 else mine)
 
     s, r1 = call(base, 'POST', '/api/cc/activities/%s/register' % AID,
                  {'activity_role': 'speaker',

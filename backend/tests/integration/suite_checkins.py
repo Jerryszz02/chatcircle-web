@@ -144,3 +144,14 @@ def run(ctx):
               _visits(base, AT) == 3, _visits(base, AT))
     _, m = call(base, 'GET', '/api/cc/metrics/unique_participants', token=AT)
     rep.check('CHK-23 unique_participants 去重口径 = 3', m.get('value') == 3, m)
+
+    # ---------- 8. 补签候选人名单（按用户名选择） ----------
+    s, r = call(base, 'GET', '/api/cc/activities/%s/checkin/manual-candidates' % act, token=AT)
+    cands = r.get('candidates') or []
+    usernames = sorted(c.get('username') for c in cands)
+    rep.check('CHK-24 候选人 = 已通过报名者（含用户名，不含待审核/已拒绝）',
+              s == 200 and usernames == ['chk_u1', 'chk_u2', 'chk_u3', 'chk_u4'], r)
+    by_name = {c.get('username'): c for c in cands}
+    rep.check('CHK-25 候选人 participant_id 与账号一一对应',
+              s == 200 and by_name.get('chk_u1', {}).get('participant_id') == P1
+              and by_name.get('chk_u4', {}).get('participant_id') == P4, cands)

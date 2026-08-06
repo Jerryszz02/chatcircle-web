@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import PocketBase, { LocalAuthStore } from 'pocketbase';
 import {
   adminAuth,
@@ -10,6 +10,7 @@ import {
   superAuth,
 } from './auth';
 import { AUTH_STORAGE_KEYS, PB_URL, pbClients } from './pocketbase';
+import { stubApi, unstubApi } from '../test/mockApi';
 
 /** 构造一个未过期的假 JWT（结构满足 SDK 的过期解析即可，签名不校验）。 */
 function makeToken(expOffsetSeconds = 3600): string {
@@ -36,6 +37,8 @@ beforeEach(() => {
   localStorage.clear();
   Object.values(pbClients).forEach((c) => c.authStore.clear());
 });
+
+afterEach(unstubApi);
 
 describe('三角色 auth store（technical-design §5.4）', () => {
   it('三角色使用互相隔离的 localStorage 存储 key', () => {
@@ -97,5 +100,42 @@ describe('三角色 auth store（technical-design §5.4）', () => {
     expect(authFor('participant')).toBe(participantAuth);
     expect(authFor('admin')).toBe(adminAuth);
     expect(authFor('super')).toBe(superAuth);
+  });
+
+  it('单会话互斥：参与者登录成功即清除管理与超管会话', async () => {
+    saveSession('admin', 'admin_accounts');
+    saveSession('super', '_superusers');
+    stubApi({
+      'POST /api/cc/auth/participant': {
+        body: {
+          token: makeToken(),
+          record: { id: 'p1', collectionName: 'participant_accounts' },
+        },
+      },
+    });
+    await participantAuth.login('u1', 'password123');
+    expect(participantAuth.isValid()).toBe(true);
+    expect(adminAuth.isValid()).toBe(false);
+    expect(superAuth.isValid()).toBe(false);
+    expect(localStorage.getItem(AUTH_STORAGE_KEYS.admin)).toBeNull();
+    expect(localStorage.getItem(AUTH_STORAGE_KEYS.super)).toBeNull();
+    expect(currentRole()).toBe('participant');
+  });
+
+  it('单会话互斥：管理员登录成功即清除参与者会话', async () => {
+    saveSession('participant', 'participant_accounts');
+    stubApi({
+      'POST /api/collections/admin_accounts/auth-with-password': {
+        body: {
+          token: makeToken(),
+          record: { id: 'a1', collectionName: 'admin_accounts' },
+        },
+      },
+    });
+    await adminAuth.login('admin1', 'password123');
+    expect(adminAuth.isValid()).toBe(true);
+    expect(participantAuth.isValid()).toBe(false);
+    expect(localStorage.getItem(AUTH_STORAGE_KEYS.participant)).toBeNull();
+    expect(currentRole()).toBe('admin');
   });
 });

@@ -56,6 +56,20 @@ export function manualCheckin(input: {
   return apiPost(adminClient(), '/api/cc/checkins/manual', input);
 }
 
+/** 补签候选人（已通过报名者，含用户名；管理员不可读参与者集合，由服务端按本机构活动注入）。 */
+export interface ManualCheckinCandidate {
+  participant_id: string;
+  username: string;
+  activity_role: ActivityRole;
+}
+
+export async function fetchManualCheckinCandidates(
+  activityId: string,
+): Promise<ManualCheckinCandidate[]> {
+  const res = await apiGet(adminClient(), `/api/cc/activities/${activityId}/checkin/manual-candidates`);
+  return ((res as { candidates?: ManualCheckinCandidate[] }).candidates ?? []) as ManualCheckinCandidate[];
+}
+
 /** 撤销签到（reason 必填，保留原记录，写审计）。 */
 export function revokeCheckin(id: string, reason: string): Promise<unknown> {
   return apiPost(adminClient(), `/api/cc/checkins/${id}/revoke`, { reason });

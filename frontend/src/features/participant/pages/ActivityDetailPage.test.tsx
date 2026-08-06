@@ -60,6 +60,8 @@ describe('ActivityDetailPage 公开活动详情', () => {
     expect(screen.getByText(/总名额剩余 5 个/)).toBeInTheDocument();
     expect(screen.getByText(/倾诉者剩余 2 个名额/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '立即报名' })).toHaveAttribute('href', '/a/act1/register');
+    // 顶部提供返回首页入口
+    expect(screen.getByRole('link', { name: '返回首页' })).toHaveAttribute('href', '/');
   });
 
   it('报名未开放：按原因展示（名额已满）', async () => {

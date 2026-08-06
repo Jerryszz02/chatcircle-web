@@ -1,4 +1,82 @@
-/* 移动端优先基础样式：360px 宽无横向滚动（PRD §13） */
+/* ==========================================================================
+ * ChatCircle 设计系统（docs/planning/ui-design.md V1）
+ * 参与者端：温暖社会创新风；管理后台：极简公益科技风。
+ * 全部色值/圆角/阴影/动效经由 CSS 变量引用，组件样式不写死 hex。
+ * 移动端优先基础样式：360px 宽无横向滚动（PRD §13）。
+ * ========================================================================== */
+
+:root {
+  /* ---------- 品牌色（深青绿：信任、成长、社会连接） ---------- */
+  --cc-brand-50: #eff8f5;
+  --cc-brand-100: #d7efe7;
+  --cc-brand-300: #78c6b0;
+  --cc-brand-500: #23866f;
+  --cc-brand-600: #176b5b; /* 主品牌色、主按钮 */
+  --cc-brand-700: #115548; /* 悬停、深色文本强调 */
+  --cc-brand-900: #0c2e29; /* 深色背景 */
+
+  /* ---------- 强调色（暖黄，仅作点缀，不做大面积背景） ---------- */
+  --cc-accent-100: #fff5dc;
+  --cc-accent-500: #f4b942;
+  --cc-accent-700: #c98713;
+
+  /* ---------- 中性色 ---------- */
+  --cc-neutral-0: #ffffff;
+  --cc-neutral-50: #f7f6f2; /* 参与者端页面背景 */
+  --cc-neutral-100: #f0f2f1; /* 后台页面背景 */
+  --cc-neutral-300: #d9e2de; /* 边框与分隔 */
+  --cc-neutral-600: #64736e; /* 次级文字 */
+  --cc-neutral-900: #1d2926; /* 主文字 */
+
+  /* ---------- 状态色（与品牌色区分；各配浅底与深文字变体，对比 ≥4.5:1） ---------- */
+  --cc-success: #3d9b73;
+  --cc-success-bg: #e3f2ea;
+  --cc-success-text: #1f6a4b;
+  --cc-warning: #e9a23b;
+  --cc-warning-bg: #fbf0da;
+  --cc-warning-text: #8a5a10;
+  --cc-error: #d95d5d;
+  --cc-error-bg: #fae8e8;
+  --cc-error-text: #a83a3a;
+  --cc-info: #4a7fc1;
+  --cc-info-bg: #e4edf9;
+  --cc-info-text: #2f5d95;
+
+  /* ---------- 圆角 ---------- */
+  --cc-radius-card-p: 16px; /* 参与者端卡片 */
+  --cc-radius-card-a: 12px; /* 后台卡片 */
+  --cc-radius-control: 10px; /* 控件 */
+  --cc-radius-control-a: 8px; /* 后台控件 */
+  --cc-radius-pill: 999px; /* 标签 */
+
+  /* ---------- 阴影 ---------- */
+  --cc-shadow-1: 0 1px 2px rgba(15, 42, 35, 0.06);
+  --cc-shadow-2: 0 8px 24px rgba(15, 42, 35, 0.08);
+
+  /* ---------- 动效 ---------- */
+  --cc-motion-fast: 140ms;
+  --cc-motion-normal: 200ms;
+
+  /* ---------- 尺寸 ---------- */
+  --cc-sidebar-w: 240px;
+  --cc-content-max: 1280px;
+  --cc-content-max-p: 1120px;
+
+  /* ---------- 字体与排版 ---------- */
+  --cc-font-family:
+    Inter, 'HarmonyOS Sans SC', 'Source Han Sans SC', 'Noto Sans SC', 'PingFang SC',
+    'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  --cc-fs-display: clamp(32px, 5vw, 40px);
+  --cc-fs-page-title: 28px;
+  --cc-fs-section-title: 20px;
+  --cc-fs-card-title: 17px;
+  --cc-fs-body: 15px;
+  --cc-fs-small: 13px;
+  --cc-fs-label: 13px;
+}
+
+/* ---------- 基础 ---------- */
+
 *,
 *::before,
 *::after {
@@ -11,16 +89,19 @@ body {
   padding: 0;
 }
 
+/* 首页等页内锚点跳转使用平滑滚动；用户偏好减少动效时回退为瞬时跳转 */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
 body {
-  font-family:
-    system-ui,
-    -apple-system,
-    'PingFang SC',
-    'Microsoft YaHei',
-    sans-serif;
+  font-family: var(--cc-font-family);
+  font-size: var(--cc-fs-body);
   line-height: 1.5;
-  color: #1a1a1a;
-  background: #ffffff;
+  color: var(--cc-neutral-900);
+  background: var(--cc-neutral-0);
   overflow-x: hidden;
   word-break: break-word;
 }
@@ -33,23 +114,42 @@ svg {
   height: auto;
 }
 
+/* 全局焦点环：2px 品牌色，不移除浏览器焦点（无障碍基线 WCAG 2.2 AA） */
+:focus-visible {
+  outline: 2px solid var(--cc-brand-600);
+  outline-offset: 2px;
+}
+
+/* 尊重减少动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* ---------- 页面布局（PageLayout / PlaceholderPage 共用） ---------- */
 
 .page {
   width: 100%;
-  max-width: 960px;
+  max-width: var(--cc-content-max-p);
   margin: 0 auto;
   padding: 16px;
 }
 
 .page-wide {
-  max-width: 1200px;
+  max-width: var(--cc-content-max);
 }
 
 .page-section {
   margin: 0 0 8px;
-  font-size: 14px;
-  color: #666;
+  font-size: var(--cc-fs-label);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--cc-brand-600);
 }
 
 .page-header {
@@ -63,20 +163,39 @@ svg {
 
 .page-title {
   margin: 0;
-  font-size: 22px;
+  font-size: var(--cc-fs-page-title);
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
-/* ---------- 按钮（Button） ---------- */
+/* 眉题小标签（参考稿手法：小字号加宽字距的区块标签） */
+.cc-label-eyebrow {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--cc-brand-600);
+}
+
+/* ---------- 按钮（Button） ----------
+ * Primary 深青底白字（每视图区最多 1 个）；Secondary 白底品牌边框；
+ * Danger 浅红底红字（不用品牌色、不用实心红）。
+ * 桌面高 40px，移动端主按钮 48px，触控目标 ≥44px。 */
 
 .cc-btn {
-  min-height: 44px; /* 触控目标 ≥44px */
+  min-height: 48px;
   padding: 10px 16px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--cc-radius-control);
   font-size: 16px;
+  font-weight: 600;
   line-height: 1.4;
   cursor: pointer;
   background: none;
+  transition:
+    background-color var(--cc-motion-fast) ease,
+    border-color var(--cc-motion-fast) ease,
+    box-shadow var(--cc-motion-fast) ease;
 }
 
 .cc-btn:disabled {
@@ -84,20 +203,40 @@ svg {
   cursor: not-allowed;
 }
 
+@media (min-width: 768px) {
+  .cc-btn {
+    min-height: 40px;
+    font-size: var(--cc-fs-body);
+  }
+}
+
 .cc-btn-primary {
-  background: #1a56db;
-  color: #fff;
+  background: var(--cc-brand-600);
+  color: var(--cc-neutral-0);
+}
+
+.cc-btn-primary:hover:not(:disabled) {
+  background: var(--cc-brand-700);
 }
 
 .cc-btn-secondary {
-  border-color: #1a56db;
-  color: #1a56db;
-  background: #fff;
+  border-color: var(--cc-brand-600);
+  color: var(--cc-brand-600);
+  background: var(--cc-neutral-0);
+}
+
+.cc-btn-secondary:hover:not(:disabled) {
+  background: var(--cc-brand-50);
 }
 
 .cc-btn-danger {
-  background: #d92d20;
-  color: #fff;
+  background: var(--cc-error-bg);
+  color: var(--cc-error-text);
+}
+
+.cc-btn-danger:hover:not(:disabled) {
+  background: var(--cc-error-bg);
+  border-color: var(--cc-error);
 }
 
 .cc-btn-block {
@@ -114,12 +253,12 @@ svg {
 .cc-label {
   display: block;
   margin-bottom: 4px;
-  font-size: 14px;
+  font-size: var(--cc-fs-label);
   font-weight: 600;
 }
 
 .cc-required {
-  color: #d92d20;
+  color: var(--cc-error);
   margin-left: 2px;
 }
 
@@ -127,39 +266,45 @@ svg {
   width: 100%;
   min-height: 44px;
   padding: 10px 12px;
-  border: 1px solid #ccc;
-  border-radius: 8px;
+  border: 1px solid var(--cc-neutral-300);
+  border-radius: var(--cc-radius-control);
   font-size: 16px; /* 避免 iOS/微信内置浏览器聚焦自动放大 */
+  color: var(--cc-neutral-900);
+  background: var(--cc-neutral-0);
+  transition:
+    border-color var(--cc-motion-fast) ease,
+    box-shadow var(--cc-motion-fast) ease;
 }
 
 .cc-input:focus {
-  outline: 2px solid #1a56db;
+  outline: 2px solid var(--cc-brand-600);
   outline-offset: 1px;
-  border-color: #1a56db;
+  border-color: var(--cc-brand-600);
 }
 
 .cc-field-error .cc-input {
-  border-color: #d92d20;
+  border-color: var(--cc-error);
 }
 
 .cc-hint {
   margin: 4px 0 0;
-  font-size: 13px;
-  color: #666;
+  font-size: var(--cc-fs-small);
+  color: var(--cc-neutral-600);
 }
 
 .cc-error {
   margin: 4px 0 0;
-  font-size: 13px;
-  color: #d92d20;
+  font-size: var(--cc-fs-small);
+  color: var(--cc-error-text);
 }
 
-/* ---------- 卡片（Card） ---------- */
+/* ---------- 卡片（Card）：默认参与者端 16px 圆角；后台在各端样式中降为 12px ---------- */
 
 .cc-card {
-  border: 1px solid #e5e5e5;
-  border-radius: 10px;
-  background: #fff;
+  border: 1px solid var(--cc-neutral-300);
+  border-radius: var(--cc-radius-card-p);
+  background: var(--cc-neutral-0);
+  box-shadow: var(--cc-shadow-1);
   margin-bottom: 16px;
 }
 
@@ -169,12 +314,13 @@ svg {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 16px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--cc-neutral-300);
 }
 
 .cc-card-title {
   margin: 0;
-  font-size: 17px;
+  font-size: var(--cc-fs-card-title);
+  font-weight: 600;
 }
 
 .cc-card-body {
@@ -186,7 +332,7 @@ svg {
 .cc-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(12, 46, 41, 0.45);
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -195,12 +341,12 @@ svg {
 }
 
 .cc-modal {
-  background: #fff;
+  background: var(--cc-neutral-0);
   width: 100%;
   max-width: 480px;
   max-height: 85vh;
   overflow-y: auto;
-  border-radius: 12px 12px 0 0;
+  border-radius: var(--cc-radius-card-p) var(--cc-radius-card-p) 0 0;
   padding-bottom: env(safe-area-inset-bottom);
 }
 
@@ -211,7 +357,7 @@ svg {
   }
 
   .cc-modal {
-    border-radius: 12px;
+    border-radius: var(--cc-radius-card-p);
   }
 }
 
@@ -220,12 +366,13 @@ svg {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--cc-neutral-300);
 }
 
 .cc-modal-title {
   margin: 0;
-  font-size: 17px;
+  font-size: var(--cc-fs-card-title);
+  font-weight: 600;
 }
 
 .cc-modal-close {
@@ -236,7 +383,7 @@ svg {
   font-size: 24px;
   line-height: 1;
   cursor: pointer;
-  color: #666;
+  color: var(--cc-neutral-600);
 }
 
 .cc-modal-body {
@@ -248,10 +395,10 @@ svg {
   gap: 12px;
   justify-content: flex-end;
   padding: 12px 16px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--cc-neutral-300);
 }
 
-/* ---------- Toast ---------- */
+/* ---------- Toast（短暂反馈，最长两行） ---------- */
 
 .cc-toast-viewport {
   position: fixed;
@@ -269,29 +416,67 @@ svg {
 
 .cc-toast {
   padding: 12px 16px;
-  border-radius: 8px;
-  color: #fff;
-  font-size: 14px;
+  border-radius: var(--cc-radius-control);
+  color: var(--cc-neutral-0);
+  font-size: var(--cc-fs-small);
   text-align: center;
-  background: #333;
+  background: var(--cc-neutral-900);
 }
 
 .cc-toast-success {
-  background: #067647;
+  background: var(--cc-success-text);
 }
 
 .cc-toast-error {
-  background: #d92d20;
+  background: var(--cc-error-text);
 }
 
-/* ---------- Loading ---------- */
+/* ---------- 状态标签（五色语义：绿成功/琥珀待处理/红错误/蓝处理中/灰中性） ---------- */
+
+.cc-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: var(--cc-radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.cc-tag-success {
+  background: var(--cc-success-bg);
+  color: var(--cc-success-text);
+}
+
+.cc-tag-warning {
+  background: var(--cc-warning-bg);
+  color: var(--cc-warning-text);
+}
+
+.cc-tag-danger {
+  background: var(--cc-error-bg);
+  color: var(--cc-error-text);
+}
+
+.cc-tag-info {
+  background: var(--cc-info-bg);
+  color: var(--cc-info-text);
+}
+
+.cc-tag-neutral,
+.cc-tag-muted {
+  background: var(--cc-neutral-100);
+  color: var(--cc-neutral-600);
+}
+
+/* ---------- Loading（品牌色圆环，呼应圆形母题） ---------- */
 
 .cc-spinner {
   display: inline-block;
   width: 18px;
   height: 18px;
-  border: 2px solid rgba(0, 0, 0, 0.15);
-  border-top-color: #1a56db;
+  border: 2px solid var(--cc-brand-100);
+  border-top-color: var(--cc-brand-600);
   border-radius: 50%;
   animation: cc-spin 0.8s linear infinite;
 }
@@ -300,8 +485,8 @@ svg {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #666;
-  font-size: 14px;
+  color: var(--cc-neutral-600);
+  font-size: var(--cc-fs-small);
 }
 
 .cc-loading-fullscreen {
@@ -311,7 +496,7 @@ svg {
   justify-content: center;
   gap: 12px;
   min-height: 40vh;
-  color: #666;
+  color: var(--cc-neutral-600);
 }
 
 @keyframes cc-spin {
@@ -320,19 +505,53 @@ svg {
   }
 }
 
-/* ---------- 看板指标（metrics） ---------- */
+/* ---------- 骨架屏（首屏加载，结构与页面一致） ---------- */
+
+.cc-skeleton {
+  border-radius: var(--cc-radius-control);
+  background: linear-gradient(
+    90deg,
+    var(--cc-neutral-100) 25%,
+    var(--cc-neutral-50) 50%,
+    var(--cc-neutral-100) 75%
+  );
+  background-size: 200% 100%;
+  animation: cc-skeleton-shimmer 1.4s ease infinite;
+}
+
+.cc-skeleton-line {
+  height: 14px;
+  margin-bottom: 10px;
+}
+
+.cc-skeleton-card {
+  height: 120px;
+  margin-bottom: 16px;
+  border-radius: var(--cc-radius-card-p);
+}
+
+@keyframes cc-skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* ---------- 看板指标（metrics）：白底轻边框 + 单强调数字，不用彩色大底 ---------- */
 
 .cc-metric {
-  border: 1px solid #e5e5e5;
-  border-radius: 10px;
+  border: 1px solid var(--cc-neutral-300);
+  border-radius: var(--cc-radius-card-a);
   padding: 16px;
-  background: #fff;
+  background: var(--cc-neutral-0);
 }
 
 .cc-metric-title {
   margin: 0 0 8px;
-  font-size: 14px;
-  color: #666;
+  font-size: var(--cc-fs-label);
+  color: var(--cc-neutral-600);
   font-weight: 600;
 }
 
@@ -340,25 +559,27 @@ svg {
   margin: 0;
   font-size: 28px;
   font-weight: 700;
+  color: var(--cc-brand-600);
+  font-variant-numeric: tabular-nums;
 }
 
 .cc-metric-unit {
   margin-left: 4px;
-  font-size: 14px;
+  font-size: var(--cc-fs-small);
   font-weight: 400;
-  color: #666;
+  color: var(--cc-neutral-600);
 }
 
 .cc-metric-note {
   margin: 8px 0 0;
   font-size: 12px;
-  color: #888;
+  color: var(--cc-neutral-600);
 }
 
 .cc-metric-empty {
   margin: 0;
-  color: #888;
-  font-size: 14px;
+  color: var(--cc-neutral-600);
+  font-size: var(--cc-fs-small);
 }
 
 .cc-metric-trend {
@@ -371,8 +592,8 @@ svg {
   display: flex;
   justify-content: space-between;
   padding: 4px 0;
-  border-bottom: 1px dashed #eee;
-  font-size: 14px;
+  border-bottom: 1px dashed var(--cc-neutral-300);
+  font-size: var(--cc-fs-small);
 }
 
 .cc-metric-split {
@@ -382,25 +603,26 @@ svg {
 }
 
 .cc-metric-split dt {
-  font-size: 13px;
-  color: #666;
+  font-size: var(--cc-fs-small);
+  color: var(--cc-neutral-600);
 }
 
 .cc-metric-split dd {
   margin: 0;
   font-size: 22px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .cc-metric-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--cc-fs-small);
 }
 
 .cc-metric-table th,
 .cc-metric-table td {
   text-align: left;
   padding: 6px 8px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--cc-neutral-300);
 }

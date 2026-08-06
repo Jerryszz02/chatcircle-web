@@ -208,33 +208,23 @@ describe('名额校验（FR-ACT-006/007）', () => {
     expect(isRoleFull({ total: 2, speaker: 0, listener: 3 }, 'listener')).toBe(false);
   });
 
-  it('名额下限校验：不得低于当前已通过人数，错误文案含已通过数', () => {
-    const counts: ApprovedCounts = { total: 6, speaker: 4, listener: 2 };
-    const errors = validateCapacityEdit(
-      { capacity_total: 5, capacity_speaker: 3, capacity_listener: 2 },
-      counts,
-    );
-    expect(errors.capacity_total).toContain('6');
-    expect(errors.capacity_speaker).toContain('4');
-    // capacity_listener=2 等于已通过数，合法
-    expect(errors.capacity_listener).toBeUndefined();
+  it('总名额须为正偶数（角色名额自动对半分配）', () => {
+    const zero: ApprovedCounts = { total: 0, speaker: 0, listener: 0 };
+    for (const bad of [0, -2, 3, 1.5, Number('')]) {
+      expect(validateCapacityEdit(bad, zero).capacity_total).toContain('偶数');
+    }
+    expect(validateCapacityEdit(2, zero)).toEqual({});
+    expect(validateCapacityEdit(10, zero)).toEqual({});
   });
 
-  it('名额下限校验：非负整数要求与全通过场景', () => {
-    const counts: ApprovedCounts = { total: 1, speaker: 1, listener: 0 };
-    const errors = validateCapacityEdit(
-      { capacity_total: -1, capacity_speaker: 1.5, capacity_listener: 2 },
-      counts,
-    );
-    expect(errors.capacity_total).toContain('整数');
-    expect(errors.capacity_speaker).toContain('整数');
-    expect(errors.capacity_listener).toBeUndefined();
-    expect(
-      validateCapacityEdit(
-        { capacity_total: 10, capacity_speaker: 5, capacity_listener: 5 },
-        counts,
-      ),
-    ).toEqual({});
+  it('名额下限校验：总名额不得低于已通过总数，对半后不得低于单一角色已通过数', () => {
+    const counts: ApprovedCounts = { total: 6, speaker: 4, listener: 2 };
+    // 总下限：4 < 已通过 6
+    expect(validateCapacityEdit(4, counts).capacity_total).toContain('6');
+    // 对半下限：6 ≥ 6 但对半 3 < 倾诉者已通过 4
+    expect(validateCapacityEdit(6, counts).capacity_total).toContain('4');
+    // 对半 4 恰好等于单一角色已通过数，合法
+    expect(validateCapacityEdit(8, counts)).toEqual({});
   });
 });
 

@@ -95,6 +95,9 @@ describe('MePage 我的中心', () => {
     stubApi({ 'GET /api/cc/me/overview': { body: overviewBody() } });
     renderMe();
 
+    // 顶部提供返回首页入口
+    expect(screen.getByRole('link', { name: '返回首页' })).toHaveAttribute('href', '/');
+
     // 报名列表：状态与角色
     expect(await screen.findByText('八月光影茶话会')).toBeInTheDocument();
     expect(screen.getByText('待审核')).toBeInTheDocument();

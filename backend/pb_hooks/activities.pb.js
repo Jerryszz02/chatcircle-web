@@ -1,6 +1,8 @@
 // activities.pb.js — 活动公开详情与活动生命周期 hooks
 //
 // 端点契约（technical-design §5.5、database-design §5.5，统一端点契约）：
+// - GET  /api/cc/public/activities                     公开活动列表（未登录可看；首页活动广场，
+//     仅 published/closed 可见，按开始时间倒序，含报名开放状态与剩余名额口径）
 // - GET  /api/cc/public/activities/{id}                公开活动详情（未登录可看，FR-ACT-003；
 //     仅 published/closed 可见，含报名开放状态（open + 未开放 reason）与剩余名额口径、
 //     活动级生效报名字段 registration_fields（form_config_json 数组版解析）；下架后公开入口不可访问）
@@ -16,6 +18,74 @@
 // JSVM 各 hooks 文件顶层声明在请求处理时不可见（无跨文件全局共享、无 ES module），
 // 每个 handler 只能使用自身闭包内的标识符与 JSVM 内建全局（$app / ApiError / Record 等）。
 // 各 handler 顶部的共享函数与 lib/*.pb.js 契约同源（由生成器按引用自动内联，勿手工改副本）。
+
+// ---------------------------------------------------------------------------
+// GET /api/cc/public/activities — 公开活动列表（首页活动广场）
+// 无需登录；仅 published/closed 可见（其余状态不下发，PRD §4.3），按开始时间倒序。
+// ---------------------------------------------------------------------------
+routerAdd('GET', '/api/cc/public/activities', (e) => {
+  try {
+  const ccCount = (app, collection, filter, params) => app.findRecordsByFilter(collection, filter, '', 5000, 0, params || {}).length;
+  // 活动当前已通过计数（总/按角色）；事务内传 txApp 即同事务读
+  const ccApprovedCount = (app, activityId, role) => role
+    ? ccCount(app, 'registrations', "activity_id = {:a} && status = 'approved' && activity_role = {:r}", { a: activityId, r: role })
+    : ccCount(app, 'registrations', "activity_id = {:a} && status = 'approved'", { a: activityId });
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  const ccNow = () => new Date().toISOString().replace('T', ' ').slice(0, 23) + 'Z';
+
+  const now = ccNow();
+  const records = $app.findRecordsByFilter(
+    'activities',
+    "status = 'published' || status = 'closed'",
+    '-start_time',
+    100,
+    0,
+  );
+
+  const activities = [];
+  for (const activity of records) {
+    const status = activity.get('status');
+    const approvedTotal = ccApprovedCount($app, activity.id, null);
+    const regStart = String(activity.get('registration_start_at') || '');
+    const regEnd = String(activity.get('registration_end_at') || '');
+    const withinWindow = (!regStart || now >= regStart) && (!regEnd || now <= regEnd);
+    const accepting = status === 'published' && !!activity.get('registration_open') &&
+      withinWindow && approvedTotal < activity.get('capacity_total');
+
+    // 未开放原因口径与详情端点一致：closed / not_started / ended / full
+    let closedReason = null;
+    if (status !== 'published' || !activity.get('registration_open')) closedReason = 'closed';
+    else if (regStart && now < regStart) closedReason = 'not_started';
+    else if (regEnd && now > regEnd) closedReason = 'ended';
+    else if (approvedTotal >= activity.get('capacity_total')) closedReason = 'full';
+
+    activities.push({
+      id: activity.id,
+      title: activity.get('title'),
+      activity_code: activity.get('activity_code'),
+      description: activity.get('description'),
+      location: activity.get('location'),
+      start_time: activity.get('start_time'),
+      end_time: activity.get('end_time'),
+      status: status,
+      capacity_total: activity.get('capacity_total'),
+      registration: {
+        open: accepting,
+        reason: accepting ? null : closedReason,
+        remaining_total: Math.max(0, activity.get('capacity_total') - approvedTotal),
+      },
+    });
+  }
+
+  return e.json(200, { activities: activities });
+  } catch (err) {
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
+  }
+});
 
 // ---------------------------------------------------------------------------
 // GET /api/cc/public/activities/{id} — 公开活动详情（FR-ACT-003）
@@ -814,10 +884,27 @@ routerAdd('POST', '/api/cc/activities/{id}/unpublish', (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// 名额修改下限校验（FR-ACT-006、AC-08）：capacity_* 不得低于当前已通过人数。
-// 挂在 activities 模型更新钩子上，API 更新与程序化更新一视同仁；
-// 生命周期端点只改状态不动名额，天然通过。
+// 名额写入规则（FR-ACT-006、AC-08 + 对半派生不变量）：
+// - capacity_total 须为正偶数；capacity_speaker/listener 由总名额对半派生，
+//   显式传入与对半结果不一致即 400（不可单独设置）；
+// - 更新时总名额（及其对半）不得低于当前已通过人数；
+// - 存量不一致数据在任何更新落库时被顺带校正为对半值。
+// 挂在 activities 模型钩子上，API 写入与程序化更新一视同仁。
+// ⚠️ 自包含模式（见文件头）：两个钩子各自内联实现，不共享顶层声明。
 // ---------------------------------------------------------------------------
+onRecordCreate((e) => {
+  const record = e.record;
+  const total = Number(record.get('capacity_total'));
+  if (!Number.isInteger(total) || total <= 0 || total % 2 !== 0) {
+    throw new ApiError(400, '总名额须为正偶数（倾诉者/聆听者名额自动对半分配）');
+  }
+  const half = total / 2;
+  if (Number(record.get('capacity_speaker')) !== half || Number(record.get('capacity_listener')) !== half) {
+    throw new ApiError(400, '角色名额由总名额对半派生（各 ' + half + ' 人），不可单独设置');
+  }
+  e.next();
+}, 'activities');
+
 onRecordUpdate((e) => {
   const ccCount = (app, collection, filter, params) => app.findRecordsByFilter(collection, filter, '', 5000, 0, params || {}).length;
   // 活动当前已通过计数（总/按角色）；事务内传 txApp 即同事务读
@@ -826,21 +913,34 @@ onRecordUpdate((e) => {
     : ccCount(app, 'registrations', "activity_id = {:a} && status = 'approved'", { a: activityId });
   const record = e.record;
   const original = record.original();
+  const total = Number(record.get('capacity_total'));
+  if (!Number.isInteger(total) || total <= 0 || total % 2 !== 0) {
+    throw new ApiError(400, '总名额须为正偶数（倾诉者/聆听者名额自动对半分配）');
+  }
+  const half = total / 2;
+  if (Number(record.get('capacity_speaker')) !== half || Number(record.get('capacity_listener')) !== half) {
+    const roleFieldChanged = (field) => original && original.id && Number(record.get(field)) !== Number(original.get(field));
+    if (roleFieldChanged('capacity_speaker') || roleFieldChanged('capacity_listener')) {
+      // 模型钩子内抛 ApiError（消息可读；第三参数 data 会被转换，不携带）
+      throw new ApiError(400, '角色名额由总名额对半派生（各 ' + half + ' 人），不可单独设置');
+    }
+    // 存量不一致数据：本次未显式改角色名额，顺带校正为对半值
+    record.set('capacity_speaker', half);
+    record.set('capacity_listener', half);
+  }
   if (original && original.id) {
     const checks = [
-      ['capacity_total', null],
-      ['capacity_speaker', 'speaker'],
-      ['capacity_listener', 'listener'],
+      [total, null, '总名额'],
+      [half, 'speaker', '倾诉者名额（总名额对半）'],
+      [half, 'listener', '聆听者名额（总名额对半）'],
     ];
-    for (const pair of checks) {
-      const field = pair[0];
-      const role = pair[1];
-      const newVal = record.get(field);
-      if (newVal === original.get(field)) continue;
+    for (const check of checks) {
+      const value = check[0];
+      const role = check[1];
+      const label = check[2];
       const approved = ccApprovedCount(e.app, record.id, role);
-      if (newVal < approved) {
-        // 模型钩子内抛 ApiError（消息可读；第三参数 data 会被转换，不携带）
-        throw new ApiError(400, '名额不可低于当前已通过人数（' + field + ' 当前已通过 ' + approved + ' 人）');
+      if (value < approved) {
+        throw new ApiError(400, label + '不可低于当前已通过人数（当前已通过 ' + approved + ' 人）');
       }
     }
   }

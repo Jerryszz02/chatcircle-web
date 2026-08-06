@@ -5,6 +5,10 @@
  * 模板具体题目内容 PRD 未写死（technical-design 待确认 #5），此处按能力层实现：
  * 防御式解析 schema_json.questions 数组用于版本题目预览与锁定题标识展示，
  * 解析不到结构时页面降级为只显示版本元信息。
+ *
+ * 可视化模板题目编辑器（components/TemplateSchemaEditor）的草稿模型已下沉到
+ * shared/survey/questionDrafts（与机构管理端 SurveyQuestionEditor 共用），
+ * 此处原样 re-export，本文件 import 方无需改动。
  */
 
 /** 版本题目预览视图（从 schema_json 提取）。 */
@@ -54,3 +58,19 @@ export function validateSchemaJsonText(text: string): string | null {
     return 'JSON 格式不合法，请检查后再提交';
   }
 }
+
+// ---------------------------------------------------------------------------
+// 可视化编辑器草稿模型（TemplateSchemaEditor）：已下沉 shared，原样 re-export
+// ---------------------------------------------------------------------------
+
+export {
+  CHOICE_QUESTION_TYPES,
+  TEMPLATE_QUESTION_TYPES,
+  draftsFromSchema,
+  emptyQuestionDraft,
+  newDraftKey,
+  schemaFromDrafts,
+  validateQuestionDrafts,
+  type TemplateOptionDraft,
+  type TemplateQuestionDraft,
+} from '../../../shared/survey/questionDrafts';

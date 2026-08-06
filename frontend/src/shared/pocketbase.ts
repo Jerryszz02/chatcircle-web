@@ -1,4 +1,5 @@
 import PocketBase, { LocalAuthStore } from 'pocketbase';
+import type { SendOptions } from 'pocketbase';
 
 /**
  * PocketBase 后端地址。
@@ -18,8 +19,9 @@ export type Role = 'participant' | 'admin' | 'super';
 
 /**
  * 各角色会话在 localStorage 中的存储 key。
- * 三类会话互不通用（PRD §3.2、technical-design §5.3），因此按角色隔离存储，
- * 同一浏览器可同时持有三种会话而互不覆盖。
+ * 三类会话互不通用（PRD §3.2、technical-design §5.3），因此按角色隔离存储；
+ * 产品层要求单会话互斥——登录任一角色成功即清除其它角色会话（见 shared/auth.ts），
+ * 退出当前账号后才能登录另一个身份。
  */
 export const AUTH_STORAGE_KEYS: Record<Role, string> = {
   participant: 'cc_participant_auth',
@@ -34,8 +36,40 @@ export const ROLE_COLLECTIONS: Record<Role, string> = {
   super: '_superusers',
 };
 
+/**
+ * 剔除 send options 中值为 undefined 的字段（含 options.query 内的字段）。
+ *
+ * pocketbase SDK 0.21.x 不会跳过 undefined 查询参数，会把 filter: undefined
+ * 序列化成字符串 "undefined" 发出（如 filter=undefined），服务端解析 filter
+ * 报 400（invalid or incomplete filter expression）。各页面的筛选构造器
+ * （如 buildActivityFilter/buildAuditFilter）在无筛选时合法地返回 undefined，
+ * 因此统一在这里兜底，一处修复全局生效。
+ */
+function stripUndefinedParams(options: SendOptions): SendOptions {
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(options)) {
+    if (value === undefined) continue;
+    if (key === 'query' && value && typeof value === 'object') {
+      cleaned.query = Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined),
+      );
+      continue;
+    }
+    cleaned[key] = value;
+  }
+  return cleaned as SendOptions;
+}
+
 function createClient(role: Role): PocketBase {
-  return new PocketBase(PB_URL, new LocalAuthStore(AUTH_STORAGE_KEYS[role]));
+  const client = new PocketBase(PB_URL, new LocalAuthStore(AUTH_STORAGE_KEYS[role]));
+  // 关闭 SDK 默认的 autoCancellation：React StrictMode / 组件重渲染下同一 URL 的
+  // 重复请求会互相取消，取消被 UI 误报为「请求已取消」失败（看板失败计数同理）。
+  // 各页面请求均为幂等 GET，重复发出无副作用。
+  client.autoCancellation(false);
+  const rawSend = client.send.bind(client);
+  client.send = <T,>(path: string, options: SendOptions = {}): Promise<T> =>
+    rawSend<T>(path, stripUndefinedParams(options));
+  return client;
 }
 
 /**

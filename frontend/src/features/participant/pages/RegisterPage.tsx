@@ -105,7 +105,11 @@ export function RegisterPage() {
   }, [authed, registrationOpen, activityId, authVersion]);
 
   return (
-    <PageLayout section="参与者端" title="活动报名">
+    <PageLayout section="参与者端" title="活动报名" className="ccp-root">
+      <div className="ccp-auth-mark" aria-hidden="true">
+        <span />
+        <span />
+      </div>
       {loading ? <Loading fullscreen /> : null}
 
       {!loading && error ? (

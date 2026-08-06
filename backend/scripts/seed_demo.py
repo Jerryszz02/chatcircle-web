@@ -220,7 +220,7 @@ def main():
             'title': '演示·倾诉茶话会', 'description': '本地开发演示活动（种子脚本生成）',
             'location': '线上', 'start_time': '2026-08-10 12:00:00Z',
             'end_time': '2026-08-10 14:00:00Z', 'status': 'draft',
-            'capacity_total': 20, 'capacity_speaker': 8, 'capacity_listener': 12,
+            'capacity_total': 20, 'capacity_speaker': 10, 'capacity_listener': 10,
             'registration_open': True,
             'registration_start_at': '2026-01-01 00:00:00Z',
             'registration_end_at': '2027-12-31 23:59:59Z',

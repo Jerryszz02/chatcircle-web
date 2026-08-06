@@ -57,7 +57,7 @@ export function CheckinPage() {
   }, [attempt]);
 
   return (
-    <PageLayout section="参与者端" title="扫码签到">
+    <PageLayout section="参与者端" title="扫码签到" className="ccp-root">
       {phase.kind === 'loading' ? <Loading fullscreen label="正在签到…" /> : null}
 
       {phase.kind === 'success' ? (

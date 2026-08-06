@@ -6,6 +6,7 @@ import type {
   ExportScope,
   ExportStatus,
   InviteStatus,
+  QuestionType,
 } from '../../../shared/api/types';
 
 /**
@@ -64,4 +65,15 @@ export const EXPORT_SCOPE_TYPE_LABELS: Record<ExportScope['type'], string> = {
 export const ACTIVITY_ROLE_LABELS: Record<'speaker' | 'listener', string> = {
   speaker: '倾诉者',
   listener: '聆听者',
+};
+
+/** 问卷题型标签（FR-SUR-007 七题型，模板编辑器/版本预览用）。 */
+export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
+  info: '说明',
+  single_choice: '单选',
+  multi_choice: '多选',
+  scale_1_5: '1-5 量表',
+  scale_0_10: '0-10 量表',
+  text_short: '单行文本',
+  text_long: '多行文本',
 };

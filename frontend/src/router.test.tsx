@@ -1,8 +1,9 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AppRoutes } from './router';
 import { pbClients, type Role } from './shared/pocketbase';
+import { stubApi, unstubApi } from './test/mockApi';
 
 function makeToken(): string {
   const b64 = (obj: unknown) =>
@@ -35,13 +36,19 @@ function renderAt(path: string) {
 beforeEach(() => {
   localStorage.clear();
   Object.values(pbClients).forEach((c) => c.authStore.clear());
+  // 首页会拉取公开活动列表，统一兜底为空列表，避免真实网络请求。
+  stubApi({ 'GET /api/cc/public/activities': { body: { activities: [] } } });
+});
+
+afterEach(() => {
+  unstubApi();
 });
 
 describe('路由分区（公开页）', () => {
-  it('/ 渲染参与者端占位页', () => {
+  it('/ 渲染首页（活动广场，未登录可看）', () => {
     renderAt('/');
     expect(screen.getByText('参与者端')).toBeInTheDocument();
-    expect(screen.getByText('开发中')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Chat Circles' })).toBeInTheDocument();
   });
 
   it('/a/:activityId 公开活动详情未登录可看（FR-ACT-003）', () => {
@@ -99,5 +106,19 @@ describe('路由守卫（technical-design §5.3）', () => {
     saveSession('participant');
     renderAt('/admin/activities');
     expect(screen.getByText('403 无权访问')).toBeInTheDocument();
+  });
+
+  it('单会话互斥：参与者会话访问 /admin/login、/super/login：回首页', () => {
+    saveSession('participant');
+    renderAt('/admin/login');
+    expect(screen.queryByRole('heading', { name: '管理员登录' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Chat Circles' })).toBeInTheDocument();
+  });
+
+  it('单会话互斥：机构管理员会话访问 /login、/super/login：回首页或本端面板', () => {
+    saveSession('admin');
+    renderAt('/super/login');
+    expect(screen.queryByRole('heading', { name: '超级管理员登录' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Chat Circles' })).toBeInTheDocument();
   });
 });

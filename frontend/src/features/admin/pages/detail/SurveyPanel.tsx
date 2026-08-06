@@ -3,7 +3,6 @@ import type {
   ActivityRecord,
   ActivitySurveyRecord,
   AnswerRecord,
-  QuestionType,
   RoleScope,
   SubmissionRecord,
   SurveyQuestionRecord,
@@ -14,6 +13,7 @@ import { Button, Card, Input, Loading, Modal } from '../../../../shared/ui';
 import { QrDisplay } from '../../components/QrDisplay';
 import { ReasonModal } from '../../components/ReasonModal';
 import { StatusTag, type StatusTone } from '../../components/StatusTag';
+import { SurveyQuestionEditor } from '../../components/SurveyQuestionEditor';
 import {
   adminCollections,
   createActivitySurvey,
@@ -21,14 +21,13 @@ import {
   voidSubmission,
 } from '../../lib/api';
 import {
-  QUESTION_TYPE_LABELS,
   ROLE_SCOPE_LABELS,
-  SOURCE_TYPE_LABELS,
   SUBMISSION_STATUS_LABELS,
   SURVEY_STATUS_LABELS,
 } from '../../lib/labels';
 import { formatDateTime, shortId } from '../../lib/format';
 import { ADMIN_SURVEY_ACTION_LABELS, availableSurveyActions } from '../../lib/rules';
+import { applyQuestionChanges } from '../../lib/surveyQuestionApply';
 
 const STATUS_TONES: Record<ActivitySurveyRecord['status'], StatusTone> = {
   draft: 'neutral',
@@ -43,8 +42,10 @@ const STATUS_TONES: Record<ActivitySurveyRecord['status'], StatusTone> = {
  *
  * - 从模板复制创建：POST /api/cc/activities/:id/surveys（取模板当前版本物化题目，
  *   创建后不随模板升级，AC-13）；
- * - 题目编辑走 survey_questions 集合 API：锁定题只读展示（FR-SUR-001），
- *   自定义题可新增/编辑/排序（必填 + 敏感标记，FR-SUR-002、§8.3）；
+ * - 题目编辑复用超管端可视化编辑器（components/SurveyQuestionEditor，草稿模型见
+ *   shared/survey/questionDrafts）：锁定题只读且为排序锚点、不可跨过（FR-SUR-001），
+ *   自定义题可新增/编辑/排序（必填 + 敏感标记，FR-SUR-002、§8.3），
+ *   落库经 lib/surveyQuestionApply（创建/更新/槽位重排）；
  *   V1 无删除入口（无硬删除 FR-AUD-001，survey_questions.deleteRule 关闭）；
  * - 开放/结束手动控制（PRD §8.2），独立链接 /survey/:qrToken 固定；
  * - 答卷作废 reason 必填 + 审计（FR-SUR-010），作废记录保留且统计/导出排除。
@@ -289,12 +290,11 @@ function SurveyCard({
   );
 }
 
-/** 题目管理：锁定题只读；自定义题新增/编辑/排序（必填 + 敏感标记）。 */
+/** 题目管理：可视化编辑器；锁定题只读且为排序锚点，自定义题新增/编辑/排序。 */
 function QuestionManager({ survey }: { survey: ActivitySurveyRecord }) {
   const [questions, setQuestions] = useState<SurveyQuestionRecord[] | null>(null);
   const [error, setError] = useState('');
-  const [editing, setEditing] = useState<SurveyQuestionRecord | null>(null);
-  const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setError('');
@@ -313,271 +313,32 @@ function QuestionManager({ survey }: { survey: ActivitySurveyRecord }) {
     void load();
   }, [load]);
 
-  /** 上移/下移：与相邻题交换 order_index（两次集合更新，服务端无事务需求——排序非关键不变量）。 */
-  const move = async (index: number, direction: -1 | 1) => {
-    if (!questions) return;
-    const target = index + direction;
-    if (target < 0 || target >= questions.length) return;
-    const a = questions[index];
-    const b = questions[target];
-    try {
-      const cc = adminCollections().surveyQuestions;
-      await cc.update(a.id, { order_index: b.order_index });
-      await cc.update(b.id, { order_index: a.order_index });
-      await load();
-    } catch (err) {
-      setError(normalizeApiError(err).message);
-    }
-  };
-
   return (
     <div className="admin-section">
-      <div className="admin-row-actions">
-        <Button variant="secondary" onClick={() => setShowAdd(true)}>
-          新增自定义题
-        </Button>
-      </div>
       {error ? (
         <p className="cc-error" role="alert">
           {error}
         </p>
       ) : null}
       {questions === null && !error ? <Loading label="题目加载中…" /> : null}
-      {questions && questions.length === 0 ? <p className="admin-empty">暂无题目。</p> : null}
-      {questions && questions.length > 0 ? (
-        <div className="admin-table-wrap">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>题目</th>
-                <th>题型</th>
-                <th>来源</th>
-                <th>标记</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {questions.map((q, index) => (
-                <tr key={q.id}>
-                  <td>{index + 1}</td>
-                  <td>
-                    {q.title}
-                    <br />
-                    <code className="admin-muted">{q.question_code}</code>
-                  </td>
-                  <td>{QUESTION_TYPE_LABELS[q.question_type]}</td>
-                  <td>
-                    {SOURCE_TYPE_LABELS[q.source_type]}
-                    {q.locked ? (
-                      <>
-                        {' '}
-                        <StatusTag label="锁定" tone="warning" />
-                      </>
-                    ) : null}
-                  </td>
-                  <td>
-                    {q.required ? <StatusTag label="必填" tone="info" /> : null}{' '}
-                    {q.is_sensitive ? <StatusTag label="敏感" tone="danger" /> : null}
-                  </td>
-                  <td>
-                    <div className="admin-row-actions">
-                      <Button variant="secondary" disabled={index === 0} onClick={() => void move(index, -1)}>
-                        上移
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        disabled={index === questions.length - 1}
-                        onClick={() => void move(index, 1)}
-                      >
-                        下移
-                      </Button>
-                      {!q.locked ? (
-                        <Button variant="secondary" onClick={() => setEditing(q)}>
-                          编辑
-                        </Button>
-                      ) : (
-                        <span className="admin-muted">只读</span>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {questions !== null ? (
+        <SurveyQuestionEditor
+          survey={survey}
+          questions={questions}
+          saving={saving}
+          onSubmit={async (drafts) => {
+            // 错误不在此捕获：try/finally 只复位 saving，错误原样抛给编辑器内联展示
+            setSaving(true);
+            try {
+              await applyQuestionChanges(survey.id, drafts, questions);
+              await load();
+            } finally {
+              setSaving(false);
+            }
+          }}
+        />
       ) : null}
-
-      <QuestionFormModal
-        open={showAdd}
-        title="新增自定义题"
-        survey={survey}
-        nextOrderIndex={questions ? Math.max(0, ...questions.map((q) => q.order_index)) + 1 : 1}
-        onClose={() => setShowAdd(false)}
-        onSaved={() => {
-          setShowAdd(false);
-          void load();
-        }}
-      />
-      <QuestionFormModal
-        open={editing !== null}
-        title="编辑自定义题"
-        survey={survey}
-        initial={editing ?? undefined}
-        onClose={() => setEditing(null)}
-        onSaved={() => {
-          setEditing(null);
-          void load();
-        }}
-      />
     </div>
-  );
-}
-
-/** 自定义题新增/编辑表单（锁定题不可进入编辑；question_code 生成后稳定不可改）。 */
-function QuestionFormModal({
-  open,
-  title,
-  survey,
-  initial,
-  nextOrderIndex,
-  onClose,
-  onSaved,
-}: {
-  open: boolean;
-  title: string;
-  survey: ActivitySurveyRecord;
-  initial?: SurveyQuestionRecord;
-  nextOrderIndex?: number;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [questionTitle, setQuestionTitle] = useState('');
-  const [questionType, setQuestionType] = useState<QuestionType>('text_short');
-  const [required, setRequired] = useState(false);
-  const [sensitive, setSensitive] = useState(false);
-  const [options, setOptions] = useState('');
-  const [error, setError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    setQuestionTitle(initial?.title ?? '');
-    setQuestionType(initial?.question_type ?? 'text_short');
-    setRequired(initial?.required ?? false);
-    setSensitive(initial?.is_sensitive ?? false);
-    setOptions(optionsJsonToText(initial?.options_json));
-    setError('');
-  }, [open, initial]);
-
-  const isChoice = questionType === 'single_choice' || questionType === 'multi_choice';
-
-  const submit = async () => {
-    if (!questionTitle.trim()) {
-      setError('请输入题干');
-      return;
-    }
-    if (isChoice && !parseOptions(options)) {
-      setError('选择题需填写选项（每行一条）');
-      return;
-    }
-    setSubmitting(true);
-    setError('');
-    try {
-      const cc = adminCollections().surveyQuestions;
-      if (initial) {
-        await cc.update(initial.id, {
-          title: questionTitle.trim(),
-          required,
-          is_sensitive: sensitive,
-          options_json: parseOptions(options),
-        });
-      } else {
-        await cc.create({
-          activity_survey_id: survey.id,
-          question_code: `CUS_${Date.now().toString(36).toUpperCase()}`,
-          source_type: 'custom',
-          question_type: questionType,
-          title: questionTitle.trim(),
-          required,
-          is_sensitive: sensitive,
-          options_json: parseOptions(options),
-          locked: false,
-          order_index: nextOrderIndex ?? 1,
-        });
-      }
-      onSaved();
-    } catch (err) {
-      setError(normalizeApiError(err).message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <Modal
-      open={open}
-      title={title}
-      onClose={onClose}
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose} disabled={submitting}>
-            取消
-          </Button>
-          <Button onClick={() => void submit()} loading={submitting}>
-            保存
-          </Button>
-        </>
-      }
-    >
-      <Input label="题干" value={questionTitle} onChange={(e) => setQuestionTitle(e.target.value)} required />
-      {initial ? null : (
-        <div className="cc-field">
-          <label className="cc-label" htmlFor="question-type">
-            题型
-          </label>
-          <select
-            id="question-type"
-            className="admin-select"
-            value={questionType}
-            onChange={(e) => setQuestionType(e.target.value as QuestionType)}
-          >
-            {Object.entries(QUESTION_TYPE_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-      {isChoice ? (
-        <div className="cc-field">
-          <label className="cc-label" htmlFor="question-options">
-            选项（每行一条，格式：机器值,显示文本 或仅显示文本）
-          </label>
-          <textarea
-            id="question-options"
-            className="cc-input cc-textarea"
-            rows={3}
-            value={options}
-            onChange={(e) => setOptions(e.target.value)}
-          />
-        </div>
-      ) : null}
-      <label className="admin-checkbox-row">
-        <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />
-        必填
-      </label>
-      <label className="admin-checkbox-row">
-        <input type="checkbox" checked={sensitive} onChange={(e) => setSensitive(e.target.checked)} />
-        标记为敏感题目（普通导出过滤，FR-SUR-012）
-      </label>
-      {error ? (
-        <p className="cc-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </Modal>
   );
 }
 
@@ -795,30 +556,4 @@ function formatAnswer(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
-}
-
-function parseOptions(text: string): { options: { value: string; label: string }[] } | undefined {
-  const options = text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [value, label] = line.split(/[,，]/).map((s) => s.trim());
-      return { value: value || '', label: label || value || '' };
-    })
-    .filter((o) => o.value !== '');
-  return options.length > 0 ? { options } : undefined;
-}
-
-function optionsJsonToText(optionsJson: unknown): string {
-  if (
-    optionsJson &&
-    typeof optionsJson === 'object' &&
-    Array.isArray((optionsJson as { options?: unknown }).options)
-  ) {
-    return (optionsJson as { options: { value: string; label: string }[] }).options
-      .map((o) => `${o.value},${o.label}`)
-      .join('\n');
-  }
-  return '';
 }

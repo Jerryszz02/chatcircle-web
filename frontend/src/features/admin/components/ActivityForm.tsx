@@ -28,8 +28,8 @@ import { StatusTag } from './StatusTag';
  *
  * - 创建走 activities 集合 API（createRule 限定本机构），必需的 checkin_qr_token
  *   由前端生成随机不可猜值（PRD §10.3 同类要求）；初始状态固定 draft。
- * - 名额三字段（capacity_total/speaker/listener）编辑时按 FR-ACT-006 做
- *   「不得低于当前已通过人数」的前端提示（服务端 hooks 硬校验兜底）。
+ * - 名额只填总名额（正偶数），倾诉者/聆听者名额由总名额对半派生；
+ *   编辑时按 FR-ACT-006 做「不得低于当前已通过人数」的前端提示（服务端 hooks 硬校验兜底）。
  * - 报名表配置：标准字段启用/必填 + 机构自定义字段新增（含敏感标记，security-privacy §4.2）；
  *   配置存 activities.form_config_json（database-design D-3），结构见 lib/rules.parseFormConfig。
  * - group_tag 为预留分组字段（PRD §4.1：V1 不消费，仅录入保留）。
@@ -76,8 +76,6 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
   const [startTime, setStartTime] = useState(toInputDateTime(initial?.start_time));
   const [endTime, setEndTime] = useState(toInputDateTime(initial?.end_time));
   const [capacityTotal, setCapacityTotal] = useState(String(initial?.capacity_total ?? ''));
-  const [capacitySpeaker, setCapacitySpeaker] = useState(String(initial?.capacity_speaker ?? ''));
-  const [capacityListener, setCapacityListener] = useState(String(initial?.capacity_listener ?? ''));
   const [registrationOpen, setRegistrationOpen] = useState(initial?.registration_open ?? true);
   const [regStart, setRegStart] = useState(toInputDateTime(initial?.registration_start_at));
   const [regEnd, setRegEnd] = useState(toInputDateTime(initial?.registration_end_at));
@@ -197,12 +195,8 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
       nextErrors.registration_end_at = '报名结束须晚于报名开始';
     }
 
-    const capacityInput = {
-      capacity_total: Number(capacityTotal),
-      capacity_speaker: Number(capacitySpeaker),
-      capacity_listener: Number(capacityListener),
-    };
-    const capacityErrors: CapacityEditErrors = validateCapacityEdit(capacityInput, counts);
+    const total = Number(capacityTotal);
+    const capacityErrors: CapacityEditErrors = validateCapacityEdit(total, counts);
     Object.assign(nextErrors, capacityErrors);
 
     setErrors(nextErrors);
@@ -217,7 +211,10 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
         location: location.trim() || undefined,
         start_time: start,
         end_time: end,
-        ...capacityInput,
+        // 校验已通过（正偶数），角色名额按总名额对半派生
+        capacity_total: total,
+        capacity_speaker: total / 2,
+        capacity_listener: total / 2,
         registration_open: registrationOpen,
         registration_start_at: regStartIso,
         registration_end_at: regEndIso,
@@ -246,6 +243,18 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
   };
 
   const isChoiceType = newType === 'single_choice' || newType === 'multi_choice';
+
+  // 总名额提示：合法正偶数时展示对半结果；编辑模式附带已通过人数
+  const parsedTotal = Number(capacityTotal);
+  const splitHint =
+    Number.isInteger(parsedTotal) && parsedTotal > 0 && parsedTotal % 2 === 0
+      ? `倾诉者/聆听者名额自动对半分配（各 ${parsedTotal / 2} 人）`
+      : '总名额须为正偶数，倾诉者/聆听者名额自动对半分配';
+  const approvedHint =
+    counts.total > 0
+      ? `当前已通过 ${counts.total} 人（倾诉者 ${counts.speaker} / 聆听者 ${counts.listener}）`
+      : '';
+  const capacityHint = [splitHint, approvedHint].filter(Boolean).join('；');
 
   return (
     <form onSubmit={handleSubmit} noValidate>
@@ -286,31 +295,12 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
         <Input
           label="总名额"
           type="number"
-          min={0}
+          min={2}
+          step={2}
           value={capacityTotal}
           onChange={(e) => setCapacityTotal(e.target.value)}
           error={errors.capacity_total}
-          hint={counts.total > 0 ? `当前已通过 ${counts.total} 人` : undefined}
-          required
-        />
-        <Input
-          label="倾诉者名额"
-          type="number"
-          min={0}
-          value={capacitySpeaker}
-          onChange={(e) => setCapacitySpeaker(e.target.value)}
-          error={errors.capacity_speaker}
-          hint={counts.speaker > 0 ? `当前已通过 ${counts.speaker} 人` : undefined}
-          required
-        />
-        <Input
-          label="聆听者名额"
-          type="number"
-          min={0}
-          value={capacityListener}
-          onChange={(e) => setCapacityListener(e.target.value)}
-          error={errors.capacity_listener}
-          hint={counts.listener > 0 ? `当前已通过 ${counts.listener} 人` : undefined}
+          hint={capacityHint}
           required
         />
         <Input

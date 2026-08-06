@@ -10,6 +10,7 @@ export function PageLayout({
   title,
   actions,
   wide = false,
+  className,
   children,
 }: {
   /** 所属端：参与者端 / 机构管理端 / 超级管理端。 */
@@ -17,10 +18,12 @@ export function PageLayout({
   title?: ReactNode;
   actions?: ReactNode;
   wide?: boolean;
+  /** 附加在根元素上的类名（如参与者端页面底色标记 ccp-root）。 */
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <main className={`page${wide ? ' page-wide' : ''}`}>
+    <main className={`page${wide ? ' page-wide' : ''}${className ? ` ${className}` : ''}`}>
       {section ? <p className="page-section">{section}</p> : null}
       {title || actions ? (
         <header className="page-header">

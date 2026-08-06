@@ -1,24 +1,23 @@
 import { useCallback } from 'react';
 import type { ReactNode } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { adminAuth } from '../../../shared/auth';
 import type { AdminAccountRecord } from '../../../shared/api/types';
-import { Button, PageLayout } from '../../../shared/ui';
+import { Button } from '../../../shared/ui';
 
 /**
  * 机构管理端布局（technical-design §5.3 /admin 分区）。
- * 顶部导航：活动 / 看板 / 导出 / 审计；右侧显示当前管理员与主动退出
+ * 极简公益科技风：左侧 240px 侧栏 + 顶部上下文栏（docs/planning/ui-design.md）。
+ * 侧栏含品牌标识、主导航（活动 / 看板 / 导出 / 审计日志）、当前管理员与主动退出
  * （管理后台不做无操作自动退出，但必须具备主动退出机制，PRD §12.4）。
  */
 export function AdminLayout({
   title,
   actions,
-  wide = true,
   children,
 }: {
   title: ReactNode;
   actions?: ReactNode;
-  wide?: boolean;
   children: ReactNode;
 }) {
   const navigate = useNavigate();
@@ -31,28 +30,50 @@ export function AdminLayout({
 
   return (
     <div className="admin-shell">
-      <nav className="admin-nav" aria-label="机构管理端导航">
-        <NavLink to="/admin/activities" className={navClass}>
-          活动
-        </NavLink>
-        <NavLink to="/admin/dashboard" className={navClass}>
-          看板
-        </NavLink>
-        <NavLink to="/admin/exports" className={navClass}>
-          导出
-        </NavLink>
-        <NavLink to="/admin/audit" className={navClass}>
-          审计日志
-        </NavLink>
-        <span className="admin-nav-spacer" />
-        <span className="admin-nav-user">{record?.display_name || record?.username || ''}</span>
-        <Button variant="secondary" onClick={logout}>
-          退出登录
-        </Button>
-      </nav>
-      <PageLayout section="机构管理端" title={title} actions={actions} wide={wide}>
-        {children}
-      </PageLayout>
+      <aside className="admin-sidebar">
+        <div className="admin-brand">
+          <span className="admin-brand-mark" aria-hidden="true">
+            <span />
+            <span />
+          </span>
+          <span className="admin-brand-text">
+            <strong>ChatCircle</strong>
+            <span className="admin-brand-scope">机构端</span>
+          </span>
+        </div>
+        <nav className="admin-nav" aria-label="机构管理端导航">
+          <NavLink to="/admin/activities" className={navClass}>
+            活动
+          </NavLink>
+          <NavLink to="/admin/dashboard" className={navClass}>
+            看板
+          </NavLink>
+          <NavLink to="/admin/exports" className={navClass}>
+            导出
+          </NavLink>
+          <NavLink to="/admin/audit" className={navClass}>
+            审计日志
+          </NavLink>
+        </nav>
+        <div className="admin-sidebar-foot">
+          <span className="admin-nav-user">{record?.display_name || record?.username || ''}</span>
+          <div className="admin-sidebar-foot-actions">
+            <Link to="/" className="admin-foot-link">
+              返回首页
+            </Link>
+            <Button variant="secondary" onClick={logout}>
+              退出登录
+            </Button>
+          </div>
+        </div>
+      </aside>
+      <div className="admin-main">
+        <header className="admin-topbar">
+          <h1 className="admin-topbar-title">{title}</h1>
+          {actions ? <div className="admin-topbar-actions">{actions}</div> : null}
+        </header>
+        <main className="admin-content">{children}</main>
+      </div>
     </div>
   );
 }

@@ -5,8 +5,9 @@
 - 角色名额满 / 总名额满时审核通过被拒绝（事务内校验），名额计数不变；
 - 新报名口径：总名额满拒绝全部新报名、角色名额满拒绝该角色（FR-ACT-007）；
 - 审核时修改 activity_role 撞目标角色满额 → 拒绝（FR-REG-005）；
-- 两名管理员并发通过不同报名（剩余名额 1）→ 恰好一个成功，终态不超额；
-- capacity_* 修改不得低于当前已通过数（FR-ACT-006）。
+- 两名管理员并发通过不同报名（总名额剩 1）→ 恰好一个成功，终态不超额；
+- 总名额须为正偶数，角色名额由总名额对半派生（创建/更新均硬校验）；
+- 总名额（及其对半）不得低于当前已通过数（FR-ACT-006）。
 """
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -57,20 +58,21 @@ def run(ctx):
     rep.check('CAP-06 总名额满时新报名 → 409 CAPACITY_FULL',
               s == 409 and biz_code(r) == 'CAPACITY_FULL', r)
 
-    # ---------- 2. 名额修改下限（FR-ACT-006）----------
+    # ---------- 2. 名额修改规则（偶数对半派生 + FR-ACT-006 下限）----------
     s, r = call(base, 'PATCH', '/api/collections/activities/records/%s' % act,
-                {'capacity_total': 1}, AT)
-    rep.check('CAP-07 capacity_total 调低于已通过数 → 400', s == 400, r)
+                {'capacity_total': 3}, AT)
+    rep.check('CAP-07 奇数总名额 → 400', s == 400, r)
     s, r = call(base, 'PATCH', '/api/collections/activities/records/%s' % act,
                 {'capacity_speaker': 0}, AT)
-    rep.check('CAP-08 capacity_speaker 调低于已通过数 → 400', s == 400, r)
+    rep.check('CAP-08 单独修改角色名额（与对半派生冲突）→ 400', s == 400, r)
     s, r = call(base, 'PATCH', '/api/collections/activities/records/%s' % act,
                 {'capacity_total': 4}, AT)
-    rep.check('CAP-09 调高名额允许（≥已通过数）', s == 200, r)
+    rep.check('CAP-09 调高总名额允许且角色名额自动对半（=2）',
+              s == 200 and r.get('capacity_speaker') == 2 and r.get('capacity_listener') == 2, r)
 
     # ---------- 3. 审核时改角色撞目标角色满额（FR-REG-005）----------
     act2 = fx.create_activity(base, AT, org, 'CC_IT_CAP_02', '角色修改校验场',
-                              fields=fx.nick_field_cfg(fields), caps=(5, 1, 5))
+                              fields=fx.nick_field_cfg(fields), caps=(2, 1, 1))
     _, pt6, _ = fx.create_participant(base, 'cap_u6')
     _, pt7, _ = fx.create_participant(base, 'cap_u7')
     reg6 = fx.register(base, pt6, act2, 'speaker', fx.field_answers(fields, '角色6'))
@@ -83,13 +85,17 @@ def run(ctx):
     s, r = fx.transition(base, AT, reg7, 'approved')
     rep.check('CAP-12 按原角色 listener 通过成功', s == 200, r)
 
-    # ---------- 4. 并发审核不超额（剩余名额 1，两名管理员同时通过不同报名）----------
+    # ---------- 4. 并发审核不超额（总名额剩 1，两名管理员同时通过不同报名）----------
     act3 = fx.create_activity(base, AT, org, 'CC_IT_CAP_03', '并发审核场',
-                              fields=fx.nick_field_cfg(fields), caps=(1, 1, 1))
+                              fields=fx.nick_field_cfg(fields), caps=(2, 1, 1))
+    # 先占一席（聆听者），使总名额仅剩 1，两名倾诉者并发争抢
+    _, pt10, _ = fx.create_participant(base, 'cap_u10')
+    reg10 = fx.register(base, pt10, act3, 'listener', fx.field_answers(fields, '并发占位'))
+    fx.transition(base, AT, reg10, 'approved')
     _, pt8, _ = fx.create_participant(base, 'cap_u8')
     _, pt9, _ = fx.create_participant(base, 'cap_u9')
     reg8 = fx.register(base, pt8, act3, 'speaker', fx.field_answers(fields, '并发8'))
-    reg9 = fx.register(base, pt9, act3, 'listener', fx.field_answers(fields, '并发9'))
+    reg9 = fx.register(base, pt9, act3, 'speaker', fx.field_answers(fields, '并发9'))
 
     barrier = threading.Barrier(3)
 
@@ -112,5 +118,31 @@ def run(ctx):
     s2, r2 = call(base, 'GET',
                   f"/api/collections/registrations/records?perPage=100&filter=(activity_id='{act3}'%26%26status='approved')",
                   token=AT)
-    rep.check('CAP-14 并发场终态已通过数 ≤ 名额（=1，不超额）',
-              s2 == 200 and r2.get('totalItems') == 1, r2)
+    rep.check('CAP-14 并发场终态已通过数 ≤ 名额（=2，不超额）',
+              s2 == 200 and r2.get('totalItems') == 2, r2)
+
+    # ---------- 5. 创建期名额规则与下限（FR-ACT-006）----------
+    s, r = call(base, 'POST', '/api/collections/activities/records', {
+        'organization_id': org, 'activity_code': 'CC_IT_CAP_BAD_1', 'title': '奇数名额场',
+        'start_time': '2026-08-10 12:00:00Z', 'end_time': '2026-08-10 14:00:00Z',
+        'status': 'draft', 'capacity_total': 3, 'capacity_speaker': 2, 'capacity_listener': 1,
+        'registration_open': True, 'checkin_qr_token': 'ckqr_cc_it_cap_bad_1'}, AT)
+    rep.check('CAP-15 创建活动：奇数总名额 → 400', s == 400, r)
+    s, r = call(base, 'POST', '/api/collections/activities/records', {
+        'organization_id': org, 'activity_code': 'CC_IT_CAP_BAD_2', 'title': '不一致名额场',
+        'start_time': '2026-08-10 12:00:00Z', 'end_time': '2026-08-10 14:00:00Z',
+        'status': 'draft', 'capacity_total': 4, 'capacity_speaker': 3, 'capacity_listener': 1,
+        'registration_open': True, 'checkin_qr_token': 'ckqr_cc_it_cap_bad_2'}, AT)
+    rep.check('CAP-16 创建活动：角色名额与对半派生不一致 → 400', s == 400, r)
+
+    # 下限：总名额对半后的角色名额不得低于该角色已通过数
+    act_low = fx.create_activity(base, AT, org, 'CC_IT_CAP_04', '名额下限校验场',
+                                 fields=fx.nick_field_cfg(fields), caps=(4, 2, 2))
+    for i in (1, 2):
+        _, ptl, _ = fx.create_participant(base, 'cap_low%d' % i)
+        reg_low = fx.register(base, ptl, act_low, 'speaker', fx.field_answers(fields, '下限%d' % i))
+        s_low, r_low = fx.transition(base, AT, reg_low, 'approved')
+        assert s_low == 200, '下限场占位通过失败：%s' % r_low
+    s, r = call(base, 'PATCH', '/api/collections/activities/records/%s' % act_low,
+                {'capacity_total': 2}, AT)
+    rep.check('CAP-17 总名额对半后（1）低于已通过倾诉者（2）→ 400', s == 400, r)

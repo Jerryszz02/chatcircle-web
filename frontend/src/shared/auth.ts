@@ -15,6 +15,10 @@ import { pbClients, pbForRole, ROLE_COLLECTIONS, type Role } from './pocketbase'
  *
  * token 持久化由各角色独立 LocalAuthStore 完成（见 shared/pocketbase.ts），
  * 参与者 token 有效期 30 天由服务端 collection 配置保证（FR-AUTH-006），前端不处理续期。
+ *
+ * 单会话互斥：同一浏览器任一时刻只持有一个有效会话。登录任一角色成功即
+ * 清除其它两个角色的会话（makeRoleAuth 统一保证，覆盖登录页、报名链路自动
+ * 注册、邀请码注册后自动登录等全部入口）；要登录另一个身份必须先退出当前账号。
  */
 
 /** 参与者自定义认证端点的响应形态（约定与 PocketBase auth 响应一致：token + record）。 */
@@ -46,7 +50,15 @@ function makeRoleAuth(role: Role, login: RoleAuth['login']): RoleAuth {
   return {
     role,
     client,
-    login,
+    async login(identity, password) {
+      const record = await login(identity, password);
+      // 单会话互斥：本角色登录成功即清除其它角色会话，
+      // 保证任一时刻全端只有一个有效会话（无论从哪个入口登录）。
+      for (const other of Object.keys(pbClients) as Role[]) {
+        if (other !== role) pbClients[other].authStore.clear();
+      }
+      return record;
+    },
     logout() {
       client.authStore.clear();
     },
@@ -112,7 +124,8 @@ export function authFor(role: Role): RoleAuth {
   }
 }
 
-/** 当前持有有效会话的角色；多会话并存时按 participant → admin → super 顺序返回首个。 */
+/** 当前持有有效会话的角色。登录互斥（见 makeRoleAuth）下至多一个会话有效；
+ *  异常情况下多会话并存时按 participant → admin → super 顺序返回首个。 */
 export function currentRole(): Role | null {
   for (const role of ['participant', 'admin', 'super'] as const) {
     if (pbForRole(role).authStore.isValid) return role;

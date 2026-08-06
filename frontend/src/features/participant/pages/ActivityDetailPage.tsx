@@ -12,7 +12,16 @@ export function ActivityDetailPage() {
   const { data, error, loading, reload } = usePublicActivity(activityId);
 
   return (
-    <PageLayout section="参与者端" title="公开活动详情">
+    <PageLayout
+      section="参与者端"
+      title="公开活动详情"
+      className="ccp-root ccp-has-sticky-cta"
+      actions={
+        <Link to="/" className="cc-btn cc-btn-secondary">
+          返回首页
+        </Link>
+      }
+    >
       {loading ? <Loading fullscreen /> : null}
 
       {!loading && error ? (
@@ -66,9 +75,11 @@ export function ActivityDetailPage() {
                     <li>聆听者剩余 {data.registration.remaining_listener} 个名额</li>
                   ) : null}
                 </ul>
-                <Link to={`/a/${activityId}/register`} className="cc-btn cc-btn-primary cc-btn-block">
-                  立即报名
-                </Link>
+                <div className="ccp-cta-bar">
+                  <Link to={`/a/${activityId}/register`} className="cc-btn cc-btn-primary cc-btn-block">
+                    立即报名
+                  </Link>
+                </div>
                 <p className="cc-hint">
                   点击报名后登录或创建账号；已有账号会直接识别登录。
                 </p>
