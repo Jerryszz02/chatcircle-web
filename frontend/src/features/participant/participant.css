@@ -98,6 +98,13 @@ body:has(.ccp-root) {
   color: rgba(255, 255, 255, 0.78);
 }
 
+.ccp-hero-cta {
+  position: relative;
+  display: inline-block;
+  margin-top: 20px;
+  width: auto;
+}
+
 @media (max-width: 640px) {
   .ccp-hero-rings {
     right: -12px;

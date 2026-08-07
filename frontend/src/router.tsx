@@ -1,6 +1,7 @@
 import { Route, Routes } from 'react-router-dom';
 import { RequireRole } from './shared/guards';
 import {
+  ActivitiesPage,
   ActivityDetailPage,
   CheckinPage,
   HomePage,
@@ -37,8 +38,9 @@ import {
 export function AppRoutes() {
   return (
     <Routes>
-      {/* 参与者端（公开页：活动详情、报名链路、登录） */}
+      {/* 参与者端（公开页：活动广场、活动详情、报名链路、登录） */}
       <Route path="/" element={<HomePage />} />
+      <Route path="/activities" element={<ActivitiesPage />} />
       <Route path="/a/:activityId" element={<ActivityDetailPage />} />
       <Route path="/a/:activityId/register" element={<RegisterPage />} />
       <Route path="/login" element={<LoginPage />} />
