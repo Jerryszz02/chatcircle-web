@@ -3,11 +3,15 @@ import type { SendOptions } from 'pocketbase';
 
 /**
  * PocketBase 后端地址。
- * 生产部署时前端产物由 PocketBase 同源伺服（pb_public），通常无需设置；
+ * 生产部署时前端产物由 PocketBase 同源伺服（pb_public），VITE_PB_URL 留空即同源——
+ * 但空字符串必须落成 window.location.origin：pocketbase SDK 的 buildUrl 会把空/相对
+ * baseUrl 拼到当前页面 pathname 之后（如 /login 页 → /login/api/...，全站 API 404）。
  * 本地开发直连默认 8090 端口（vite dev server 亦配置了 /api 代理，见 vite.config.ts），
  * 跨环境直连用 VITE_PB_URL 覆盖（见 technical-design §5.7）。
  */
-export const PB_URL: string = import.meta.env.VITE_PB_URL ?? 'http://127.0.0.1:8090';
+const envUrl = import.meta.env.VITE_PB_URL;
+export const PB_URL: string =
+  envUrl === '' ? window.location.origin : (envUrl ?? 'http://127.0.0.1:8090');
 
 /**
  * 三类角色（technical-design §5.3/§5.4）：
