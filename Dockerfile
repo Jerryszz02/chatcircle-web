@@ -15,9 +15,15 @@ RUN npm run build
 # ---- stage 2: PocketBase 运行时 ----
 FROM alpine:3.20
 ARG PB_VERSION=0.28.4
-RUN apk add --no-cache ca-certificates unzip
+RUN apk add --no-cache ca-certificates curl unzip
 WORKDIR /pb
-ADD "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip" /tmp/pocketbase.zip
+# 境内 ECS 直连 GitHub Releases 慢且偶发 EOF（2026-08-07 实测 ~16KB/s），
+# 不用 ADD <url>：它每次构建都发请求校验缓存，请求失败直接构建失败。
+# RUN 层命中缓存则完全不联网；未命中时 curl 断点续传 + 全类型错误重试 8 次
+# （busybox wget 实测无法处理 GitHub 的 TLS/重定向，故装 curl）。
+RUN curl -fSL -C - --retry 8 --retry-delay 10 --retry-all-errors --connect-timeout 20 \
+      -o /tmp/pocketbase.zip \
+      "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip"
 RUN unzip /tmp/pocketbase.zip -d /pb && rm /tmp/pocketbase.zip
 
 COPY --from=frontend-build /app/dist ./pb_public
