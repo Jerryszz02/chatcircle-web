@@ -36,7 +36,7 @@ function renderAt(path: string) {
 beforeEach(() => {
   localStorage.clear();
   Object.values(pbClients).forEach((c) => c.authStore.clear());
-  // 首页会拉取公开活动列表，统一兜底为空列表，避免真实网络请求。
+  // 活动与问卷页会拉取公开活动列表，统一兜底为空列表，避免真实网络请求。
   stubApi({ 'GET /api/cc/public/activities': { body: { activities: [] } } });
 });
 
@@ -45,10 +45,16 @@ afterEach(() => {
 });
 
 describe('路由分区（公开页）', () => {
-  it('/ 渲染首页（活动广场，未登录可看）', () => {
+  it('/ 渲染首页（项目介绍落地页，未登录可看）', () => {
     renderAt('/');
     expect(screen.getByText('参与者端')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Chat Circles' })).toBeInTheDocument();
+  });
+
+  it('/activities 渲染活动与问卷页（活动广场，未登录可看）', () => {
+    renderAt('/activities');
+    expect(screen.getByRole('heading', { name: '活动' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '问卷' })).toBeInTheDocument();
   });
 
   it('/a/:activityId 公开活动详情未登录可看（FR-ACT-003）', () => {
