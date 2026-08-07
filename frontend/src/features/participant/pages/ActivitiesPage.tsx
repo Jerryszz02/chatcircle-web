@@ -77,7 +77,17 @@ export function ActivitiesPage() {
       : '';
 
   return (
-    <PageLayout actions={<HeaderActions />} className="ccp-root">
+    <PageLayout
+      actions={
+        <>
+          <Link to="/" className="cc-btn cc-btn-secondary">
+            返回首页
+          </Link>
+          <HeaderActions />
+        </>
+      }
+      className="ccp-root"
+    >
       <section id="activities" className="ccp-anchor">
         <h2 className="ccp-section-title">活动</h2>
         {activities === null && !activitiesError ? <Loading /> : null}
