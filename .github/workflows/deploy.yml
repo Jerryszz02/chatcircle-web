@@ -1,0 +1,54 @@
+name: Deploy
+
+# main 分支有推送（含 PR 合并）时自动部署到阿里云 ECS：
+# SSH 登录服务器 → /opt/chatcircle 拉取 main → docker compose 重建
+# （镜像重建，pb_data/backups 卷不动，迁移由 PocketBase 启动时自动应用，
+#   与 deploy/README.md §2 的手动升级命令一致）。
+#
+# 所需 Secrets（Settings → Secrets and variables → Actions）：
+#   ECS_SSH_PRIVATE_KEY  部署专用私钥（对应公钥已加入服务器 authorized_keys，
+#                        comment 为 github-actions-deploy-chatcircle）
+#   ECS_HOST             服务器地址
+#   ECS_USER             登录用户
+#
+# 注意：服务器上的 docker-compose.override.yml（过渡期明文 HTTP 挂 8443、
+# 跳过 caddy）不在仓库内，重建时不受影响；切 HTTPS 时按 deploy/README.md §5 处理。
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # 允许在 Actions 页面手动触发重新部署
+
+# 部署不取消中途运行，避免半截部署；新提交排队等上一次部署完成
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 同步到阿里云 ECS 并重建
+    runs-on: ubuntu-latest
+    steps:
+      - name: 配置 SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ECS_SSH_PRIVATE_KEY }}
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$ECS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+      - name: 服务器拉取 main 并重建
+        env:
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$ECS_USER@$ECS_HOST" '
+            set -e
+            cd /opt/chatcircle
+            git fetch origin
+            git checkout main
+            git merge --ff-only origin/main
+            docker compose up --build -d
+            docker compose ps
+          '
