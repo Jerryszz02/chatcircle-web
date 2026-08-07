@@ -10,6 +10,21 @@ describe('pocketbase client', () => {
     expect(PB_URL).toBe('http://127.0.0.1:8090');
   });
 
+  it('VITE_PB_URL 为空字符串（生产 Dockerfile 默认注入）时回退到当前站点 origin', async () => {
+    // 回归：空 baseUrl 会被 SDK 拼到当前页面 pathname 之后（/login → /login/api/...），
+    // 导致登录等全部 API 404；空字符串必须回退为绝对 origin。
+    vi.stubEnv('VITE_PB_URL', '');
+    vi.resetModules();
+    try {
+      const mod = await import('./pocketbase');
+      expect(mod.PB_URL).toBe(window.location.origin);
+      expect(mod.PB_URL.startsWith('http')).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
+  });
+
   it('pb client 以 PB_URL 初始化', () => {
     expect(pb.baseUrl).toBe(PB_URL);
   });
