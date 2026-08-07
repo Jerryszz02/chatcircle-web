@@ -96,7 +96,19 @@ docker compose start app
   `443:443`（可加 `80:80` 让 Caddy 自动跳 HTTPS）→ 安全组放行 80/443 →
   `docker compose up -d` 重建 caddy；证书会自动按新地址重签，无需其他改动。
 
-## 6. 验证记录（如实声明）
+## 6. 自动部署（GitHub Actions）
+
+`.github/workflows/deploy.yml`：push / 合并到 `main` 后，runner 经 SSH 登录 ECS，
+在 `/opt/chatcircle` 执行 `git fetch && git merge --ff-only origin/main &&
+docker compose up --build -d`——即 §2 手动升级命令的自动化，无需人工上服务器。
+也可在 Actions 页面手动触发（workflow_dispatch）。
+
+- 所需 Secrets：`ECS_SSH_PRIVATE_KEY`（部署专用密钥对，公钥在服务器
+  `authorized_keys`，comment `github-actions-deploy-chatcircle`）、`ECS_HOST`、`ECS_USER`。
+- 服务器仓库有本地 `docker-compose.override.yml`（过渡期明文 HTTP 8443，不入库），
+  checkout/pull 不会触碰；`concurrency` 串行化部署，避免并发重建。
+
+## 7. 验证记录（如实声明）
 
 - `deploy/backup.sh`：本机以真实 PocketBase 0.28.4 实例进程级验证成功路径
   （建备份→下载→PK 校验→删服务端副本→写标记）与失败路径（错误凭据→failure 标记）；
