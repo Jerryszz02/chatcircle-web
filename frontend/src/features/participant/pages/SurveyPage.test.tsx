@@ -135,6 +135,8 @@ describe('SurveyPage 问卷填写', () => {
     expect(screen.getByText('对活动的总体满意度')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '保存草稿' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '正式提交' })).toBeInTheDocument();
+    // 顶部「返回首页」入口
+    expect(screen.getByRole('link', { name: '返回首页' })).toHaveAttribute('href', '/');
   });
 
   it('必填未答：展示错误且不发起提交请求', async () => {
