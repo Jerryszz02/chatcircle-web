@@ -11,6 +11,7 @@ import type { AdminAccountRecord } from '../../../shared/api/types';
 import { Button, Input, Loading } from '../../../shared/ui';
 import { FIELD_TYPE_LABELS, SOURCE_TYPE_LABELS } from '../lib/labels';
 import { fromInputDateTime, toInputDateTime } from '../lib/format';
+import { randomUUID } from '../lib/uuid';
 import {
   mergeFormConfig,
   parseFormConfig,
@@ -229,7 +230,7 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
           organization_id: admin?.organization_id,
           activity_code: activityCode.trim(),
           status: 'draft',
-          checkin_qr_token: crypto.randomUUID().replace(/-/g, ''),
+          checkin_qr_token: randomUUID().replace(/-/g, ''),
         });
       } else {
         saved = await cc.activities.update(initial!.id, payload);
