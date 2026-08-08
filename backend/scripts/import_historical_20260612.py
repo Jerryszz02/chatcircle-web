@@ -137,6 +137,12 @@ def count_of(base, collection, filt, token):
     return r.get('totalItems', 0)
 
 
+def list_all(base, collection, filt, token):
+    q = urllib.parse.quote(filt)
+    _, r = call(base, 'GET', '/api/collections/%s/records?filter=(%s)&perPage=500' % (collection, q), token=token)
+    return r.get('items') or []
+
+
 # ---------------------------------------------------------------------------
 # 数据值解析
 # ---------------------------------------------------------------------------
@@ -291,8 +297,9 @@ SURVEYS = [
 
 # 报名表列 → 机构自定义报名字段（col 下标见表头）
 REG_FIELDS = [
-    {'code': 'kd_name', 'type': 'text', 'label': '姓名', 'col': 2, 'required': True},
-    {'code': 'kd_email', 'type': 'text', 'label': '邮箱', 'col': 3, 'required': True},
+    # 直接标识符必须 is_sensitive=True：普通导出按此标记排除（exports.pb.js FR-EXP-002）
+    {'code': 'kd_name', 'type': 'text', 'label': '姓名', 'col': 2, 'required': True, 'sensitive': True},
+    {'code': 'kd_email', 'type': 'text', 'label': '邮箱', 'col': 3, 'required': True, 'sensitive': True},
     {'code': 'kd_commit_attend', 'type': 'single_choice', 'label': '确认并承诺培训和活动均能到场', 'col': 4, 'required': True},
     {'code': 'kd_expectation', 'type': 'text', 'label': '对项目的期待或特殊说明', 'col': 5, 'required': False},
     {'code': 'kd_commit_principle', 'type': 'single_choice', 'label': '了解并愿意遵守倾听原则', 'col': 6, 'required': True},
@@ -304,7 +311,8 @@ REG_FIELDS = [
     {'code': 'kd_gain_other', 'type': 'text', 'label': '收获的其他回复', 'col': 12, 'required': False},
     {'code': 'kd_motivation', 'type': 'multi_choice', 'label': '想成为Chat Circles志愿者的原因', 'col': 13, 'required': False},
     {'code': 'kd_motivation_other', 'type': 'text', 'label': '志愿者原因的其他回复', 'col': 14, 'required': False},
-    {'code': 'kd_employee_id', 'type': 'text', 'label': '公司ID', 'col': 15, 'required': False},
+    # 直接标识符必须 is_sensitive=True：普通导出按此标记排除（exports.pb.js FR-EXP-002）
+    {'code': 'kd_employee_id', 'type': 'text', 'label': '公司ID', 'col': 15, 'required': False, 'sensitive': True},
     {'code': 'kd_age_range', 'type': 'single_choice', 'label': '年龄段', 'col': 16, 'required': False},
     {'code': 'kd_age_range_other', 'type': 'text', 'label': '年龄段的其他回复', 'col': 17, 'required': False},
     {'code': 'kd_department', 'type': 'text', 'label': '所在部门', 'col': 18, 'required': False},
@@ -555,7 +563,8 @@ def main():
             field_ids[f['code']] = row['id']
             continue
         body = {'organization_id': org_id, 'field_code': f['code'], 'field_type': f['type'],
-                'label': f['label'], 'source_type': 'custom', 'is_sensitive': False,
+                'label': f['label'], 'source_type': 'custom',
+                'is_sensitive': f.get('sensitive', False),
                 'required_default': f['required'], 'status': 'active'}
         if f['type'] in ('single_choice', 'multi_choice'):
             vals = distinct_values(reg_data, f['col'], multi=(f['type'] == 'multi_choice'))
@@ -593,10 +602,14 @@ def main():
 
     # ---------------- 参与者账号 ----------------
     pid_of = {}  # username -> participant id
+    reused_participants = []
     for a in accounts:
         row = get_one(base, 'participant_accounts', "username='%s'" % a['username'], ST)
         if row:
+            # 用户名全局唯一：已存在账号可能是上次导入所建（重跑正常），也可能是
+            # 平台既有无关账号（撞名）。无法经 API 区分，故显式列出供人工核对。
             pid_of[a['username']] = row['id']
+            reused_participants.append(a['username'])
             continue
         pw = secrets.token_urlsafe(12)
         r = must(base, 'POST', '/api/collections/participant_accounts/records',
@@ -606,6 +619,9 @@ def main():
         write_cred(a['role'], a['username'], pw, a.get('name', ''), a.get('email', ''))
         new_participants += 1
     info('参与者账号就绪：%d 个（新建 %d）' % (len(pid_of), new_participants))
+    if reused_participants:
+        info('警告：%d 个用户名已存在并被复用（重跑属正常；首次执行出现请人工核对）：%s'
+             % (len(reused_participants), ', '.join(reused_participants)))
 
     # ---------------- 报名记录 + 答案 ----------------
     reg_id_of = {}  # username -> registration id
@@ -616,25 +632,30 @@ def main():
                       "activity_id='%s'&&participant_id='%s'" % (act_id, pid_of[uname]), ST)
         if row:
             reg_id_of[uname] = row['id']
-            continue
-        role = 'listener' if a['role'] == 'listener' else 'speaker'
-        if a['role'] == 'listener':
-            submitted = to_cst(cell(listeners[a['nickname']], 1))
-        elif a['role'] == 'chatter':
-            r1a = next(r for r in SURVEYS[0]['rows'] if cell(r, 3) == a['qid'])
-            submitted = to_cst(cell(r1a, 2))
         else:
-            r3 = next(r for r in SURVEYS[-1]['rows'] if cell(r, 0) == a['name'])
-            submitted = to_cst(cell(r3, 2))
-        r = must(base, 'POST', '/api/collections/registrations/records',
-                 {'activity_id': act_id, 'participant_id': pid_of[uname], 'activity_role': role,
-                  'status': 'approved', 'submitted_at': submitted,
-                  'status_reason': '历史数据导入：最终名单'}, ST, '创建报名 %s' % uname)
-        reg_id_of[uname] = r['id']
-        new_regs += 1
+            role = 'listener' if a['role'] == 'listener' else 'speaker'
+            if a['role'] == 'listener':
+                submitted = to_cst(cell(listeners[a['nickname']], 1))
+            elif a['role'] == 'chatter':
+                r1a = next(r for r in SURVEYS[0]['rows'] if cell(r, 3) == a['qid'])
+                submitted = to_cst(cell(r1a, 2))
+            else:
+                r3 = next(r for r in SURVEYS[-1]['rows'] if cell(r, 0) == a['name'])
+                submitted = to_cst(cell(r3, 2))
+            r = must(base, 'POST', '/api/collections/registrations/records',
+                     {'activity_id': act_id, 'participant_id': pid_of[uname], 'activity_role': role,
+                      'status': 'approved', 'submitted_at': submitted,
+                      'status_reason': '历史数据导入：最终名单'}, ST, '创建报名 %s' % uname)
+            reg_id_of[uname] = r['id']
+            new_regs += 1
+        # 报名答案按 (registration_id, field_def_id) 补齐：中断重跑只补缺失项，不整行跳过
         if a['role'] == 'listener':
+            existing = {x['field_def_id'] for x in list_all(
+                base, 'registration_answers', "registration_id='%s'" % reg_id_of[uname], ST)}
             src = listeners[a['nickname']]
             for f in REG_FIELDS:
+                if field_ids[f['code']] in existing:
+                    continue
                 v = cell(src, f['col'])
                 if not v:
                     continue
@@ -646,7 +667,7 @@ def main():
                 else:
                     value = v
                 must(base, 'POST', '/api/collections/registration_answers/records',
-                     {'registration_id': r['id'], 'field_def_id': field_ids[f['code']],
+                     {'registration_id': reg_id_of[uname], 'field_def_id': field_ids[f['code']],
                       'value_json': value}, ST, '报名答案 %s/%s' % (uname, f['code']))
     info('报名就绪：共 %d 条（新建 %d）' % (len(reg_id_of), new_regs))
 
@@ -674,18 +695,24 @@ def main():
         sv = get_one(base, 'activity_surveys', "survey_code='%s'" % code, ST)
         if sv:
             survey_ids[spec['suffix']] = sv['id']
-            continue
-        times = [to_cst(cell(r, 2)) for r in spec['rows'] if cell(r, 2)]
-        opened = min(times) if times else to_cst('2026-06-09 00:00')
-        ended = max(times) if times else to_cst('2026-06-13 00:00')
-        r = must(base, 'POST', '/api/collections/activity_surveys/records',
-                 {'activity_id': act_id, 'template_version_id': version_id, 'survey_code': code,
-                  'title': spec['survey_title'], 'role_scope': spec['role_scope'],
-                  'status': 'ended', 'qr_token': secrets.token_urlsafe(18)[:24],
-                  'opened_at': opened, 'ended_at': ended}, ST, '创建活动问卷 %s' % code)
-        survey_ids[spec['suffix']] = r['id']
+            existing_codes = {x['question_code'] for x in list_all(
+                base, 'survey_questions', "activity_survey_id='%s'" % sv['id'], ST)}
+        else:
+            times = [to_cst(cell(r, 2)) for r in spec['rows'] if cell(r, 2)]
+            opened = min(times) if times else to_cst('2026-06-09 00:00')
+            ended = max(times) if times else to_cst('2026-06-13 00:00')
+            r = must(base, 'POST', '/api/collections/activity_surveys/records',
+                     {'activity_id': act_id, 'template_version_id': version_id, 'survey_code': code,
+                      'title': spec['survey_title'], 'role_scope': spec['role_scope'],
+                      'status': 'ended', 'qr_token': secrets.token_urlsafe(18)[:24],
+                      'opened_at': opened, 'ended_at': ended}, ST, '创建活动问卷 %s' % code)
+            survey_ids[spec['suffix']] = r['id']
+            existing_codes = set()
+        # 题目按 (activity_survey_id, question_code) 补齐：中断重跑只补缺失题
         for i, qu in enumerate(spec['questions']):
-            body = {'activity_survey_id': r['id'], 'question_code': qu['code'],
+            if qu['code'] in existing_codes:
+                continue
+            body = {'activity_survey_id': survey_ids[spec['suffix']], 'question_code': qu['code'],
                     'source_type': 'standard', 'question_type': qu['type'], 'title': qu['title'],
                     'required': qu['required'], 'locked': False, 'is_sensitive': False,
                     'order_index': i + 1, 'options_json': None, 'validation_json': None}
@@ -706,13 +733,21 @@ def main():
             row = get_one(base, 'submissions',
                           "activity_survey_id='%s'&&participant_id='%s'" % (sid, pid_of[uname]), ST)
             if row:
-                continue
-            sub = must(base, 'POST', '/api/collections/submissions/records',
-                       {'activity_survey_id': sid, 'participant_id': pid_of[uname],
-                        'registration_id': reg_id_of[uname], 'status': 'submitted',
-                        'submitted_at': to_cst(cell(r, 2))}, ST, '创建答卷 %s/%s' % (spec['suffix'], uname))
-            new_subs += 1
+                sub_id = row['id']
+                existing_codes = {x['question_code'] for x in list_all(
+                    base, 'answers', "submission_id='%s'" % sub_id, ST)}
+            else:
+                sub = must(base, 'POST', '/api/collections/submissions/records',
+                           {'activity_survey_id': sid, 'participant_id': pid_of[uname],
+                            'registration_id': reg_id_of[uname], 'status': 'submitted',
+                            'submitted_at': to_cst(cell(r, 2))}, ST, '创建答卷 %s/%s' % (spec['suffix'], uname))
+                sub_id = sub['id']
+                new_subs += 1
+                existing_codes = set()
+            # 答案按 (submission_id, question_code) 补齐：中断重跑只补缺失答案
             for qu in spec['questions']:
+                if qu['code'] in existing_codes:
+                    continue
                 v = cell(r, qu['col'])
                 if not v:
                     continue
@@ -733,7 +768,7 @@ def main():
                 else:
                     value = v
                 must(base, 'POST', '/api/collections/answers/records',
-                     {'submission_id': sub['id'], 'question_code': qu['code'], 'value_json': value},
+                     {'submission_id': sub_id, 'question_code': qu['code'], 'value_json': value},
                      ST, '答案 %s/%s' % (spec['suffix'], qu['code']))
                 new_answers += 1
     info('答卷就绪：新建 %d 份答卷、%d 条答案' % (new_subs, new_answers))
@@ -756,13 +791,33 @@ def main():
     print('报名记录：预期 %d，实际 %d %s'
           % (len(accounts), total_reg, 'OK' if total_reg == len(accounts) else 'MISMATCH'))
     all_ok = total_reg == len(accounts)
+    # 报名答案逐条核对（中断重跑场景下答卷/答案数可能比父级计数更能发现问题）
+    expect_reg_ans = 0
+    for src in listeners.values():
+        for f in REG_FIELDS:
+            v = cell(src, f['col'])
+            if not v:
+                continue
+            if f['type'] == 'multi_choice' and not parse_multi(v):
+                continue
+            expect_reg_ans += 1
+    actual_reg_ans = sum(
+        count_of(base, 'registration_answers', "registration_id='%s'" % reg_id_of[a['username']], ST)
+        for a in accounts if a['role'] == 'listener')
+    ok = actual_reg_ans == expect_reg_ans
+    all_ok = all_ok and ok
+    print('报名答案：预期 %d，实际 %d %s' % (expect_reg_ans, actual_reg_ans, 'OK' if ok else 'MISMATCH'))
     for spec in SURVEYS:
         sid = survey_ids[spec['suffix']]
-        actual = count_of(base, 'submissions', "activity_survey_id='%s'" % sid, ST)
+        subs = list_all(base, 'submissions', "activity_survey_id='%s'" % sid, ST)
+        actual = len(subs)
+        actual_ans = sum(count_of(base, 'answers', "submission_id='%s'" % s['id'], ST) for s in subs)
         expect = len(spec['rows'])
-        ok = actual == expect
+        expect_ans = expected_answers(spec)
+        ok = actual == expect and actual_ans == expect_ans
         all_ok = all_ok and ok
-        print('问卷 %s 答卷：预期 %d，实际 %d %s' % (spec['suffix'], expect, actual, 'OK' if ok else 'MISMATCH'))
+        print('问卷 %s：答卷预期/实际 %d/%d，答案预期/实际 %d/%d %s'
+              % (spec['suffix'], expect, actual, expect_ans, actual_ans, 'OK' if ok else 'MISMATCH'))
 
     # ---------------- 凭据输出 ----------------
     if os.path.exists(args.accounts_out):
