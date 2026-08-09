@@ -7,6 +7,9 @@ import { scaleRange, type SurveyAnswerValue, type SurveyQuestionModel } from '..
  * 受控组件：值由父级（问卷页）统一持有，key = question_code。
  * 可访问性：选择题用 fieldset/legend + 原生 radio/checkbox；错误 role=alert。
  */
+
+/** 文本题答案长度上限（与服务端校验上限对齐，超出直接无法输入）。 */
+const SURVEY_ANSWER_TEXT_MAX = 2000;
 export function SurveyQuestionField({
   model,
   value,
@@ -52,6 +55,7 @@ export function SurveyQuestionField({
           required={model.required}
           error={error}
           hint={model.isSensitive ? '敏感题目：普通导出与分析不包含本答案' : undefined}
+          maxLength={SURVEY_ANSWER_TEXT_MAX}
         />
       );
     }
@@ -70,6 +74,7 @@ export function SurveyQuestionField({
           onChange={(e) => onChange(e.target.value)}
           aria-invalid={error ? true : undefined}
           aria-describedby={errorId}
+          maxLength={SURVEY_ANSWER_TEXT_MAX}
         />
         {sensitiveHint}
         {errorBlock}

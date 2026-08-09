@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ActivityRecord, ActivityStatus } from '../../../shared/api/types';
 import { normalizeApiError } from '../../../shared/api/http';
@@ -31,7 +31,10 @@ export function AdminActivitiesPage() {
   const [statusFilter, setStatusFilter] = useState<'' | ActivityStatus>('');
   const [showCreate, setShowCreate] = useState(false);
 
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    // 竞态保护：连续切换筛选/刷新时仅最后一次响应生效，避免旧响应覆盖新状态
+    const seq = ++loadSeq.current;
     setError('');
     try {
       const filter = statusFilter ? `status = "${statusFilter}"` : undefined;
@@ -39,8 +42,10 @@ export function AdminActivitiesPage() {
         sort: '-created',
         filter,
       });
+      if (seq !== loadSeq.current) return;
       setItems(list);
     } catch (err) {
+      if (seq !== loadSeq.current) return;
       setError(normalizeApiError(err).message);
       setItems([]);
     }

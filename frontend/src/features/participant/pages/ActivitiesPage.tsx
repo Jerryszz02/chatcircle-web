@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { normalizeApiError, type ApiError } from '../../../shared/api/http';
 import { currentRole, participantAuth } from '../../../shared/auth';
+import { useSessionSnapshot } from '../../../shared/session';
 import { Button, Loading, PageLayout } from '../../../shared/ui';
 import {
   getMeOverview,
@@ -21,6 +22,8 @@ import { HeaderActions } from '../components/HeaderActions';
  * 支持 #activities / #surveys 锚点直达对应区块。
  */
 export function ActivitiesPage() {
+  // 订阅会话变化：登录/登出后问卷区与头部入口即时刷新
+  useSessionSnapshot();
   const authed = participantAuth.isValid();
   // 当前有效会话角色（单会话互斥，见 shared/auth.ts）：仅用于问卷区兜底提示。
   const role = currentRole();

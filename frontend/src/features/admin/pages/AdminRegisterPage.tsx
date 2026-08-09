@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
-import { adminAuth } from '../../../shared/auth';
+import { adminAuth, hasAnySession } from '../../../shared/auth';
 import { normalizeApiError, registerAdmin } from '../../../shared/api/http';
 import { Button, Input, PageLayout } from '../../../shared/ui';
 
@@ -25,6 +25,10 @@ export function AdminRegisterPage() {
 
   if (adminAuth.isValid()) {
     return <Navigate to="/admin/activities" replace />;
+  }
+  // 单会话互斥：已登录其它身份（参与者/超管）时须先退出，回首页进入对应面板（与登录页一致）。
+  if (hasAnySession()) {
+    return <Navigate to="/" replace />;
   }
 
   const handleSubmit = async (e: FormEvent) => {

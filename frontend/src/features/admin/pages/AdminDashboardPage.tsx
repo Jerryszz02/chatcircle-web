@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ActivityRecord, ActivityRole } from '../../../shared/api/types';
 import { normalizeApiError } from '../../../shared/api/http';
+import { localDayToPbUtcRange } from '../../../shared/lib/datetime';
 import { listMetricDefinitions, MetricRenderer, type MetricData } from '../../../shared/metrics';
 import type { MetricKey } from '../../../shared/metrics';
 import { Button, Loading } from '../../../shared/ui';
@@ -71,8 +72,11 @@ export function AdminDashboardPage() {
           ? `status = "${activityStatus}"`
           : 'status = "published" || status = "closed" || status = "archived"',
       ];
-      if (from) conditions.push(`start_time >= "${from} 00:00:00"`);
-      if (to) conditions.push(`start_time <= "${to} 23:59:59"`);
+      // 本地日期 → 该自然日对应的 UTC 边界（PB 按 UTC 存储比较，直接拼本地日期会偏移一个时区）
+      const fromRange = from ? localDayToPbUtcRange(from) : null;
+      if (fromRange) conditions.push(`start_time >= "${fromRange.gte}"`);
+      const toRange = to ? localDayToPbUtcRange(to) : null;
+      if (toRange) conditions.push(`start_time < "${toRange.lt}"`);
       const list = await adminCollections().activities.getFullList({
         filter: conditions.map((c) => `(${c})`).join(' && '),
         sort: '-start_time',

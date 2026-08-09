@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { currentRole } from '../../../shared/auth';
+import { useSessionSnapshot } from '../../../shared/session';
 
 /**
  * 参与者端公开页（首页 / 活动与问卷页）右上角入口：
@@ -8,6 +9,8 @@ import { currentRole } from '../../../shared/auth';
  * 未登录时展示聚合参与者/机构管理员/超级管理员三类登录入口的「登录」菜单。
  */
 export function HeaderActions() {
+  // 订阅会话变化：其它页签/链路登录或登出后入口即时刷新
+  useSessionSnapshot();
   const role = currentRole();
   if (role === 'participant') {
     return (

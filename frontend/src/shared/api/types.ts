@@ -297,6 +297,8 @@ export interface AnswerRecord extends BaseRecord {
 /** 导出范围（scope_json）：服务端按身份校验允许范围（FR-EXP-004）。 */
 export interface ExportScope {
   type: 'platform' | 'organization' | 'activity';
+  /** type=organization 时必填（超管机构范围导出；管理员机构导出由服务端按身份注入）。 */
+  organization_id?: string;
   activity_id?: string;
   date_range?: { from: string; to: string };
 }

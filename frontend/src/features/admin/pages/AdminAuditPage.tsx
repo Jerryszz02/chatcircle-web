@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AuditLogRecord } from '../../../shared/api/types';
 import { normalizeApiError } from '../../../shared/api/http';
+import { localDayToPbUtcRange } from '../../../shared/lib/datetime';
+import { pbClients } from '../../../shared/pocketbase';
 import { Button, Card, Input, Loading } from '../../../shared/ui';
 import { AdminLayout } from '../components/AdminLayout';
 import { StatusTag } from '../components/StatusTag';
@@ -30,14 +32,34 @@ export function AdminAuditPage() {
     async (pageNo: number) => {
       setError('');
       const conditions: string[] = [];
-      if (from) conditions.push(`created >= "${from} 00:00:00"`);
-      if (to) conditions.push(`created <= "${to} 23:59:59"`);
-      if (actorId.trim()) conditions.push(`actor_id = "${actorId.trim()}"`);
-      if (action.trim()) conditions.push(`action ~ "${action.trim()}"`);
+      const params: Record<string, string> = {};
+      // 本地日期 → 该自然日对应的 UTC 边界（PB 按 UTC 存储比较，直接拼本地日期会偏移一个时区）
+      const fromRange = from ? localDayToPbUtcRange(from) : null;
+      if (fromRange) {
+        conditions.push('created >= {:fromGte}');
+        params.fromGte = fromRange.gte;
+      }
+      const toRange = to ? localDayToPbUtcRange(to) : null;
+      if (toRange) {
+        conditions.push('created < {:toLt}');
+        params.toLt = toRange.lt;
+      }
+      // 用户输入一律经 client.filter 参数绑定，防 filter 注入（引号/运算符截断）
+      if (actorId.trim()) {
+        conditions.push('actor_id = {:actorId}');
+        params.actorId = actorId.trim();
+      }
+      if (action.trim()) {
+        conditions.push('action ~ {:action}');
+        params.action = action.trim();
+      }
       try {
         const list = await adminCollections().auditLogs.getList(pageNo, 50, {
           sort: '-created',
-          filter: conditions.length > 0 ? conditions.map((c) => `(${c})`).join(' && ') : undefined,
+          filter:
+            conditions.length > 0
+              ? pbClients.admin.filter(conditions.map((c) => `(${c})`).join(' && '), params)
+              : undefined,
         });
         setItems(list.items);
         setTotalPages(Math.max(1, list.totalPages));
