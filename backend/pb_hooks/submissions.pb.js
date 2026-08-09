@@ -25,9 +25,9 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/draft', (e) => {
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -79,7 +79,11 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/draft', (e) => {
   try {
     auth = requireAuth(e, 'participant');
   } catch (err) {
-    return jsonError(e, err.status || 401, (err.data && typeof err.data.code === 'string' ? err.data.code : 'unauthorized'), err.message || '需要参与者登录');
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
   }
   let survey;
   try {
@@ -110,11 +114,13 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/draft', (e) => {
     return jsonError(e, 403, 'survey_not_eligible', '问卷填写资格校验未通过：' + failed.join('、'));
   }
 
-  // 归一化 answers 入参：[{question_code, value}]
+  // 归一化 answers 入参：[{question_code, value}]；未提供 value（或显式 null）的项跳过
+  // （保留已有草稿，不归一为 null 清空；answers.value_json required，null 落库会被拒）
   const body = e.requestInfo().body || {};
   const answersInput = (Array.isArray(body.answers) ? body.answers : [])
     .filter((a) => a && typeof a.question_code === 'string' && a.question_code !== '')
-    .map((a) => ({ question_code: a.question_code, value: a.value === undefined ? null : a.value }));
+    .filter((a) => a.value !== undefined && a.value !== null)
+    .map((a) => ({ question_code: a.question_code, value: a.value }));
 
   // question_code 必须属于本问卷
   const questions = $app.findRecordsByFilter(
@@ -129,9 +135,49 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/draft', (e) => {
   questions.forEach((q) => {
     byCode[q.get('question_code')] = q;
   });
+  // 答案值形态校验：选择题须为选项成员、scale_1_5 须 1-5 整数、数值题须有限数、
+  // 文本 ≤2000 字符；空值跳过（未作答项由提交侧必填校验兜底）
+  const answerValueError = (q, value) => {
+    const code = q.get('question_code');
+    const type = q.get('question_type');
+    if (value === null || value === '' || (Array.isArray(value) && value.length === 0)) return null;
+    if (type === 'single_choice' || type === 'multi_choice') {
+      if (type === 'single_choice' && typeof value !== 'string') return '题目 ' + code + ' 须为单选值';
+      if (type === 'multi_choice' && (!Array.isArray(value) || value.some((v) => typeof v !== 'string'))) {
+        return '题目 ' + code + ' 须为选项数组';
+      }
+      const opts = decodeJson(q.get('options_json'));
+      const list = Array.isArray(opts) ? opts : (opts && Array.isArray(opts.options) ? opts.options : []);
+      const allowed = list.map((o) => (typeof o === 'string' ? o : o && o.value)).filter((v) => typeof v === 'string');
+      if (allowed.length === 0) return null; // 无可解析选项定义时不做强校验
+      const values = type === 'single_choice' ? [value] : value;
+      for (const v of values) {
+        if (allowed.indexOf(v) < 0) return '题目 ' + code + ' 含非法选项值';
+      }
+      return null;
+    }
+    if (type === 'scale_1_5') {
+      if (!Number.isInteger(value) || value < 1 || value > 5) return '题目 ' + code + ' 须为 1~5 的整数';
+      return null;
+    }
+    if (type === 'scale_0_10') {
+      if (typeof value !== 'number' || !isFinite(value)) return '题目 ' + code + ' 须为有限数值';
+      return null;
+    }
+    if (type === 'text_short' || type === 'text_long') {
+      if (typeof value !== 'string') return '题目 ' + code + ' 须为文本';
+      if (value.length > 2000) return '题目 ' + code + ' 文本长度不可超过 2000 字符';
+      return null;
+    }
+    return null; // info / 其他类型不校验
+  };
   for (const a of answersInput) {
     if (!byCode[a.question_code]) {
       return jsonError(e, 400, 'validation_failed', '答案包含不属于本问卷的 question_code：' + a.question_code);
+    }
+    const valueError = answerValueError(byCode[a.question_code], a.value);
+    if (valueError) {
+      return jsonError(e, 400, 'validation_failed', valueError);
     }
   }
 
@@ -202,13 +248,18 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/draft', (e) => {
       },
     });
   } catch (err) {
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
     if (String(err).indexOf('LOCKED') >= 0) {
       return jsonError(e, 409, 'submission_locked', '答卷已提交并锁定，不可再修改');
     }
     if (String(err).indexOf('VOIDED') >= 0) {
       return jsonError(e, 409, 'submission_voided', '答卷已被作废，V1 不支持重新填写');
     }
-    return jsonError(e, 500, 'internal_error', '草稿保存失败：' + err);
+    // 内部错误细节不回传客户端（仅服务端日志可读）
+    return jsonError(e, 500, 'internal_error', '草稿保存失败，请稍后重试');
   }
 });
 
@@ -219,9 +270,9 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/submit', (e) => {
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -273,7 +324,11 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/submit', (e) => {
   try {
     auth = requireAuth(e, 'participant');
   } catch (err) {
-    return jsonError(e, err.status || 401, (err.data && typeof err.data.code === 'string' ? err.data.code : 'unauthorized'), err.message || '需要参与者登录');
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
   }
   let survey;
   try {
@@ -305,11 +360,14 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/submit', (e) => {
   }
 
   const body = e.requestInfo().body || {};
+  // 归一化 answers 入参（与 draft 同口径）：未提供 value（或显式 null）的项跳过（沿用已有
+  // 草稿，不归一为 null 清空；answers.value_json required，null 落库会被拒）
   const answersInput = (Array.isArray(body.answers) ? body.answers : [])
     .filter((a) => a && typeof a.question_code === 'string' && a.question_code !== '')
-    .map((a) => ({ question_code: a.question_code, value: a.value === undefined ? null : a.value }));
+    .filter((a) => a.value !== undefined && a.value !== null)
+    .map((a) => ({ question_code: a.question_code, value: a.value }));
 
-  // 题目校验：question_code 归属 + 必填题（说明题除外）非空
+  // 题目校验：question_code 归属 + 答案值形态 + 必填题（说明题除外）非空
   const questions = $app.findRecordsByFilter(
     'survey_questions',
     'activity_survey_id = {:sid}',
@@ -322,12 +380,69 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/submit', (e) => {
   questions.forEach((q) => {
     byCode[q.get('question_code')] = q;
   });
+  // 答案值形态校验：选择题须为选项成员、scale_1_5 须 1-5 整数、数值题须有限数、
+  // 文本 ≤2000 字符；空值跳过（由下方必填校验兜底）
+  const answerValueError = (q, value) => {
+    const code = q.get('question_code');
+    const type = q.get('question_type');
+    if (value === null || value === '' || (Array.isArray(value) && value.length === 0)) return null;
+    if (type === 'single_choice' || type === 'multi_choice') {
+      if (type === 'single_choice' && typeof value !== 'string') return '题目 ' + code + ' 须为单选值';
+      if (type === 'multi_choice' && (!Array.isArray(value) || value.some((v) => typeof v !== 'string'))) {
+        return '题目 ' + code + ' 须为选项数组';
+      }
+      const opts = decodeJson(q.get('options_json'));
+      const list = Array.isArray(opts) ? opts : (opts && Array.isArray(opts.options) ? opts.options : []);
+      const allowed = list.map((o) => (typeof o === 'string' ? o : o && o.value)).filter((v) => typeof v === 'string');
+      if (allowed.length === 0) return null; // 无可解析选项定义时不做强校验
+      const values = type === 'single_choice' ? [value] : value;
+      for (const v of values) {
+        if (allowed.indexOf(v) < 0) return '题目 ' + code + ' 含非法选项值';
+      }
+      return null;
+    }
+    if (type === 'scale_1_5') {
+      if (!Number.isInteger(value) || value < 1 || value > 5) return '题目 ' + code + ' 须为 1~5 的整数';
+      return null;
+    }
+    if (type === 'scale_0_10') {
+      if (typeof value !== 'number' || !isFinite(value)) return '题目 ' + code + ' 须为有限数值';
+      return null;
+    }
+    if (type === 'text_short' || type === 'text_long') {
+      if (typeof value !== 'string') return '题目 ' + code + ' 须为文本';
+      if (value.length > 2000) return '题目 ' + code + ' 文本长度不可超过 2000 字符';
+      return null;
+    }
+    return null; // info / 其他类型不校验
+  };
   for (const a of answersInput) {
     if (!byCode[a.question_code]) {
       return jsonError(e, 400, 'validation_failed', '答案包含不属于本问卷的 question_code：' + a.question_code);
     }
+    const valueError = answerValueError(byCode[a.question_code], a.value);
+    if (valueError) {
+      return jsonError(e, 400, 'validation_failed', valueError);
+    }
   }
+  // 必填校验合并服务端已有草稿答案（本次请求未覆盖的必填题沿用草稿值，非只看请求体）
   const answerMap = {};
+  let draftSub = null;
+  try {
+    draftSub = $app.findFirstRecordByFilter(
+      'submissions',
+      'activity_survey_id = {:sid} && participant_id = {:pid}',
+      { sid: survey.id, pid: auth.id },
+    );
+  } catch (_) {
+    draftSub = null;
+  }
+  if (draftSub && draftSub.get('status') === 'draft') {
+    const draftRows = $app.findRecordsByFilter('answers', 'submission_id = {:sid}', '', 500, 0, { sid: draftSub.id });
+    draftRows.forEach((row) => {
+      answerMap[row.get('question_code')] = decodeJson(row.get('value_json'));
+    });
+  }
   answersInput.forEach((a) => {
     answerMap[a.question_code] = a.value;
   });
@@ -414,10 +529,15 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/submit', (e) => {
       idempotent,
     });
   } catch (err) {
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
     if (String(err).indexOf('VOIDED') >= 0) {
       return jsonError(e, 409, 'submission_voided', '答卷已被作废，V1 不支持重新填写');
     }
-    return jsonError(e, 500, 'internal_error', '答卷提交失败：' + err);
+    // 内部错误细节不回传客户端（仅服务端日志可读）
+    return jsonError(e, 500, 'internal_error', '答卷提交失败，请稍后重试');
   }
 });
 
@@ -428,9 +548,9 @@ routerAdd('GET', '/api/cc/submissions/{id}', (e) => {
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -482,7 +602,11 @@ routerAdd('GET', '/api/cc/submissions/{id}', (e) => {
   try {
     auth = requireAuth(e, 'participant');
   } catch (err) {
-    return jsonError(e, err.status || 401, (err.data && typeof err.data.code === 'string' ? err.data.code : 'unauthorized'), err.message || '需要参与者登录');
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
   }
   let sub;
   try {
@@ -559,9 +683,9 @@ routerAdd('POST', '/api/cc/submissions/{id}/void', (e) => {
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -595,7 +719,11 @@ routerAdd('POST', '/api/cc/submissions/{id}/void', (e) => {
   try {
     auth = requireAuth(e, 'admin');
   } catch (err) {
-    return jsonError(e, err.status || 401, (err.data && typeof err.data.code === 'string' ? err.data.code : 'unauthorized'), err.message || '需要机构管理员登录');
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
   }
   let sub;
   try {
@@ -619,22 +747,25 @@ routerAdd('POST', '/api/cc/submissions/{id}/void', (e) => {
     return jsonError(e, 400, 'invalid_transition', '仅已提交的答卷可作废，当前状态：' + sub.get('status'));
   }
 
-  sub.set('status', 'voided');
-  sub.set('voided_by', auth.id);
-  sub.set('voided_at', new Date().toISOString());
-  sub.set('void_reason', reason);
-  $app.save(sub);
+  // 业务写 + 审计同事务提交（作废状态与留痕不可分）
+  $app.runInTransaction((txApp) => {
+    sub.set('status', 'voided');
+    sub.set('voided_by', auth.id);
+    sub.set('voided_at', new Date().toISOString());
+    sub.set('void_reason', reason);
+    txApp.save(sub);
 
-  writeAudit($app, {
-    actorId: auth.id,
-    actorRole: 'admin',
-    organizationId: auth.get('organization_id'),
-    action: 'submission.void',
-    targetType: 'submission',
-    targetId: sub.id,
-    result: 'success',
-    reason,
-    metadata: { from: 'submitted', to: 'voided', activity_survey_id: survey.id },
+    writeAudit(txApp, {
+      actorId: auth.id,
+      actorRole: 'admin',
+      organizationId: auth.get('organization_id'),
+      action: 'submission.void',
+      targetType: 'submission',
+      targetId: sub.id,
+      result: 'success',
+      reason,
+      metadata: { from: 'submitted', to: 'voided', activity_survey_id: survey.id },
+    });
   });
   return e.json(200, { id: sub.id, status: 'voided' });
 });
@@ -647,9 +778,9 @@ routerAdd('GET', '/api/cc/me/overview', (e) => {
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -683,7 +814,11 @@ routerAdd('GET', '/api/cc/me/overview', (e) => {
   try {
     auth = requireAuth(e, 'participant');
   } catch (err) {
-    return jsonError(e, err.status || 401, (err.data && typeof err.data.code === 'string' ? err.data.code : 'unauthorized'), err.message || '需要参与者登录');
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
   }
 
   const registrations = $app.findRecordsByFilter(

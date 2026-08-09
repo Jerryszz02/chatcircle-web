@@ -153,14 +153,16 @@ routerAdd('POST', '/api/cc/activities/{id}/register', (e) => {
       }
     }
   };
-  // 按 field_type 校验答案值形态（能力层，字段内容 PRD 未写死，D-1）
+  // 按 field_type 校验答案值形态（能力层，字段内容 PRD 未写死，D-1）：
+  // 文本 ≤2000 字符；数字须有限（拒 Infinity/NaN，防 JSON 落库劣化）；日期锚定整串
   const validateAnswerValue = (def, value) => {
     const type = def.get('field_type');
     const code = def.get('field_code');
     if (type === 'text') {
       if (typeof value !== 'string') ccError(400, 'INVALID_VALUE', '字段 ' + code + ' 须为文本');
+      if (value.length > 2000) ccError(400, 'INVALID_VALUE', '字段 ' + code + ' 文本长度不可超过 2000 字符');
     } else if (type === 'number') {
-      if (typeof value !== 'number') ccError(400, 'INVALID_VALUE', '字段 ' + code + ' 须为数字');
+      if (typeof value !== 'number' || !isFinite(value)) ccError(400, 'INVALID_VALUE', '字段 ' + code + ' 须为有限数字');
     } else if (type === 'single_choice') {
       if (typeof value !== 'string') ccError(400, 'INVALID_VALUE', '字段 ' + code + ' 须为单选值');
       assertChoiceMember(def, [value]);
@@ -170,7 +172,7 @@ routerAdd('POST', '/api/cc/activities/{id}/register', (e) => {
       }
       assertChoiceMember(def, value);
     } else if (type === 'date') {
-      if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(value)) {
+      if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
         ccError(400, 'INVALID_VALUE', '字段 ' + code + ' 须为日期（YYYY-MM-DD）');
       }
     } else {
@@ -369,52 +371,76 @@ routerAdd('POST', '/api/cc/registrations/{id}/transition', (e) => {
   }
   const roleChanged = to === 'approved' && targetRole !== registration.get('activity_role');
 
-  let fresh = null;
-  $app.runInTransaction((txApp) => {
-    // 事务内重读：防审核间状态漂移
-    fresh = txApp.findRecordById('registrations', registrationId);
-    if (fresh.get('status') === to && fresh.get('activity_role') === targetRole) {
-      return; // 幂等：已是目标状态与角色（并发同目标操作）
-    }
-    if (fresh.get('status') !== from) {
-      ccError(409, 'CONCURRENT_MODIFICATION', '报名状态已被其他操作变更，请刷新后重试');
-    }
-    // 名额事务硬校验：通过/回退/改角色共用（FR-REG-005、AC-08）
-    if (to === 'approved') {
-      const freshActivity = txApp.findRecordById('activities', activity.id);
-      ccAssertCapacity(txApp, freshActivity, targetRole);
-    }
-    fresh.set('status', to);
-    if (to === 'approved') {
-      fresh.set('activity_role', targetRole);
-    }
-    fresh.set('status_reason', reason);
-    txApp.save(fresh);
+  // 活动状态校验：已下架/已归档活动不可再审核报名（approve/reject 一律拒绝）
+  if ((to === 'approved' || to === 'rejected') &&
+      (activity.get('status') === 'taken_down' || activity.get('status') === 'archived')) {
+    ccError(400, 'ACTIVITY_UNAVAILABLE', '活动已下架或已归档，不能审核报名');
+  }
 
-    // 审计：状态变更（FR-REG-008、security-privacy §8.1 报名类），与业务写同事务
-    const meta = {
-      from: from, to: to,
-      activity_id: activity.id, participant_id: fresh.get('participant_id'),
-    };
-    writeAudit(txApp, {
-      actorId: admin.id, actorRole: 'admin', organizationId: orgId,
-      action: rule.action, targetType: 'registration', targetId: registrationId,
-      result: 'success', reason: reason || undefined, metadata: meta,
-    });
-    // 审核时改角色单独留痕（security-privacy §8.1「角色修改」）
-    if (roleChanged) {
-      writeAudit(txApp, {
-        actorId: admin.id, actorRole: 'admin', organizationId: orgId,
-        action: 'registration.role_change', targetType: 'registration', targetId: registrationId,
-        result: 'success', reason: reason || undefined,
-        metadata: {
+  let fresh = null;
+  // SQLite 快照冲突/SQLITE_BUSY 类错误最多重试 2 次，仍失败返回 409 CONFLICT（并发友好化）
+  const isBusyErr = (err) => !!err && /busy|locked|snapshot/i.test(String((err && err.message) || err));
+  let attempts = 0;
+  for (;;) {
+    try {
+      $app.runInTransaction((txApp) => {
+        // 事务内重读：防审核间状态漂移
+        fresh = txApp.findRecordById('registrations', registrationId);
+        if (fresh.get('status') === to && fresh.get('activity_role') === targetRole) {
+          return; // 幂等：已是目标状态与角色（并发同目标操作）
+        }
+        if (fresh.get('status') !== from) {
+          ccError(409, 'CONCURRENT_MODIFICATION', '报名状态已被其他操作变更，请刷新后重试');
+        }
+        // 名额事务硬校验：通过/回退/改角色共用（FR-REG-005、AC-08）
+        if (to === 'approved') {
+          const freshActivity = txApp.findRecordById('activities', activity.id);
+          ccAssertCapacity(txApp, freshActivity, targetRole);
+        }
+        fresh.set('status', to);
+        if (to === 'approved') {
+          fresh.set('activity_role', targetRole);
+        }
+        fresh.set('status_reason', reason);
+        txApp.save(fresh);
+
+        // 审计：状态变更（FR-REG-008、security-privacy §8.1 报名类），与业务写同事务
+        const meta = {
           from: from, to: to,
           activity_id: activity.id, participant_id: fresh.get('participant_id'),
-          from_role: registration.get('activity_role'), to_role: targetRole,
-        },
+        };
+        writeAudit(txApp, {
+          actorId: admin.id, actorRole: 'admin', organizationId: orgId,
+          action: rule.action, targetType: 'registration', targetId: registrationId,
+          result: 'success', reason: reason || undefined, metadata: meta,
+        });
+        // 审核时改角色单独留痕（security-privacy §8.1「角色修改」）
+        if (roleChanged) {
+          writeAudit(txApp, {
+            actorId: admin.id, actorRole: 'admin', organizationId: orgId,
+            action: 'registration.role_change', targetType: 'registration', targetId: registrationId,
+            result: 'success', reason: reason || undefined,
+            metadata: {
+              from: from, to: to,
+              activity_id: activity.id, participant_id: fresh.get('participant_id'),
+              from_role: registration.get('activity_role'), to_role: targetRole,
+            },
+          });
+        }
       });
+      break;
+    } catch (err) {
+      if (err && err.__ccError === true) throw err; // 业务错误不重试，顶层统一转换
+      if (isBusyErr(err) && attempts < 2) {
+        attempts++;
+        continue;
+      }
+      if (isBusyErr(err)) {
+        ccError(409, 'CONFLICT', '审核操作冲突，请稍后重试');
+      }
+      throw err;
     }
-  });
+  }
 
   return e.json(200, { registration: fresh });
   } catch (err) {
