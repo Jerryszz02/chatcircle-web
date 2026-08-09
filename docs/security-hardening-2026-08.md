@@ -88,10 +88,11 @@
 
 ## 4. 生产部署必做
 
-1. **PB 控制台 Settings → 启用 trusted proxy headers（信任 `X-Forwarded-For`）**：否则 `e.realIP()` 只拿到 Caddy 容器地址，所有 per-IP 限流（内置认证 20 次/10 分钟、参与者喷洒/注册、导出）退化为全平台共享桶，等同全局限流。Caddy 侧已覆盖伪造 XFF（`deploy/Caddyfile`），两边必须同时生效。
+1. ~~PB 控制台启用 trusted proxy headers~~ **已代码化**：迁移 `1785889200_cc_trusted_proxy.js` 随部署自动生效（settings 存 `_params` 表，非 schema），无需控制台手工操作；实测启用后 `e.realIP()` 立即采信 XFF。前提是流量必须经 Caddy（compose 拓扑已保证 8090 仅回环+内网可达，Caddyfile 覆盖伪造 XFF）。
 2. 重印全部活动签到二维码（见 §3）。
 3. 按 `.env.example` 最新指引收窄阿里云 RAM 策略（按 hosted zone + 4 个 DNS Action），轮换已在用的 AccessKey。
 4. 确认备份告警巡检口径切换到 `backups/last_backup.json`（audit 回写接入前）。
+5. 删除服务器上的明文 HTTP 过渡配置 `docker-compose.override.yml`，改走 Caddy 8443 HTTPS（仓库配置已具备，删除后 `docker compose up -d` 即可）。
 
 ---
 
