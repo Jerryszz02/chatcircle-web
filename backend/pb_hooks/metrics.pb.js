@@ -14,7 +14,8 @@
 //   unique_participants     有效签到中的 participant_id 去重（同一自然人多账号不合并）
 //   survey_submissions      有效已提交答卷数（作废不计）
 //   survey_completion_rate  有效提交人数 ÷ 符合填写资格人数；资格=当前报名已通过（剔除已取消）
-//                           且角色符合问卷适用范围；开放时间不影响最终分母
+//                           且角色符合问卷适用范围；分子同样只计报名当前仍为已通过的提交；
+//                           开放时间不影响最终分母
 // - 时间筛选 from/to 作用于活动 start_time（先圈定活动范围，再聚合其关联记录），
 //   与导出口径保持一致（FR-DASH-002）。
 //
@@ -25,9 +26,9 @@ routerAdd('GET', '/api/cc/metrics/{metricKey}', (e) => {
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -98,6 +99,15 @@ routerAdd('GET', '/api/cc/metrics/{metricKey}', (e) => {
   }
 
   const query = e.requestInfo().query || {};
+
+  // from/to 仅接受纯日期（YYYY-MM-DD），非法格式 400；to 的当日结束边界在校验通过后拼接
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  if (query.from && (typeof query.from !== 'string' || !DATE_RE.test(query.from))) {
+    return jsonError(e, 400, 'validation_failed', 'from 须为 YYYY-MM-DD 格式');
+  }
+  if (query.to && (typeof query.to !== 'string' || !DATE_RE.test(query.to))) {
+    return jsonError(e, 400, 'validation_failed', 'to 须为 YYYY-MM-DD 格式');
+  }
 
   // 机构范围注入：管理员恒为本机构（忽略客户端传入的 organization_id，FR-ORG-006）；
   // 超级管理员可全平台或按机构筛选（FR-DASH-001）
@@ -257,12 +267,17 @@ routerAdd('GET', '/api/cc/metrics/{metricKey}', (e) => {
         const scope = s.get('role_scope');
         denominator += regs.filter((r) => scope === 'both' || r.get('activity_role') === scope).length;
       });
-      const numerator = ctx.submittedSubmissions().length;
+      // 分子口径：只计报名当前仍为 approved 的提交（取消/拒绝后不计入有效提交人数）
+      const approvedRegIds = {};
+      approved.forEach((r) => {
+        approvedRegIds[r.id] = true;
+      });
+      const numerator = ctx.submittedSubmissions().filter((s) => approvedRegIds[s.get('registration_id')]).length;
       return {
         value: denominator === 0 ? 0 : Math.round((numerator / denominator) * 10000) / 10000,
         numerator,
         denominator,
-        note: '有效提交人数 ÷ 符合填写资格人数（当前报名已通过且角色匹配；剔除已取消；开放时间不影响分母）',
+        note: '有效提交人数（报名当前仍为已通过）÷ 符合填写资格人数（当前报名已通过且角色匹配；剔除已取消；开放时间不影响分母）',
       };
     },
   };

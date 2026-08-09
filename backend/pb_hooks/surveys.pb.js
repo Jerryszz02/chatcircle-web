@@ -31,9 +31,9 @@ routerAdd('POST', '/api/cc/activities/{id}/surveys', (e) => {
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -107,7 +107,11 @@ routerAdd('POST', '/api/cc/activities/{id}/surveys', (e) => {
   try {
     auth = requireAuth(e, 'admin');
   } catch (err) {
-    return jsonError(e, err.status || 401, (err.data && typeof err.data.code === 'string' ? err.data.code : 'unauthorized'), err.message || '需要机构管理员登录');
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
   }
 
   let activity;
@@ -194,7 +198,12 @@ routerAdd('POST', '/api/cc/activities/{id}/surveys', (e) => {
       created = survey;
     });
   } catch (err) {
-    return jsonError(e, 500, 'internal_error', '复制活动问卷失败：' + err);
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    // 内部错误细节不回传客户端（仅服务端日志可读）
+    return jsonError(e, 500, 'internal_error', '复制活动问卷失败，请稍后重试');
   }
 
   return e.json(200, {
@@ -236,9 +245,9 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/open', (e) => {
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -272,7 +281,11 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/open', (e) => {
   try {
     auth = requireAuth(e, 'admin');
   } catch (err) {
-    return jsonError(e, err.status || 401, (err.data && typeof err.data.code === 'string' ? err.data.code : 'unauthorized'), err.message || '需要机构管理员登录');
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
   }
   let survey;
   try {
@@ -288,20 +301,23 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/open', (e) => {
   if (['draft', 'not_open'].indexOf(from) < 0) {
     return jsonError(e, 400, 'invalid_transition', '仅草稿/未开放状态可开放，当前状态：' + from);
   }
-  survey.set('status', 'open');
-  if (!survey.get('opened_at')) {
-    survey.set('opened_at', new Date().toISOString());
-  }
-  $app.save(survey);
-  writeAudit($app, {
-    actorId: auth.id,
-    actorRole: 'admin',
-    organizationId: auth.get('organization_id'),
-    action: 'survey.open',
-    targetType: 'activity_survey',
-    targetId: survey.id,
-    result: 'success',
-    metadata: { from, to: 'open', survey_code: survey.get('survey_code') },
+  // 业务写 + 审计同事务提交（状态变更与留痕不可分）
+  $app.runInTransaction((txApp) => {
+    survey.set('status', 'open');
+    if (!survey.get('opened_at')) {
+      survey.set('opened_at', new Date().toISOString());
+    }
+    txApp.save(survey);
+    writeAudit(txApp, {
+      actorId: auth.id,
+      actorRole: 'admin',
+      organizationId: auth.get('organization_id'),
+      action: 'survey.open',
+      targetType: 'activity_survey',
+      targetId: survey.id,
+      result: 'success',
+      metadata: { from, to: 'open', survey_code: survey.get('survey_code') },
+    });
   });
   return e.json(200, { id: survey.id, status: 'open' });
 });
@@ -326,9 +342,9 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/close', (e) => {
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -362,7 +378,11 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/close', (e) => {
   try {
     auth = requireAuth(e, 'admin');
   } catch (err) {
-    return jsonError(e, err.status || 401, (err.data && typeof err.data.code === 'string' ? err.data.code : 'unauthorized'), err.message || '需要机构管理员登录');
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
   }
   let survey;
   try {
@@ -378,18 +398,21 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/close', (e) => {
   if (from !== 'open') {
     return jsonError(e, 400, 'invalid_transition', '仅开放中的问卷可结束，当前状态：' + from);
   }
-  survey.set('status', 'ended');
-  survey.set('ended_at', new Date().toISOString());
-  $app.save(survey);
-  writeAudit($app, {
-    actorId: auth.id,
-    actorRole: 'admin',
-    organizationId: auth.get('organization_id'),
-    action: 'survey.close',
-    targetType: 'activity_survey',
-    targetId: survey.id,
-    result: 'success',
-    metadata: { from, to: 'ended', survey_code: survey.get('survey_code') },
+  // 业务写 + 审计同事务提交（状态变更与留痕不可分）
+  $app.runInTransaction((txApp) => {
+    survey.set('status', 'ended');
+    survey.set('ended_at', new Date().toISOString());
+    txApp.save(survey);
+    writeAudit(txApp, {
+      actorId: auth.id,
+      actorRole: 'admin',
+      organizationId: auth.get('organization_id'),
+      action: 'survey.close',
+      targetType: 'activity_survey',
+      targetId: survey.id,
+      result: 'success',
+      metadata: { from, to: 'ended', survey_code: survey.get('survey_code') },
+    });
   });
   return e.json(200, { id: survey.id, status: 'ended' });
 });
@@ -401,9 +424,9 @@ routerAdd('GET', '/api/cc/surveys/{qrToken}', (e) => {
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -477,7 +500,11 @@ routerAdd('GET', '/api/cc/surveys/{qrToken}', (e) => {
   try {
     auth = requireAuth(e, 'participant');
   } catch (err) {
-    return jsonError(e, err.status || 401, (err.data && typeof err.data.code === 'string' ? err.data.code : 'unauthorized'), err.message || '需要参与者登录');
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
   }
 
   let survey;
