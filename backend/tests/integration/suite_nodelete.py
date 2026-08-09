@@ -17,14 +17,19 @@ def run(ctx):
     # ---------- fixture：每个集合至少一条真实记录 ----------
     org = fx.create_org(base, st, '删除校验机构')
     _, AT = fx.create_admin(base, st, org, 'ndel_admin_1')
-    _, AT2 = fx.create_admin(base, st, org, 'ndel_admin_2')
+    # 第二管理员仅作 delete 目标记录，无需登录态：超管直建（invite 流程的登录会占用
+    # 内置 auth-with-password per-IP 限流预算，见 suite_hardening 头注释）
+    s, a2 = call(base, 'POST', '/api/collections/admin_accounts/records',
+                 {'username': 'ndel_admin_2', 'password': fx.PASSWORD,
+                  'passwordConfirm': fx.PASSWORD, 'organization_id': org, 'status': 'active'}, st)
+    assert s == 200, '超管直建第二管理员失败：%s' % a2
     act = fx.create_activity(base, AT, org, 'CC_IT_NDEL_01', '删除校验场',
                              fields=[(fields['nickname'], True, True)])
     P, PT, _ = fx.create_participant(base, 'ndel_user')
     reg = fx.register(base, PT, act, 'speaker', fx.field_answers(fields, '删验'))
     fx.transition(base, AT, reg, 'approved')
     call(base, 'POST', '/api/cc/activities/%s/checkin/open' % act, {}, AT)
-    s, ck = call(base, 'POST', '/api/cc/checkin/%s/self' % act, {}, PT)
+    s, ck = fx.self_checkin(base, fx.checkin_token(base, AT, act), PT)
     checkin = (ck.get('checkin') or {}).get('id')
     sv, _ = fx.create_survey(base, AT, act, ver_id, '删验问卷')
     call(base, 'POST', '/api/cc/activity-surveys/%s/open' % sv, {}, AT)

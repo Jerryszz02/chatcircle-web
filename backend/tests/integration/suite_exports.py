@@ -77,7 +77,7 @@ def run(ctx):
     call(base, 'POST', '/api/cc/submissions/%s/void' % sub2_id, {'reason': '导出排除验证'}, AT_A)
     # p1 签到一次
     call(base, 'POST', '/api/cc/activities/%s/checkin/open' % act, {}, AT_A)
-    call(base, 'POST', '/api/cc/checkin/%s/self' % act, {}, PT1)
+    fx.self_checkin(base, fx.checkin_token(base, AT_A, act), PT1)
     call(base, 'POST', '/api/cc/activities/%s/checkin/close' % act, {}, AT_A)
 
     # ---------- 1. 普通导出内容（AC-16）----------

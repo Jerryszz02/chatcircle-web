@@ -4,7 +4,7 @@
 覆盖：邀请码 → 管理员注册/登录 → 建活动（数组版 form_config）→ 发布 →
 参与者自动注册 → 公开详情 → 报名 → 审核 → 签到（错误分支 + 幂等）→
 问卷（资格/草稿/提交幂等/只读答案/me 聚合）→ 看板指标口径 → 导出 ZIP →
-手动备份与故障注入告警 → 未认证错误形态。
+备份端点下线形态（410/无审计）→ 未认证错误形态。
 
 对应 AC：AC-02/04/05/06/09/11/12/14/15/16/20/23 的happy path 与关键分支；
 专项反例（越权、并发、矩阵枚举、限流等）在各自套件。
@@ -49,7 +49,7 @@ def run(ctx):
         'status': 'draft', 'capacity_total': 10, 'capacity_speaker': 5, 'capacity_listener': 5,
         'registration_open': True,
         'registration_start_at': '2026-08-01 00:00:00Z', 'registration_end_at': '2026-12-31 23:59:59Z',
-        'checkin_qr_token': 'ckqr_cc_it_flow_01', 'group_tag': '',
+        'group_tag': '',
         'form_config_json': {'fields': [
             {'field_def_id': fields['nickname'], 'enabled': True, 'required': True},
             {'field_def_id': fields['age'], 'enabled': True, 'required': False},
@@ -59,6 +59,10 @@ def run(ctx):
     AID = act.get('id')
     rep.check('C1 管理员创建活动（数组版 form_config）', s == 200 and bool(AID),
               act if s != 200 else '')
+    # 签到二维码 token 由服务端创建时生成（checkin_qr_token，FR-CHK-001），管理员读活动记录获取
+    QR_CK = fx.checkin_token(base, AT, AID)
+    rep.check('C1b 服务端自动生成签到二维码 token（24 位随机）',
+              isinstance(QR_CK, str) and len(QR_CK) == 24, QR_CK)
     s, pub = call(base, 'POST', '/api/cc/activities/%s/publish' % AID, {}, AT)
     rep.check('C2 直接发布活动', s == 200 and pub.get('activity', {}).get('status') == 'published',
               pub if s != 200 else '')
@@ -109,7 +113,7 @@ def run(ctx):
     R2 = (r2.get('registration') or {}).get('id')
 
     # D5 签到错误分支：报名未审核
-    s, e1 = call(base, 'POST', '/api/cc/checkin/%s/self' % AID, {}, P2T)
+    s, e1 = fx.self_checkin(base, QR_CK, P2T)
     rep.check('D5 未审核签到 → 403 registration_not_approved',
               s == 403 and biz_code(e1) == 'registration_not_approved', e1)
 
@@ -119,20 +123,20 @@ def run(ctx):
               tr1 if s != 200 else '')
     s, tr2 = call(base, 'POST', '/api/cc/registrations/%s/transition' % R2, {'to': 'approved'}, AT)
     rep.check('D6b 管理员审核通过 R2', s == 200, tr2 if s != 200 else '')
-    s, e2 = call(base, 'POST', '/api/cc/checkin/%s/self' % AID, {}, P1T)
+    s, e2 = fx.self_checkin(base, QR_CK, P1T)
     rep.check('D6c 签到未开放 → 400 checkin_not_open', s == 400 and biz_code(e2) == 'checkin_not_open', e2)
 
     s, oc = call(base, 'POST', '/api/cc/activities/%s/checkin/open' % AID, {}, AT)
     rep.check('D7a 开放签到', s == 200, oc if s != 200 else '')
-    s, ck = call(base, 'POST', '/api/cc/checkin/%s/self' % AID, {}, P1T)
+    s, ck = fx.self_checkin(base, QR_CK, P1T)
     rep.check('D7b 自助签到成功（status=valid）',
               s == 200 and ck.get('checkin', {}).get('status') == 'valid', ck if s != 200 else '')
-    s, ck2 = call(base, 'POST', '/api/cc/checkin/%s/self' % AID, {}, P1T)
+    s, ck2 = fx.self_checkin(base, QR_CK, P1T)
     rep.check('D7c 重复扫码幂等 already_checked_in=true',
               s == 200 and ck2.get('already_checked_in') is True, ck2)
 
     call(base, 'POST', '/api/cc/activities/%s/checkin/close' % AID, {}, AT)
-    s, e3 = call(base, 'POST', '/api/cc/checkin/%s/self' % AID, {}, P2T)
+    s, e3 = fx.self_checkin(base, QR_CK, P2T)
     rep.check('D8 签到已结束 → 400 checkin_closed', s == 400 and biz_code(e3) == 'checkin_closed', e3)
 
     # ---------- E. 问卷链路 ----------
@@ -232,21 +236,23 @@ def run(ctx):
               s == 200 and isinstance(blob, bytes) and blob[:2] == b'PK',
               'status=%s len=%s' % (s, len(blob) if isinstance(blob, bytes) else 0))
 
+    # F6~F8：backup/run 已下线（410 Gone，假备份治理）；每日一致性快照由 deploy/backup.sh
+    # 自动执行，backup-status 的 backup.* 审计口径与告警联动由 suite_backup 覆盖
     s, br = call(base, 'POST', '/api/cc/super/backup/run', {}, st)
-    rep.check('F6 手动备份 backup/run', s == 200 and br.get('ok') is True, br if s != 200 else '')
+    rep.check('F6 手动备份 backup/run → 410 backup_deprecated',
+              s == 410 and biz_code(br) == 'backup_deprecated', br)
     s, bs = call(base, 'GET', '/api/cc/super/backup-status', token=st)
-    lb = bs.get('last_backup') or {}
-    rep.check('F7 backup-status {last_backup{result,file,created}, alert:false}',
-              s == 200 and lb.get('result') == 'success' and bs.get('alert') is False
-              and bool(lb.get('file')), bs)
-    call(base, 'POST', '/api/cc/super/backup/run', {'force_fail': True}, st)
-    s, bs2 = call(base, 'GET', '/api/cc/super/backup-status', token=st)
-    rep.check('F8 故障注入后 alert=true（AC-23）',
-              bs2.get('alert') is True and (bs2.get('last_backup') or {}).get('result') == 'failure', bs2)
+    rep.check('F7 backup-status 尚无备份记录 → last_backup=null 且 alert=true',
+              s == 200 and bs.get('last_backup') is None and bs.get('alert') is True
+              and bool(bs.get('message')), bs)
+    s, ba = call(base, 'GET',
+                 "/api/collections/audit_logs/records?filter=(action='backup.success'||action='backup.failed')",
+                 token=st)
+    rep.check('F8 backup/run 不再写 backup.* 审计', s == 200 and ba.get('totalItems') == 0, ba)
 
     # ---------- G. 未认证错误形态 ----------
     s, ue = call(base, 'GET', '/api/cc/me/overview')
     rep.check('G1 未认证 401 错误体 {code,message,data:{code}}',
               s == 401 and 'message' in ue and biz_code(ue) is not None, ue)
-    s, ue2 = call(base, 'POST', '/api/cc/checkin/%s/self' % AID, {})
+    s, ue2 = call(base, 'POST', '/api/cc/checkin/self', {'token': QR_CK})
     rep.check('G2 签到未认证 401', s == 401 and 'message' in ue2, ue2)

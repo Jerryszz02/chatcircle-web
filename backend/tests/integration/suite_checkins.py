@@ -28,6 +28,7 @@ def run(ctx):
     _, AT = fx.create_admin(base, st, org, 'chk_admin')
     act = fx.create_activity(base, AT, org, 'CC_IT_CHK_01', '签到校验场',
                              fields=fx.nick_field_cfg(fields), caps=(20, 10, 10))
+    qr = fx.checkin_token(base, AT, act)
 
     P1, PT1, _ = fx.create_participant(base, 'chk_u1')
     P2, PT2, _ = fx.create_participant(base, 'chk_u2')
@@ -45,25 +46,25 @@ def run(ctx):
     fx.transition(base, AT, reg5, 'rejected')
 
     # ---------- 1. 前置校验 ----------
-    s, r = call(base, 'POST', '/api/cc/checkin/%s/self' % act, {}, PT2)
+    s, r = fx.self_checkin(base, qr, PT2)
     rep.check('CHK-01 待审核报名扫码 → 403 registration_not_approved',
               s == 403 and biz_code(r) == 'registration_not_approved', r)
-    s, r = call(base, 'POST', '/api/cc/checkin/%s/self' % act, {}, PT5)
+    s, r = fx.self_checkin(base, qr, PT5)
     rep.check('CHK-02 已拒绝报名扫码 → 403 registration_not_approved',
               s == 403 and biz_code(r) == 'registration_not_approved', r)
-    s, r = call(base, 'POST', '/api/cc/checkin/%s/self' % act, {}, PT1)
+    s, r = fx.self_checkin(base, qr, PT1)
     rep.check('CHK-03 签到未开放 → 400 checkin_not_open',
               s == 400 and biz_code(r) == 'checkin_not_open', r)
 
     # ---------- 2. 开放 → 首签 → 幂等重复 ----------
     s, r = call(base, 'POST', '/api/cc/activities/%s/checkin/open' % act, {}, AT)
     rep.check('CHK-04 管理员开放签到', s == 200, r)
-    s, r = call(base, 'POST', '/api/cc/checkin/%s/self' % act, {}, PT1)
+    s, r = fx.self_checkin(base, qr, PT1)
     ck1 = (r.get('checkin') or {}).get('id')
     rep.check('CHK-05 已通过者开放期首签成功（valid）',
               s == 200 and (r.get('checkin') or {}).get('status') == 'valid'
               and r.get('already_checked_in') is False, r)
-    s, r = call(base, 'POST', '/api/cc/checkin/%s/self' % act, {}, PT1)
+    s, r = fx.self_checkin(base, qr, PT1)
     rep.check('CHK-06 重复扫码幂等（同一记录，不新建）',
               s == 200 and r.get('already_checked_in') is True
               and (r.get('checkin') or {}).get('id') == ck1, r)
@@ -74,7 +75,7 @@ def run(ctx):
 
     def scan():
         barrier.wait()
-        return call(base, 'POST', '/api/cc/checkin/%s/self' % act, {}, PT3)
+        return fx.self_checkin(base, qr, PT3)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         f1 = pool.submit(scan)
@@ -87,10 +88,10 @@ def run(ctx):
 
     # ---------- 4. 关闭后扫码 ----------
     call(base, 'POST', '/api/cc/activities/%s/checkin/close' % act, {}, AT)
-    s, r = call(base, 'POST', '/api/cc/checkin/%s/self' % act, {}, PT4)
+    s, r = fx.self_checkin(base, qr, PT4)
     rep.check('CHK-09 签到已结束 → 400 checkin_closed',
               s == 400 and biz_code(r) == 'checkin_closed', r)
-    s, r = call(base, 'POST', '/api/cc/checkin/%s/self' % act, {}, PT1)
+    s, r = fx.self_checkin(base, qr, PT1)
     rep.check('CHK-10 已签到者关闭期重复扫码仍幂等返回（不报错）',
               s == 200 and r.get('already_checked_in') is True, r)
 
@@ -136,7 +137,7 @@ def run(ctx):
 
     # ---------- 7. 撤销后重新开放可再签 ----------
     call(base, 'POST', '/api/cc/activities/%s/checkin/open' % act, {}, AT)
-    s, r = call(base, 'POST', '/api/cc/checkin/%s/self' % act, {}, PT1)
+    s, r = fx.self_checkin(base, qr, PT1)
     rep.check('CHK-21 撤销后重新签到成功（新一条 valid）',
               s == 200 and (r.get('checkin') or {}).get('status') == 'valid'
               and r.get('already_checked_in') is False, r)
