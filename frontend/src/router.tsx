@@ -54,7 +54,7 @@ export function AppRoutes() {
         }
       />
       <Route
-        path="/checkin/:activityId"
+        path="/checkin/:token"
         element={
           <RequireRole role="participant">
             <CheckinPage />

@@ -120,7 +120,7 @@ export function surveyIneligibleCopy(reason: SurveyIneligibleReason | string): {
   }
 }
 
-/** 签到失败展示（POST /api/cc/checkin/:activityId/self 的错误码映射，FR-CHK-002/003）。 */
+/** 签到失败展示（POST /api/cc/checkin/self 的错误码映射，FR-CHK-002/003）。 */
 export function checkinFailureCopy(err: ApiError): { title: string; detail: string } {
   switch (bizCodeOf(err)) {
     case 'checkin_not_open':

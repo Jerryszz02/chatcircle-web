@@ -69,8 +69,8 @@ describe('路由分区（公开页）', () => {
 });
 
 describe('路由守卫（technical-design §5.3）', () => {
-  it('未登录访问 /checkin/:activityId：跳 /login（redirect 回跳地址由守卫单测覆盖）', () => {
-    renderAt('/checkin/act123');
+  it('未登录访问 /checkin/:token：跳 /login（redirect 回跳地址由守卫单测覆盖）', () => {
+    renderAt('/checkin/tok123');
     expect(screen.queryByRole('heading', { name: '扫码签到' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '平台通用登录' })).toBeInTheDocument();
   });
@@ -90,9 +90,9 @@ describe('路由守卫（technical-design §5.3）', () => {
     expect(screen.getByRole('heading', { name: '超级管理员登录' })).toBeInTheDocument();
   });
 
-  it('参与者会话可访问 /checkin/:activityId', () => {
+  it('参与者会话可访问 /checkin/:token', () => {
     saveSession('participant');
-    renderAt('/checkin/act123');
+    renderAt('/checkin/tok123');
     expect(screen.getByRole('heading', { name: '扫码签到' })).toBeInTheDocument();
   });
 

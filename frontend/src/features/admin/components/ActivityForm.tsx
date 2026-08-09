@@ -11,7 +11,6 @@ import type { AdminAccountRecord } from '../../../shared/api/types';
 import { Button, Input, Loading } from '../../../shared/ui';
 import { FIELD_TYPE_LABELS, SOURCE_TYPE_LABELS } from '../lib/labels';
 import { fromInputDateTime, toInputDateTime } from '../lib/format';
-import { randomUUID } from '../lib/uuid';
 import {
   mergeFormConfig,
   parseFormConfig,
@@ -27,12 +26,14 @@ import { StatusTag } from './StatusTag';
 /**
  * 活动创建/编辑表单（FR-ACT-001/005/006）。
  *
- * - 创建走 activities 集合 API（createRule 限定本机构），必需的 checkin_qr_token
- *   由前端生成随机不可猜值（PRD §10.3 同类要求）；初始状态固定 draft。
+ * - 创建走 activities 集合 API（createRule 限定本机构）；必需的 checkin_qr_token
+ *   由服务端生成（防伪造/防覆盖），创建/详情响应带回，前端不生成；初始状态固定 draft。
  * - 名额只填总名额（正偶数），倾诉者/聆听者名额由总名额对半派生；
  *   编辑时按 FR-ACT-006 做「不得低于当前已通过人数」的前端提示（服务端 hooks 硬校验兜底）。
  * - 报名表配置：标准字段启用/必填 + 机构自定义字段新增（含敏感标记，security-privacy §4.2）；
  *   配置存 activities.form_config_json（database-design D-3），结构见 lib/rules.parseFormConfig。
+ *   字段定义加载中/加载失败时禁止提交：此时 fieldConfigs 为空数组，提交会用空配置
+ *   覆盖既有 form_config_json（数据丢失）。
  * - group_tag 为预留分组字段（PRD §4.1：V1 不消费，仅录入保留）。
  */
 
@@ -177,6 +178,8 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setSubmitError('');
+    // 字段定义未就绪时禁止提交：fieldConfigs 为空数组会覆盖既有 form_config_json
+    if (!defsReady) return;
     const nextErrors: Record<string, string> = {};
 
     if (!title.trim()) nextErrors.title = '请输入活动标题';
@@ -230,7 +233,6 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
           organization_id: admin?.organization_id,
           activity_code: activityCode.trim(),
           status: 'draft',
-          checkin_qr_token: randomUUID().replace(/-/g, ''),
         });
       } else {
         saved = await cc.activities.update(initial!.id, payload);
@@ -244,6 +246,10 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
   };
 
   const isChoiceType = newType === 'single_choice' || newType === 'multi_choice';
+
+  // 字段定义加载中（null）或加载失败（defsError 非空）时未就绪：
+  // 此时提交会以空 fieldConfigs 覆盖既有 form_config_json，必须阻止
+  const defsReady = fieldDefs !== null && defsError === '';
 
   // 总名额提示：合法正偶数时展示对半结果；编辑模式附带已通过人数
   const parsedTotal = Number(capacityTotal);
@@ -443,8 +449,15 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
           {submitError}
         </p>
       ) : null}
+      {!defsReady ? (
+        <p className="cc-hint" role="note">
+          {defsError
+            ? '报名字段定义加载失败，暂不能提交（避免空配置覆盖既有报名表）；请关闭后重试。'
+            : '报名字段定义加载中，加载完成后才能提交（避免空配置覆盖既有报名表）。'}
+        </p>
+      ) : null}
       <div className="admin-row-actions admin-section">
-        <Button type="submit" loading={submitting}>
+        <Button type="submit" loading={submitting} disabled={!defsReady}>
           {mode === 'create' ? '创建活动' : '保存修改'}
         </Button>
         {onCancel ? (

@@ -7,8 +7,9 @@ import { isUnauthorized, selfCheckin } from '../api';
 import { checkinFailureCopy, formatDateTime } from '../lib/status';
 
 /**
- * 扫码签到落地页（/checkin/:activityId，FR-CHK-003/004）。
- * 固定二维码内容指向本页；有效性由签到开放状态控制（FR-CHK-001/002）。
+ * 扫码签到落地页（/checkin/:token，FR-CHK-003/004）。
+ * 固定二维码内容指向本页（token = 活动的 checkin_qr_token，不暴露活动 id）；
+ * 有效性由签到开放状态控制（FR-CHK-001/002）。
  * 进入页面即发起一次自助签到：
  * - 成功 → 展示签到时间与结果；
  * - 重复扫码 → 服务端幂等返回已有记录，展示「已签到」不报错（AC-09/AC-20）；
@@ -20,17 +21,17 @@ type Phase =
   | { kind: 'failed'; title: string; detail: string };
 
 export function CheckinPage() {
-  const { activityId = '' } = useParams();
+  const { token = '' } = useParams();
   const navigate = useNavigate();
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
 
   const attempt = useCallback(() => {
-    if (!activityId) {
-      setPhase({ kind: 'failed', title: '链接无效', detail: '缺少活动标识，请确认二维码完整。' });
+    if (!token) {
+      setPhase({ kind: 'failed', title: '链接无效', detail: '缺少签到标识，请确认二维码完整。' });
       return;
     }
     setPhase({ kind: 'loading' });
-    selfCheckin(activityId)
+    selfCheckin(token)
       .then((res) => {
         setPhase({
           kind: 'success',
@@ -42,7 +43,7 @@ export function CheckinPage() {
         const apiErr = normalizeApiError(err);
         if (isUnauthorized(apiErr)) {
           participantAuth.logout();
-          navigate(`/login?redirect=${encodeURIComponent(`/checkin/${activityId}`)}`, {
+          navigate(`/login?redirect=${encodeURIComponent(`/checkin/${token}`)}`, {
             replace: true,
           });
           return;
@@ -50,7 +51,7 @@ export function CheckinPage() {
         const copy = checkinFailureCopy(apiErr);
         setPhase({ kind: 'failed', title: copy.title, detail: copy.detail });
       });
-  }, [activityId, navigate]);
+  }, [token, navigate]);
 
   useEffect(() => {
     attempt();
