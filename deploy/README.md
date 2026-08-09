@@ -90,11 +90,39 @@ docker compose start app
 - **未备案期间的特殊处置（2026-08 首次部署）**：境内 ECS（上海）80/443 被阿里云拦截，
   故 ① 对外端口临时用 **8443**（访问 `https://chatcircle.empact.cn:8443`，安全组放行 8443）；
   ② 证书签发改走 **DNS-01 挑战**（HTTP-01/TLS-ALPN-01 依赖 80/443，不可用），凭据为
-  仅授 `AliyunDNSFullAccess` 的 RAM AccessKey，经 `.env` 的
+  RAM AccessKey（当前为 `AliyunDNSFullAccess`，过宽，待按下文「运维行动项清单」②
+  收窄为单 hosted zone 最小权限），经 `.env` 的
   `ALIYUN_ACCESS_KEY_ID/SECRET` 注入。
 - **备案完成后的切换步骤**：Caddyfile 站点地址去掉 `:8443` → compose 端口映射改
   `443:443`（可加 `80:80` 让 Caddy 自动跳 HTTPS）→ 安全组放行 80/443 →
   `docker compose up -d` 重建 caddy；证书会自动按新地址重签，无需其他改动。
+
+### 安全响应头与 PB 管理台封闭（2026-08 安全加固）
+
+- Caddyfile 统一下发安全响应头：`Strict-Transport-Security`（max-age=31536000;
+  includeSubDomains）、`X-Content-Type-Options: nosniff`、`Referrer-Policy:
+  strict-origin-when-cross-origin`、`Content-Security-Policy: default-src 'self';
+  img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'`
+  （`style-src 'unsafe-inline'` 为 React 内联样式所需），另加 `X-Frame-Options: DENY`
+  兼容不支持 frame-ancestors 的旧浏览器。
+- **PB 管理台（`/_/`）生产封闭**：`handle /_/* { respond 403 }`。日常运营不需要暴露
+  PocketBase dashboard（统一走产品内 `/super` 后台）；临时排障时注释 Caddyfile 中该
+  `handle /_/*` 段并 `docker compose restart caddy`，用完立即恢复封闭。
+- **X-Forwarded-For 覆盖**：`reverse_proxy` 显式 `header_up X-Forwarded-For
+  {remote_host}`，客户端伪造的 XFF 不会进入后端——访问日志与审计中的来源 IP 可信，
+  这也是后续在 Caddy/应用层做按 IP 限流的前提（伪造 XFF 会绕过或误伤限流）。
+
+### 运维行动项清单（安全加固后续）
+
+1. **删除服务器上的 `docker-compose.override.yml`**：过渡期明文 HTTP 8443 配置
+   （见「自动部署」节）已不需要，保留会让明文入口继续暴露；删除后
+   `docker compose up -d` 重建确认无残留端口映射。
+2. **RAM 权限收窄**：caddy DNS-01 用的 AccessKey 由 `AliyunDNSFullAccess` 改为
+   自定义策略，仅放行 chatcircle.empact.cn 所在 hosted zone 的
+   `DescribeDomains`/`AddDomainRecord`/`DeleteDomainRecord`/`DescribeDomainRecords`
+   （见 `.env.example` 注释）。
+3. **备份加密与异地同步（§5.8 待落地）**：backups 卷目前为本地明文留存，需确定
+   加密方案与异地同步目标存储、凭据下发方式。
 
 ## 6. 自动部署（GitHub Actions）
 
@@ -107,12 +135,24 @@ docker compose up --build -d`——即 §2 手动升级命令的自动化，无�
   `authorized_keys`，comment `github-actions-deploy-chatcircle`）、`ECS_HOST`、`ECS_USER`。
 - 服务器仓库有本地 `docker-compose.override.yml`（过渡期明文 HTTP 8443，不入库），
   checkout/pull 不会触碰；`concurrency` 串行化部署，避免并发重建。
+  **该 override 待删除**，见 §5「运维行动项清单」①。
 
 ## 7. 验证记录（如实声明）
 
 - `deploy/backup.sh`：本机以真实 PocketBase 0.28.4 实例进程级验证成功路径
   （建备份→下载→PK 校验→删服务端副本→写标记）与失败路径（错误凭据→failure 标记）；
   本机无 wget/Docker，wget 语义以 curl shim 模拟，**busybox wget 真实兼容性未验证**。
+- 2026-08 安全加固改动（trap 兜底标记、保留天数校验、`--post-file` 登录、失败路径
+  清理服务端副本、原子写标记）：`sh -n` 语法检查通过；本机以 wget shim 进程级冒烟
+  5 场景 18 断言全过（成功路径含 `"`/`\` 凭据的 JSON 转义往返、非法保留天数、
+  登录失败、下载失败服务端副本清理、模拟 set -e 中断的 trap 兜底标记）；
+  仍**未经 busybox/容器内真实环境验证**。
 - `docker-compose.yml`：通过 YAML 语法与结构自查（depends_on/healthcheck/环境插值）；
-  **未经 `docker compose config` 与真实构建验证**。
+  安全加固新增项（三服务 logging、backup TZ + tzdata 安装）经 YAML 解析与结构断言；
+  **未经 `docker compose config` 与真实构建验证**（本机无 Docker）。
+- `deploy/Caddyfile`：安全头 / `/_/` 封闭 / XFF 覆盖为人工语法核对，**本机无 caddy，
+  未经 `caddy validate`**；首次部署时请先 `docker compose exec caddy caddy validate
+  --config /etc/caddy/Caddyfile`。
+- `Dockerfile`：PB_SHA256 取自官方 release `checksums.txt` 并经本机下载真实 zip 实测
+  比对一致，`sha256sum -c` 校验命令形式本机实测可用；**镜像未真实构建**（本机无 Docker）。
 - 定时触发（crond 每日）未验证：已验证的仅为脚本本体，cron 接线沿用既有占位实现。
