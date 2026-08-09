@@ -26,7 +26,7 @@
 ### 批次 C：后端逻辑修复与签到二维码后端
 
 - 签到 self 端点改为 `POST /api/cc/checkin/self { token }`（token = `checkin_qr_token`，查无 404 `ACTIVITY_NOT_FOUND`）；旧路由 `POST /api/cc/checkin/{activityId}/self` 删除（404）（`backend/pb_hooks/checkins.pb.js`）。
-- `checkin_qr_token` 改服务端唯一生成：创建活动时模型钩子生成 24 位强随机 token（`activities.pb.js` onRecordCreate）；迁移 `1785889140_cc_hardening_schema.js` 将字段改 `required=false` 并保留唯一索引。
+- `checkin_qr_token` 改服务端唯一生成：创建活动时模型钩子**无条件覆盖**为 24 位强随机 token，调用方传入值一律忽略（`activities.pb.js` onRecordCreate）；迁移 `1785889140_cc_hardening_schema.js` 将字段改 `required=false` 并保留唯一索引。
 - `activities.viewRule` 收紧为仅本机构管理员（迁移 `1785889140`）：匿名/参与者原生 view 一律 404，公开详情只走 `/api/cc/public/activities*`（字段白名单下发，不含 `checkin_qr_token`）。
 - `POST /api/cc/super/backup/run` 下线为 410 `backup_deprecated`（原 JSVM 库文件复制非一致性快照，假备份治理），不再写 `backup.*` 审计；`backup-status` 端点保留（`backend/pb_hooks/super.pb.js`）。
 - 导出限流与审计：`POST /api/cc/exports` per 机构 10 次/小时、per 超管 20 次/小时（429）；下载写 `export.download` 审计；CSV 单元格以 `= + - @` 或 Tab 开头前置 `'`（公式注入中和）（`backend/pb_hooks/exports.pb.js`）。

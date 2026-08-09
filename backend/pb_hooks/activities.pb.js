@@ -884,15 +884,14 @@ routerAdd('POST', '/api/cc/activities/{id}/unpublish', (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// 签到二维码 token（FR-CHK-001）：服务端为唯一生成方——创建时 checkin_qr_token 为空
-// 则生成 24 位随机 URL-safe token（$security 强随机，不可猜）；迁移 1785889140 起字段
-// required=false，由本模型钩子兜底实际非空（hooks 内创建路径同经此钩子）。
+// 签到二维码 token（FR-CHK-001）：服务端为唯一生成方——创建时无条件覆盖为 24 位随机
+// URL-safe token（$security 强随机，不可猜），调用方传入值一律忽略（防直连 API
+// 自带可预测 token）；迁移 1785889140 起字段 required=false，由本模型钩子兜底实际
+// 非空（hooks 内创建路径同经此钩子）。
 // ---------------------------------------------------------------------------
 onRecordCreate((e) => {
   const record = e.record;
-  if (!record.get('checkin_qr_token')) {
-    record.set('checkin_qr_token', $security.randomString(24));
-  }
+  record.set('checkin_qr_token', $security.randomString(24));
   e.next();
 }, 'activities');
 

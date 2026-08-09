@@ -135,7 +135,7 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/draft', (e) => {
   questions.forEach((q) => {
     byCode[q.get('question_code')] = q;
   });
-  // 答案值形态校验：选择题须为选项成员、scale_1_5 须 1-5 整数、数值题须有限数、
+  // 答案值形态校验：选择题须为选项成员、scale_1_5 须 1-5 整数、scale_0_10 须 0-10 整数、
   // 文本 ≤2000 字符；空值跳过（未作答项由提交侧必填校验兜底）
   const answerValueError = (q, value) => {
     const code = q.get('question_code');
@@ -161,7 +161,7 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/draft', (e) => {
       return null;
     }
     if (type === 'scale_0_10') {
-      if (typeof value !== 'number' || !isFinite(value)) return '题目 ' + code + ' 须为有限数值';
+      if (!Number.isInteger(value) || value < 0 || value > 10) return '题目 ' + code + ' 须为 0~10 的整数';
       return null;
     }
     if (type === 'text_short' || type === 'text_long') {
@@ -380,7 +380,7 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/submit', (e) => {
   questions.forEach((q) => {
     byCode[q.get('question_code')] = q;
   });
-  // 答案值形态校验：选择题须为选项成员、scale_1_5 须 1-5 整数、数值题须有限数、
+  // 答案值形态校验：选择题须为选项成员、scale_1_5 须 1-5 整数、scale_0_10 须 0-10 整数、
   // 文本 ≤2000 字符；空值跳过（由下方必填校验兜底）
   const answerValueError = (q, value) => {
     const code = q.get('question_code');
@@ -406,7 +406,7 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/submit', (e) => {
       return null;
     }
     if (type === 'scale_0_10') {
-      if (typeof value !== 'number' || !isFinite(value)) return '题目 ' + code + ' 须为有限数值';
+      if (!Number.isInteger(value) || value < 0 || value > 10) return '题目 ' + code + ' 须为 0~10 的整数';
       return null;
     }
     if (type === 'text_short' || type === 'text_long') {

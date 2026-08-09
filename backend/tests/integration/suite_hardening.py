@@ -8,8 +8,11 @@
 3. 内置认证限流（authguard.pb.js）：同一身份连续 5 次错误密码后第 6 次起 429，
    限流期间正确密码同样被拒（TOO_MANY_ATTEMPTS）。
 4. CSV 公式注入中和：导出单元格以 = + - @ / Tab 开头的值前置单引号（exports.pb.js）。
-5. 签到二维码面：原生 view 关闭、公开端点不泄露 checkin_qr_token、错误 token 404。
-6. 活动状态机补强：下架活动审核报名 400 ACTIVITY_UNAVAILABLE；草稿活动开放签到
+5. 答案值形态校验：scale_1_5 超范围、scale_0_10 非整数/超范围（须 0~10 整数）、
+   非法选项值、文本超 2000 字符均 400 validation_failed。
+6. 签到二维码面：原生 view 关闭、公开端点不泄露 checkin_qr_token、错误 token 404、
+   直连创建自带 checkin_qr_token 被服务端无条件覆盖为 24 位随机串。
+7. 活动状态机补强：下架活动审核报名 400 ACTIVITY_UNAVAILABLE；草稿活动开放签到
    400 ACTIVITY_NOT_OPEN。
 
 ⚠️ 内置认证 per-IP 限流预算（authguard：全集合共享 20 次/10 分钟滑窗，含成功尝试）：
@@ -197,6 +200,23 @@ def run(ctx):
                 {'answers': [{'question_code': 'NOTE', 'value': 'x' * 2001}]}, PT3)
     rep.check('HG-36 文本答案超 2000 字符 → 400 validation_failed',
               s == 400 and biz_code(r) == 'validation_failed', r)
+    # scale_0_10 须 0~10 整数（与 scale_1_5 同口径）：模板无该题型，挂自定义题后走 draft 校验
+    s, q = call(base, 'POST', '/api/collections/survey_questions/records',
+                {'activity_survey_id': sv, 'question_code': 'NPS', 'source_type': 'custom',
+                 'question_type': 'scale_0_10', 'title': '推荐意愿', 'required': False,
+                 'order_index': 10}, AT)
+    assert s == 200, '创建 scale_0_10 自定义题失败：%s' % q
+    s, r = call(base, 'POST', '/api/cc/activity-surveys/%s/draft' % sv,
+                {'answers': [{'question_code': 'NPS', 'value': 1.5}]}, PT3)
+    rep.check('HG-37 scale_0_10 非整数（1.5）→ 400 validation_failed',
+              s == 400 and biz_code(r) == 'validation_failed', r)
+    s, r = call(base, 'POST', '/api/cc/activity-surveys/%s/draft' % sv,
+                {'answers': [{'question_code': 'NPS', 'value': 100}]}, PT3)
+    rep.check('HG-38 scale_0_10 超范围（100）→ 400 validation_failed',
+              s == 400 and biz_code(r) == 'validation_failed', r)
+    s, r = call(base, 'POST', '/api/cc/activity-surveys/%s/draft' % sv,
+                {'answers': [{'question_code': 'NPS', 'value': 7}]}, PT3)
+    rep.check('HG-39 scale_0_10 合法整数（7）→ 草稿保存成功', s == 200, r)
 
     # ---------- 6. 签到二维码面 ----------
     s, r = call(base, 'GET', '/api/collections/activities/records/%s' % act)
@@ -207,6 +227,19 @@ def run(ctx):
     s, r = fx.self_checkin(base, 'ckqr_nonexistent_token', PT1)
     rep.check('HG-42 错误签到 token → 404 ACTIVITY_NOT_FOUND',
               s == 404 and biz_code(r) == 'ACTIVITY_NOT_FOUND', r)
+    # 直连创建自带 checkin_qr_token：服务端无条件覆盖（防可预测 token 自建，FR-CHK-001）
+    s, r = call(base, 'POST', '/api/collections/activities/records', {
+        'organization_id': org, 'activity_code': 'CC_IT_HARD_04', 'title': '自带签到token活动',
+        'description': 'x', 'location': '线上',
+        'start_time': '2026-08-10 12:00:00Z', 'end_time': '2026-08-10 14:00:00Z',
+        'status': 'draft', 'capacity_total': 10, 'capacity_speaker': 5,
+        'capacity_listener': 5, 'registration_open': True,
+        'registration_start_at': '2026-08-01 00:00:00Z',
+        'registration_end_at': '2026-12-31 23:59:59Z', 'group_tag': '',
+        'form_config_json': {'fields': []}, 'checkin_qr_token': 'weak'}, AT)
+    tok = r.get('checkin_qr_token') or ''
+    rep.check('HG-43 直连创建自带 checkin_qr_token=weak → 服务端覆盖为 24 位随机串',
+              s == 200 and len(tok) == 24 and tok != 'weak', r)
 
     # ---------- 7. 活动状态机补强 ----------
     # 下架活动审核报名 → 400 ACTIVITY_UNAVAILABLE（approve/reject 均拒绝，此处验 approve）
