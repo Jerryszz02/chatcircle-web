@@ -100,13 +100,27 @@ routerAdd('GET', '/api/cc/metrics/{metricKey}', (e) => {
 
   const query = e.requestInfo().query || {};
 
-  // from/to 仅接受纯日期（YYYY-MM-DD），非法格式 400；to 的当日结束边界在校验通过后拼接
+  // from/to 接受两种形态，非法格式 400：
+  // - 纯日期 YYYY-MM-DD：UTC 自然日边界（from 含当日 00:00 起、to 拼当日 23:59:59.999 止，
+  //   原语义不变，exports 等既有调用方不受影响）；
+  // - 完整 datetime（PB 空格 `YYYY-MM-DD HH:mm:ss.sssZ` 或 ISO `T` 形式）：归一化为 PB 空格
+  //   格式后按精确边界比较，from 含、to 不含（左闭右开，与前端 localDayToPbUtcRange 输出
+  //   契约一致——看板指标卡片与下钻明细由此共用同一时区口径）。
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-  if (query.from && (typeof query.from !== 'string' || !DATE_RE.test(query.from))) {
-    return jsonError(e, 400, 'validation_failed', 'from 须为 YYYY-MM-DD 格式');
+  const DATETIME_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+  const parseBound = (v) => {
+    if (typeof v !== 'string') return null;
+    if (DATE_RE.test(v)) return { day: v };
+    if (DATETIME_RE.test(v)) return { dt: v.replace('T', ' ') };
+    return null;
+  };
+  const fromBound = query.from ? parseBound(query.from) : null;
+  if (query.from && !fromBound) {
+    return jsonError(e, 400, 'validation_failed', 'from 须为 YYYY-MM-DD 或完整 datetime（YYYY-MM-DD HH:mm:ss.sssZ）格式');
   }
-  if (query.to && (typeof query.to !== 'string' || !DATE_RE.test(query.to))) {
-    return jsonError(e, 400, 'validation_failed', 'to 须为 YYYY-MM-DD 格式');
+  const toBound = query.to ? parseBound(query.to) : null;
+  if (query.to && !toBound) {
+    return jsonError(e, 400, 'validation_failed', 'to 须为 YYYY-MM-DD 或完整 datetime（YYYY-MM-DD HH:mm:ss.sssZ）格式');
   }
 
   // 机构范围注入：管理员恒为本机构（忽略客户端传入的 organization_id，FR-ORG-006）；
@@ -135,11 +149,15 @@ routerAdd('GET', '/api/cc/metrics/{metricKey}', (e) => {
     params.st = query.activity_status;
   }
   let activities = queryAll('activities', filter, params, 'created');
-  if (query.from) {
-    activities = activities.filter((a) => iso(a.get('start_time')) >= query.from);
+  if (fromBound) {
+    activities = fromBound.day
+      ? activities.filter((a) => iso(a.get('start_time')) >= fromBound.day)
+      : activities.filter((a) => String(a.get('start_time')) >= fromBound.dt);
   }
-  if (query.to) {
-    activities = activities.filter((a) => iso(a.get('start_time')) <= query.to + 'T23:59:59.999Z');
+  if (toBound) {
+    activities = toBound.day
+      ? activities.filter((a) => iso(a.get('start_time')) <= toBound.day + 'T23:59:59.999Z')
+      : activities.filter((a) => String(a.get('start_time')) < toBound.dt);
   }
   const activityIds = activities.map((a) => a.id);
 
