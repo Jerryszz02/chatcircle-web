@@ -107,7 +107,9 @@ export function createExport(input: {
   return apiPost(adminClient(), '/api/cc/exports', input);
 }
 
-/** 看板筛选项（与约定 query 参数一致；organization_id 由服务端按身份注入，前端不传）。 */
+/** 看板筛选项（与约定 query 参数一致；organization_id 由服务端按身份注入，前端不传）。
+ *  from/to 接受纯日期 YYYY-MM-DD（UTC 日边界）或完整 PB datetime（精确边界，from 含 to 不含）；
+ *  页面侧统一经 localDayToPbUtcRange 换算后下发，与活动明细下钻同口径。 */
 export interface MetricFilters {
   from?: string;
   to?: string;

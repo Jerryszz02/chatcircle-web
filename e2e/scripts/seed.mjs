@@ -138,7 +138,6 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     registration_open: true,
     registration_start_at: pbTime(new Date(now - 3600_000)),
     registration_end_at: pbTime(new Date(now + 6 * 3600_000)),
-    checkin_qr_token: 'e2e_ckqr_01',
     group_tag: '',
     form_config_json: {
       fields: [
@@ -148,6 +147,11 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
       ],
     },
   }, AT);
+  // 签到二维码 token 由服务端创建时生成（checkin_qr_token，FR-CHK-001；客户端不可指定），
+  // 创建响应带回；扫码落地页为 /checkin/:token
+  if (!activity.checkin_qr_token) {
+    throw new Error(`活动创建响应缺少服务端生成的 checkin_qr_token：${JSON.stringify(activity).slice(0, 300)}`);
+  }
 
   // 直接发布（机构发布审核开关关，AC-04 双路径之一直发路径）
   const pub = await call('POST', `${pbUrl}/api/cc/activities/${activity.id}/publish`, {}, AT);
@@ -160,6 +164,7 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     activityId: activity.id,
     activityTitle: FIXTURE.activityTitle,
     surveyTitle: FIXTURE.surveyTitle,
+    checkinQrToken: activity.checkin_qr_token,
     adminUsername: FIXTURE.adminUsername,
     adminPassword: FIXTURE.adminPassword,
     participantUsername: FIXTURE.participantUsername,

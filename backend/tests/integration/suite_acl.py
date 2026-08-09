@@ -51,7 +51,7 @@ def run(ctx):
                         fx.field_answers(fields, '越权乙', phone='13800000000'))
     fx.transition(base, AT_B, reg_b, 'approved')
     call(base, 'POST', '/api/cc/activities/%s/checkin/open' % act_b_pub, {}, AT_B)
-    s, ckb = call(base, 'POST', '/api/cc/checkin/%s/self' % act_b_pub, {}, PT_B)
+    s, ckb = fx.self_checkin(base, fx.checkin_token(base, AT_B, act_b_pub), PT_B)
     checkin_b = (ckb.get('checkin') or {}).get('id')
     call(base, 'POST', '/api/cc/activities/%s/checkin/close' % act_b_pub, {}, AT_B)
     sv_b, qr_b = fx.create_survey(base, AT_B, act_b_pub, ver_id, '机构B问卷')
@@ -244,7 +244,8 @@ def run(ctx):
     rep.check('ACL-64 未认证报名列表为空集（无泄露）',
               s == 200 and r.get('totalItems') == 0, r)
     s, r = call(base, 'GET', '/api/collections/activities/records/%s' % act_b_pub)
-    rep.check('ACL-65 未认证可看已发布活动详情（设计内公开面，FR-ACT-003）', s == 200, r)
+    rep.check('ACL-65 未认证原生 view 已发布活动 → 404（公开详情只走 /api/cc/public/activities 白名单端点）',
+              s == 404, r)
     s, r = call(base, 'GET', '/api/collections/activities/records/%s' % act_b_draft)
     rep.check('ACL-66 未认证看草稿活动 → 404', s == 404, r)
     s, r = call(base, 'GET', '/api/cc/metrics/applications')

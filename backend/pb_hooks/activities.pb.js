@@ -884,6 +884,18 @@ routerAdd('POST', '/api/cc/activities/{id}/unpublish', (e) => {
 });
 
 // ---------------------------------------------------------------------------
+// 签到二维码 token（FR-CHK-001）：服务端为唯一生成方——创建时无条件覆盖为 24 位随机
+// URL-safe token（$security 强随机，不可猜），调用方传入值一律忽略（防直连 API
+// 自带可预测 token）；迁移 1785889140 起字段 required=false，由本模型钩子兜底实际
+// 非空（hooks 内创建路径同经此钩子）。
+// ---------------------------------------------------------------------------
+onRecordCreate((e) => {
+  const record = e.record;
+  record.set('checkin_qr_token', $security.randomString(24));
+  e.next();
+}, 'activities');
+
+// ---------------------------------------------------------------------------
 // 名额写入规则（FR-ACT-006、AC-08 + 对半派生不变量）：
 // - capacity_total 须为正偶数；capacity_speaker/listener 由总名额对半派生，
 //   显式传入与对半结果不一致即 400（不可单独设置）；

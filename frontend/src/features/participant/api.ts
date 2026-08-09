@@ -35,7 +35,8 @@ import type {
  * 3. 错误响应统一 { code: <http status>, message, data: { code } }【已核对】
  *    （对应后端 lib/http.pb.js jsonError；业务码经 ApiError.details.code 可读，
  *    签到分支 checkin_not_open/checkin_closed/registration_not_approved 实测可读）。
- * 4. POST /api/cc/checkin/:activityId/self → SelfCheckinResult【已核对】
+ * 4. POST /api/cc/checkin/self（body: { token }）→ SelfCheckinResult
+ *    token = 活动 checkin_qr_token（扫码落地页 /checkin/:token 带入，不暴露活动 id）；
  *    幂等重复扫码返回 { checkin, already_checked_in: true }（FR-CHK-004）。
  * 5. GET /api/cc/me/overview → MeOverview【已核对】
  *    { registrations: [{ registration, activity }], open_surveys: [{ survey（含
@@ -195,7 +196,7 @@ export function getMeOverview(): Promise<MeOverview> {
   return apiGet(pbClients.participant, '/api/cc/me/overview');
 }
 
-/** POST /api/cc/checkin/:activityId/self 响应。 */
+/** POST /api/cc/checkin/self 响应。 */
 export interface SelfCheckinResult {
   checkin: CheckinRecord;
   /** true = 幂等返回的既有签到（FR-CHK-004 重复扫码不报错不新建）。 */
@@ -204,11 +205,12 @@ export interface SelfCheckinResult {
 
 /**
  * 自助签到（幂等：重复扫码返回已有记录，FR-CHK-004、AC-09/AC-20）。
+ * token 为活动 checkin_qr_token（由 /checkin/:token 扫码落地页带入，不暴露活动 id）。
  * 失败时 ApiError.details.code 预期取值：checkin_not_open（未开放）/
  * checkin_closed（已结束）/ registration_not_approved（报名未通过）。
  */
-export function selfCheckin(activityId: string): Promise<SelfCheckinResult> {
-  return apiPost(pbClients.participant, `/api/cc/checkin/${activityId}/self`);
+export function selfCheckin(token: string): Promise<SelfCheckinResult> {
+  return apiPost(pbClients.participant, '/api/cc/checkin/self', { token });
 }
 
 /** 问卷资格校验失败原因（GET /api/cc/surveys/:qrToken 的 reasons 元素，FR-SUR-006）。 */

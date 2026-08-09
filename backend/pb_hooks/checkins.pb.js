@@ -1,7 +1,7 @@
 // checkins.pb.js — 签到 hooks：场次开放/关闭、自助签到、补签、撤销
 //
 // 端点契约（technical-design §5.5、database-design §5.2.10/§5.2.11，统一端点契约）：
-// - POST /api/cc/checkin/{activityId}/self              参与者自助签到（幂等，重复扫码返回已有记录）
+// - POST /api/cc/checkin/self { token }                参与者自助签到（按 checkin_qr_token 定位活动；幂等，重复扫码返回已有记录）
 // - POST /api/cc/activities/{id}/checkin/open|close    管理员开放/关闭签到（可重复开放/关闭）
 // - POST /api/cc/checkins/manual {activity_id, participant_id, reason}   管理员补签（原因必填）
 // - GET  /api/cc/activities/{id}/checkin/manual-candidates               补签候选人名单（按用户名选择）
@@ -79,6 +79,11 @@ routerAdd('POST', '/api/cc/activities/{id}/checkin/open', (e) => {
   const activity = ccById($app, 'activities', e.request.pathValue('id'));
   if (!activity || activity.get('organization_id') !== orgId) {
     ccError(404, 'ACTIVITY_NOT_FOUND', '活动不存在');
+  }
+  // 活动状态校验：已下架/已归档一律拒绝；草稿活动不可开放签到
+  const activityStatus = activity.get('status');
+  if (activityStatus === 'taken_down' || activityStatus === 'archived' || activityStatus === 'draft') {
+    ccError(400, 'ACTIVITY_NOT_OPEN', '活动当前状态不可开放签到');
   }
 
   let session = null;
@@ -203,10 +208,11 @@ routerAdd('POST', '/api/cc/activities/{id}/checkin/close', (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/cc/checkin/{activityId}/self — 参与者自助签到（FR-CHK-003/004、AC-09/AC-20）
+// POST /api/cc/checkin/self — 参与者自助签到（FR-CHK-003/004、AC-09/AC-20）
+// 入参 { token }：活动固定签到二维码 token（checkin_qr_token，FR-CHK-001），查无 404。
 // 幂等：重复扫码返回已有有效签到，不报错不新建。
 // ---------------------------------------------------------------------------
-routerAdd('POST', '/api/cc/checkin/{activityId}/self', (e) => {
+routerAdd('POST', '/api/cc/checkin/self', (e) => {
   try {
   const ccIsNoRows = (err) => !!err && typeof err.message === 'string' && err.message.indexOf('no rows') >= 0;
   const ccById = (app, collection, id) => {
@@ -259,79 +265,98 @@ routerAdd('POST', '/api/cc/checkin/{activityId}/self', (e) => {
     return record;
   };
   const participant = requireAuth(e, 'participant');
-  const activityId = e.request.pathValue('activityId');
-  const activity = ccById($app, 'activities', activityId);
-  if (!activity) {
-    ccError(404, 'ACTIVITY_NOT_FOUND', '活动不存在');
+  // 入参为签到二维码 token（二维码内容为 /checkin/<token> 落地链接，FR-CHK-001）；
+  // body 类型校验（L1）：非字符串直接 400
+  const body = e.requestInfo().body || {};
+  const token = body.token;
+  if (typeof token !== 'string' || token === '') {
+    ccError(400, 'INVALID_TOKEN', '缺少有效的签到二维码 token');
   }
+  const activity = ccOne($app, 'activities', 'checkin_qr_token = {:t}', { t: token });
+  if (!activity) {
+    ccError(404, 'ACTIVITY_NOT_FOUND', '活动不存在或签到二维码无效');
+  }
+  const activityId = activity.id;
   // 仅已发布/已关闭活动可签到（下架/归档/未发布不可，PRD §4.3）
   const status = activity.get('status');
   if (status !== 'published' && status !== 'closed') {
     ccError(400, 'CHECKIN_UNAVAILABLE', '活动当前不可签到');
   }
 
-  // 签到前置：报名已通过（FR-CHK-003）；业务码小写与 participant 端展示分支契约一致
-  const registration = ccOne(
-    $app, 'registrations',
-    'activity_id = {:a} && participant_id = {:p}',
-    { a: activityId, p: participant.id },
-  );
-  if (!registration || registration.get('status') !== 'approved') {
-    ccError(403, 'registration_not_approved', '报名未通过，不能签到');
-  }
-
-  // 幂等：已有有效签到直接返回（重复扫码/网络重试，AC-20）
-  const existing = ccOne(
-    $app, 'checkins',
-    "activity_id = {:a} && participant_id = {:p} && status = 'valid'",
-    { a: activityId, p: participant.id },
-  );
-  if (existing) {
-    return e.json(200, { checkin: existing, already_checked_in: true });
-  }
-
-  // 签到开放中校验（FR-CHK-002）：无开放场次时区分「未开放」（从未开放过）
-  // 与「已结束」（曾开放后关闭），前端按 checkin_not_open / checkin_closed 分开展示
-  if (!ccOne($app, 'checkin_sessions', "activity_id = {:a} && status = 'open'", { a: activityId })) {
-    const hadSession = ccOne(
-      $app, 'checkin_sessions', 'activity_id = {:a}', { a: activityId },
-    );
-    if (hadSession) {
-      ccError(400, 'checkin_closed', '本场签到已结束');
-    }
-    ccError(400, 'checkin_not_open', '签到未开放');
-  }
-
+  // 报名状态与场次开放校验移入事务内（消除事务外 TOCTOU）；
+  // SQLite 快照冲突/SQLITE_BUSY 类错误最多重试 2 次，仍失败返回 409 CONFLICT
+  const isBusyErr = (err) => !!err && /busy|locked|snapshot/i.test(String((err && err.message) || err));
+  let registration = null;
   let checkin = null;
   let created = false;
-  $app.runInTransaction((txApp) => {
-    // 事务内重查：每活动每人仅一条 valid（并发扫码兜底，AC-09）
-    checkin = ccOne(
-      txApp, 'checkins',
-      "activity_id = {:a} && participant_id = {:p} && status = 'valid'",
-      { a: activityId, p: participant.id },
-    );
-    if (checkin) return;
-    const collection = txApp.findCollectionByNameOrId('checkins');
-    checkin = new Record(collection);
-    checkin.set('activity_id', activityId);
-    checkin.set('participant_id', participant.id);
-    checkin.set('registration_id', registration.id);
-    checkin.set('source', 'self_scan');
-    checkin.set('status', 'valid');
-    checkin.set('checked_in_at', ccNow());
-    checkin.set('operator_id', '');
-    checkin.set('reason', '');
-    txApp.save(checkin);
-    created = true;
-    // 审计：自助签到（security-privacy §8.1 签到类）
-    writeAudit(txApp, {
-      actorId: participant.id, actorRole: 'participant',
-      organizationId: activity.get('organization_id'),
-      action: 'checkin.self', targetType: 'checkin', targetId: checkin.id,
-      result: 'success', metadata: { activity_id: activityId, source: 'self_scan' },
-    });
-  });
+  let attempts = 0;
+  for (;;) {
+    try {
+      $app.runInTransaction((txApp) => {
+        // 签到前置：报名已通过（FR-CHK-003）；业务码小写与 participant 端展示分支契约一致
+        registration = ccOne(
+          txApp, 'registrations',
+          'activity_id = {:a} && participant_id = {:p}',
+          { a: activityId, p: participant.id },
+        );
+        if (!registration || registration.get('status') !== 'approved') {
+          ccError(403, 'registration_not_approved', '报名未通过，不能签到');
+        }
+
+        // 幂等：已有有效签到直接返回（重复扫码/网络重试，AC-20）；
+        // 每活动每人仅一条 valid（并发扫码兜底，AC-09）
+        checkin = ccOne(
+          txApp, 'checkins',
+          "activity_id = {:a} && participant_id = {:p} && status = 'valid'",
+          { a: activityId, p: participant.id },
+        );
+        if (checkin) return;
+
+        // 签到开放中校验（FR-CHK-002）：无开放场次时区分「未开放」（从未开放过）
+        // 与「已结束」（曾开放后关闭），前端按 checkin_not_open / checkin_closed 分开展示
+        if (!ccOne(txApp, 'checkin_sessions', "activity_id = {:a} && status = 'open'", { a: activityId })) {
+          const hadSession = ccOne(
+            txApp, 'checkin_sessions', 'activity_id = {:a}', { a: activityId },
+          );
+          if (hadSession) {
+            ccError(400, 'checkin_closed', '本场签到已结束');
+          }
+          ccError(400, 'checkin_not_open', '签到未开放');
+        }
+
+        const collection = txApp.findCollectionByNameOrId('checkins');
+        checkin = new Record(collection);
+        checkin.set('activity_id', activityId);
+        checkin.set('participant_id', participant.id);
+        checkin.set('registration_id', registration.id);
+        checkin.set('source', 'self_scan');
+        checkin.set('status', 'valid');
+        checkin.set('checked_in_at', ccNow());
+        checkin.set('operator_id', '');
+        checkin.set('reason', '');
+        txApp.save(checkin);
+        created = true;
+        // 审计：自助签到（security-privacy §8.1 签到类）
+        writeAudit(txApp, {
+          actorId: participant.id, actorRole: 'participant',
+          organizationId: activity.get('organization_id'),
+          action: 'checkin.self', targetType: 'checkin', targetId: checkin.id,
+          result: 'success', metadata: { activity_id: activityId, source: 'self_scan' },
+        });
+      });
+      break;
+    } catch (err) {
+      if (err && err.__ccError === true) throw err; // 业务错误不重试，顶层统一转换
+      if (isBusyErr(err) && attempts < 2) {
+        attempts++;
+        continue;
+      }
+      if (isBusyErr(err)) {
+        ccError(409, 'CONFLICT', '签到操作冲突，请稍后重试');
+      }
+      throw err;
+    }
+  }
 
   return e.json(200, { checkin: checkin, already_checked_in: !created });
   } catch (err) {

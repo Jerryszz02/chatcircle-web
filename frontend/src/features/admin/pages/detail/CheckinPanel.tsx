@@ -25,8 +25,8 @@ import { formatDateTime, shortId } from '../../lib/format';
 /**
  * 签到管理台（活动详情子页，FR-CHK-001~006）。
  *
- * - 固定二维码：内容恒为 /checkin/:activityId 链接，全活动周期不变；
- *   有效性由「签到开放状态」控制而非二维码本身（FR-CHK-001/002）。
+ * - 固定二维码：内容恒为 /checkin/:token 链接（token = 服务端生成的 activity.checkin_qr_token，
+ *   不暴露活动 id），全活动周期不变；有效性由「签到开放状态」控制而非二维码本身（FR-CHK-001/002）。
  * - 开放/关闭：走 POST /api/cc/activities/:id/checkin/open|close（可重复，PRD §5.5）；
  *   当前状态以「是否存在 open 的 checkin_sessions 行」判定。
  * - 补签/撤销：reason 必填 + 写审计（FR-CHK-005、AC-10），撤销只改状态不删行（无硬删除）。
@@ -142,17 +142,25 @@ export function CheckinPanel({
     }
   };
 
-  const checkinUrl = `${window.location.origin}/checkin/${activity.id}`;
+  const checkinUrl = activity.checkin_qr_token
+    ? `${window.location.origin}/checkin/${activity.checkin_qr_token}`
+    : '';
 
   return (
     <div>
       <div className="admin-form-grid">
         <Card title="固定签到二维码">
-          <QrDisplay
-            url={checkinUrl}
-            caption="二维码内容固定不变；未开放签到时扫码无效（FR-CHK-001/002）"
-            downloadName={`签到二维码-${activity.activity_code}.png`}
-          />
+          {checkinUrl ? (
+            <QrDisplay
+              url={checkinUrl}
+              caption="二维码内容固定不变；未开放签到时扫码无效（FR-CHK-001/002）"
+              downloadName={`签到二维码-${activity.activity_code}.png`}
+            />
+          ) : (
+            <p className="admin-muted">
+              签到二维码 token 缺失（checkin_qr_token 由服务端在活动创建时生成），请刷新重试或联系平台管理员。
+            </p>
+          )}
         </Card>
         <Card
           title="签到开放控制"

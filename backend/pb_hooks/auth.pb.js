@@ -4,7 +4,10 @@
 // - POST /api/cc/auth/participant {username, password}
 //     用户名小写归一化；不存在则创建并登录，存在则校验密码；
 //     错误密码不得创建重复账号（AC-06）；返回 { token, record }；
-//     同人同 IP 连续失败限流（FR-AUTH-007，常量 5 次 / 10 分钟滑动窗口）。
+//     同人同 IP 连续失败限流（FR-AUTH-007，常量 5 次 / 10 分钟滑动窗口）；
+//     同 IP 跨用户名失败累计限流（防密码喷洒，30 次 / 10 分钟）；
+//     同 IP 新建账号限流（防批量注册，10 个 / 小时，本机直连豁免）；
+//     密码格式校验前置到账号 lookup 之前（消除账号枚举 oracle）。
 // - POST /api/cc/auth/admin-register {invite_code, username, password}
 //     事务内消费一次性邀请码创建管理员（FR-ORG-002/003、AC-02）：
 //     校验未使用/未撤销/未过期 → 创建 admin_accounts 绑机构 → 置 used → 写审计。
@@ -51,6 +54,25 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
   // 密码长度策略：PocketBase 默认 ≥8；上限 71 防 bcrypt 截断歧义（PRD 未写死，能力层）
   const CC_PASSWORD_MIN = 8;
   const CC_PASSWORD_MAX = 71;
+  // 喷洒限流：同一来源 IP 跨用户名累计密码失败 30 次 / 10 分钟窗口（防密码喷洒；
+  // 只计失败不计成功，避免共享出口（NAT/校园网）正常用户互相误伤）
+  const CC_SPRAY_MAX_FAILURES = 30;
+  const CC_SPRAY_WINDOW_SEC = 600;
+  // 注册限流：同一来源 IP 每小时最多自动创建 10 个新账号（防批量注册/资源占用）
+  const CC_REG_MAX = 10;
+  const CC_REG_WINDOW_SEC = 3600;
+  // 本机直连判定（仅用于豁免注册限流）：TCP peer 为 loopback 且未带代理头。
+  // 判定用 e.request.remoteAddr（TCP 对等端，HTTP 头伪造不了），而非 e.realIP()；
+  // 本地开发与集成测试从 127.0.0.1 批量建号不受限，生产经 Caddy 反代时
+  // TCP peer 为容器网段地址，不会命中豁免。
+  const ccIsLoopbackPeer = () => {
+    try {
+      const ra = String(e.request.remoteAddr || '');
+      const host = ra.slice(0, ra.lastIndexOf(':')).replace(/^\[|\]$/g, '');
+      if (host !== '127.0.0.1' && host !== '::1') return false;
+      return !e.request.header.get('X-Forwarded-For') && !e.request.header.get('X-Real-Ip');
+    } catch (err) { return false; }
+  };
 
   const body = e.requestInfo().body || {};
   const username = String(body.username == null ? '' : body.username).trim().toLowerCase();
@@ -61,10 +83,18 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
   if (typeof password !== 'string' || password === '') {
     ccError(400, 'INVALID_PASSWORD', '请输入密码');
   }
+  // 长度校验前置到账号 lookup 之前（枚举收敛）：新旧账号先过同一格式校验，
+  // 消除「不存在账号先撞格式错误」的账号枚举 oracle；ACCOUNT_DISABLED 语义不变
+  if (password.length < CC_PASSWORD_MIN || password.length > CC_PASSWORD_MAX) {
+    ccError(400, 'INVALID_PASSWORD', '密码长度须为 ' + CC_PASSWORD_MIN + '–' + CC_PASSWORD_MAX + ' 位');
+  }
 
   // 限流：同一用户名 + 来源 IP 连续失败达阈值后临时拒绝；响应不泄露账号是否存在
   const rateKey = 'participant|' + username + '|' + e.realIP();
-  if (!checkRateLimit(rateKey, CC_LOGIN_MAX_FAILURES, CC_LOGIN_WINDOW_SEC)) {
+  // 喷洒限流：同一来源 IP 跨用户名累计失败（成功不清零，窗口滑出自动恢复）
+  const sprayKey = 'participant_ip|' + e.realIP();
+  if (!checkRateLimit(rateKey, CC_LOGIN_MAX_FAILURES, CC_LOGIN_WINDOW_SEC) ||
+      !checkRateLimit(sprayKey, CC_SPRAY_MAX_FAILURES, CC_SPRAY_WINDOW_SEC)) {
     ccError(429, 'TOO_MANY_ATTEMPTS', '尝试次数过多，请稍后再试');
   }
 
@@ -74,8 +104,10 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
 
   if (!record) {
     // 用户名不存在 → 自动注册并登录（FR-AUTH-001）
-    if (password.length < CC_PASSWORD_MIN || password.length > CC_PASSWORD_MAX) {
-      ccError(400, 'INVALID_PASSWORD', '密码长度须为 ' + CC_PASSWORD_MIN + '–' + CC_PASSWORD_MAX + ' 位');
+    // 注册限流：per-IP 每小时 ≤10 个新账号（本机直连豁免，见 ccIsLoopbackPeer 注释）
+    const regKey = 'register|' + e.realIP();
+    if (!ccIsLoopbackPeer() && !checkRateLimit(regKey, CC_REG_MAX, CC_REG_WINDOW_SEC)) {
+      ccError(429, 'REGISTRATION_RATE_LIMITED', '注册过于频繁，请稍后再试');
     }
     const collection = $app.findCollectionByNameOrId('participant_accounts');
     record = new Record(collection);
@@ -85,6 +117,7 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
     try {
       $app.save(record);
       created = true;
+      recordRateLimitFailure(regKey, CC_REG_WINDOW_SEC); // 借失败计数器做窗口计数（同源函数，语义 = 窗口内计一次）
     } catch (err) {
       // 并发同名注册：唯一索引兜底（AC-06 任何情况下不产生重复账号），转为密码校验路径
       if (!ccUniqueErr(err)) throw err;
@@ -100,6 +133,7 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
     }
     if (!record.validatePassword(password)) {
       recordRateLimitFailure(rateKey, CC_LOGIN_WINDOW_SEC);
+      recordRateLimitFailure(sprayKey, CC_SPRAY_WINDOW_SEC);
       ccError(400, 'INVALID_CREDENTIALS', '用户名或密码错误');
     }
   }

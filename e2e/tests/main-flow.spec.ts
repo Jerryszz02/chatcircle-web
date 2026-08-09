@@ -90,9 +90,9 @@ test.describe.serial('V1 主链路', () => {
 
     // ---------- 6. 参与者自助签到；重复扫码幂等提示已签到（AC-09/AC-20） ----------
     await test.step('参与者自助签到（重复扫码幂等）', async () => {
-      await page.goto(`${webUrl}/checkin/${fixture.activityId}`);
+      await page.goto(`${webUrl}/checkin/${fixture.checkinQrToken}`);
       await expect(page.getByText('签到成功')).toBeVisible();
-      await page.goto(`${webUrl}/checkin/${fixture.activityId}`);
+      await page.goto(`${webUrl}/checkin/${fixture.checkinQrToken}`);
       await expect(page.getByText('您已签到')).toBeVisible();
     });
 

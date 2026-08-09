@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ActivityRecord, ActivityRole } from '../../../shared/api/types';
 import { normalizeApiError } from '../../../shared/api/http';
+import { localDayToPbUtcRange } from '../../../shared/lib/datetime';
 import { listMetricDefinitions, MetricRenderer, type MetricData } from '../../../shared/metrics';
 import type { MetricKey } from '../../../shared/metrics';
 import { Button, Loading } from '../../../shared/ui';
@@ -32,9 +33,13 @@ export function AdminDashboardPage() {
   const [activitiesError, setActivitiesError] = useState('');
 
   const load = useCallback(async () => {
+    // 本地日期 → 该自然日对应的 UTC 边界（PB 按 UTC 存储比较，直接发本地日期会偏移一个时区）；
+    // 指标卡片与下钻明细共用同一组边界（datetime 形式，左闭右开），两侧口径一致
+    const fromRange = from ? localDayToPbUtcRange(from) : null;
+    const toRange = to ? localDayToPbUtcRange(to) : null;
     const filters: MetricFilters = {
-      from: from || undefined,
-      to: to || undefined,
+      from: fromRange?.gte,
+      to: toRange?.lt,
       activity_status: activityStatus || undefined,
       activity_role: activityRole || undefined,
     };
@@ -71,8 +76,8 @@ export function AdminDashboardPage() {
           ? `status = "${activityStatus}"`
           : 'status = "published" || status = "closed" || status = "archived"',
       ];
-      if (from) conditions.push(`start_time >= "${from} 00:00:00"`);
-      if (to) conditions.push(`start_time <= "${to} 23:59:59"`);
+      if (fromRange) conditions.push(`start_time >= "${fromRange.gte}"`);
+      if (toRange) conditions.push(`start_time < "${toRange.lt}"`);
       const list = await adminCollections().activities.getFullList({
         filter: conditions.map((c) => `(${c})`).join(' && '),
         sort: '-start_time',

@@ -26,6 +26,9 @@ export interface RoleRemaining {
   listener?: number | null;
 }
 
+/** 文本答案长度上限（与服务端校验上限对齐，超出直接无法输入）。 */
+const REG_ANSWER_TEXT_MAX = 2000;
+
 function remainingOf(remaining: RoleRemaining, role: ActivityRole): number | null | undefined {
   return role === 'speaker' ? remaining.speaker : remaining.listener;
 }
@@ -113,6 +116,7 @@ function FieldInput({
       required={model.required}
       error={error}
       hint={sensitiveHint}
+      maxLength={model.fieldType === 'text' ? REG_ANSWER_TEXT_MAX : undefined}
     />
   );
 }

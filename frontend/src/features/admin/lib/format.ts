@@ -3,15 +3,10 @@
  *
  * PocketBase date 字段返回形如 `2026-08-05 02:31:55.947Z`（空格分隔 + UTC），
  * 统一经 parsePbDate 解析后再格式化；导出文件内的时间格式由服务端保证（PRD §10.3），
- * 前端只负责界面展示。
+ * 前端只负责界面展示。parsePbDate 与筛选边界工具见 shared/lib/datetime。
  */
 
-/** 解析 PocketBase 日期字符串；空值/非法值返回 null。 */
-export function parsePbDate(value?: string | null): Date | null {
-  if (!value) return null;
-  const d = new Date(value.includes('T') ? value : value.replace(' ', 'T'));
-  return Number.isNaN(d.getTime()) ? null : d;
-}
+import { parsePbDate } from '../../../shared/lib/datetime';
 
 function pad(n: number): string {
   return n < 10 ? `0${n}` : String(n);

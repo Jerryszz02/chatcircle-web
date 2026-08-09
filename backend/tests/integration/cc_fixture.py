@@ -107,7 +107,7 @@ def create_activity(base, at, org_id, code, title, fields=None, caps=(10, 5, 5),
         'status': 'draft', 'capacity_total': caps[0], 'capacity_speaker': caps[1],
         'capacity_listener': caps[2], 'registration_open': True,
         'registration_start_at': '2026-08-01 00:00:00Z', 'registration_end_at': '2026-12-31 23:59:59Z',
-        'checkin_qr_token': 'ckqr_' + code.lower(), 'group_tag': '',
+        'group_tag': '',
         'form_config_json': {'fields': field_cfg}}, at)
     assert s == 200, '创建活动失败：%s' % act
     aid = act['id']
@@ -115,6 +115,22 @@ def create_activity(base, at, org_id, code, title, fields=None, caps=(10, 5, 5),
         s, pub = call(base, 'POST', '/api/cc/activities/%s/publish' % aid, {}, at)
         assert s == 200, '发布活动失败：%s' % pub
     return aid
+
+
+def checkin_token(base, at, act_id):
+    """读取活动的服务端生成签到二维码 token（checkin_qr_token，FR-CHK-001）。
+
+    安全加固后 token 由 activities.pb.js onRecordCreate 模型钩子生成（客户端不可指定、
+    不可变更），管理员经原生 view 读本机构活动记录获取（匿名/参与者原生 view 已关闭）。
+    """
+    s, r = call(base, 'GET', '/api/collections/activities/records/%s' % act_id, token=at)
+    assert s == 200 and r.get('checkin_qr_token'), '读取活动签到 token 失败：%s' % r
+    return r['checkin_qr_token']
+
+
+def self_checkin(base, qr_token, pt):
+    """参与者自助签到（POST /api/cc/checkin/self {token}），返回 (status, body)，不断言。"""
+    return call(base, 'POST', '/api/cc/checkin/self', {'token': qr_token}, pt)
 
 
 def register(base, pt, act_id, role, answers):

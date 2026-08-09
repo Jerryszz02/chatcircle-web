@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { collectionsForRole } from '../../../shared/api/collections';
 import { normalizeApiError } from '../../../shared/api/http';
+import { localDayToPbUtcRange } from '../../../shared/lib/datetime';
 import type {
   AuditLogRecord,
   AuditResult,
@@ -29,8 +30,12 @@ function buildAuditFilter(input: {
   result: AuditResult | '';
 }): string | undefined {
   const parts: string[] = [];
-  if (input.from) parts.push(`created >= "${escapeFilterValue(input.from)} 00:00:00"`);
-  if (input.to) parts.push(`created <= "${escapeFilterValue(input.to)} 23:59:59.999"`);
+  // 本地日期 → 该自然日对应的 UTC 边界（PB 按 UTC 存储比较，直接拼本地日期会偏移一个时区）；
+  // 边界值由工具函数生成（非用户输入原文），无需转义
+  const fromRange = input.from ? localDayToPbUtcRange(input.from) : null;
+  if (fromRange) parts.push(`created >= "${fromRange.gte}"`);
+  const toRange = input.to ? localDayToPbUtcRange(input.to) : null;
+  if (toRange) parts.push(`created < "${toRange.lt}"`);
   if (input.actorId.trim()) parts.push(`actor_id = "${escapeFilterValue(input.actorId.trim())}"`);
   if (input.organizationId) parts.push(`organization_id = "${escapeFilterValue(input.organizationId)}"`);
   if (input.action.trim()) parts.push(`action ~ "${escapeFilterValue(input.action.trim())}"`);
