@@ -2,9 +2,10 @@
 // 职责（technical-design §5.5、PRD §10、FR-EXP-001~006、AC-16/17、security-privacy §4/§10）：
 // - POST /api/cc/exports：范围服务端校验（管理员=本机构全部或指定单活动；超管=全平台/机构/单活动，
 //   忽略客户端越权参数，FR-EXP-004）+ 敏感导出开关（机构 allow_sensitive_export，FR-ORG-005）+
-//   二次确认（confirm:true，FR-EXP-003）+ 审计（普通 export.normal / 敏感 export.sensitive，
+//   二次确认（confirm:true，FR-EXP-003）+ 创建限流（per 机构 10 次/小时、per 超管 20 次/小时，
+//   滑窗存 $app.store()）+ 审计（普通 export.normal / 敏感 export.sensitive，
 //   security-privacy §8.1 数据类）；同步生成 ZIP 并留痕 export_jobs（导出人/范围/时间/
-//   是否含个人信息/文件校验信息，PRD §10.3）。
+//   是否含个人信息/文件校验信息，PRD §10.3）；job 与审计同事务提交。
 // - ZIP 内容（PRD §10.1 全部 CSV 清单）：organizations / activities / participants /
 //   registrations / registration_answers / checkins / survey_templates / surveys / submissions /
 //   answers / custom_fields / data_dictionary / manifest，共 13 个 CSV。
@@ -14,7 +15,9 @@
 //   与 survey_questions 两个标记位，禁止按字段名启发式判断）；主体关联用 participant_id，
 //   普通导出不导出用户名；作废答卷（status=voided）不计入导出口径（database-design §5.2.16）。
 // - GET /api/cc/exports/{id}/download：鉴权下载（管理员仅本机构任务、超管全部），
-//   文件存受保护目录（pb_data/exports，非公开静态路径），文件名随机不可猜（FR-EXP-005）。
+//   文件存受保护目录（pb_data/exports，非公开静态路径），文件名随机不可猜（FR-EXP-005）；
+//   成功下载写审计 export.download。
+// - CSV 安全：单元格以 = + - @ 或 Tab 开头的值前置单引号（公式注入防护）。
 //
 // 实现说明：
 // - JSVM 无压缩库，ZIP 采用 store（不压缩）格式手写（本地文件头 + 中央目录 + CRC32）；
@@ -45,9 +48,9 @@ routerAdd('POST', '/api/cc/exports', (e) => {
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -178,11 +181,13 @@ routerAdd('POST', '/api/cc/exports', (e) => {
     return out;
   };
 
-  // CSV 单元格转义；缺失值输出空值（不以 0/-1/"无" 代替，PRD §10.3）
+  // CSV 单元格转义；缺失值输出空值（不以 0/-1/"无" 代替，PRD §10.3）；
+  // 公式注入防护：以 = + - @ 或 Tab 开头的值前置单引号（Excel/WPS 打开时不解析为公式）
   const csvCell = (v) => {
     if (v === null || v === undefined || v === '') return '';
     if (typeof v === 'object') v = JSON.stringify(v); // 多选答案用标准 JSON 数组（PRD §10.3）
     v = String(v);
+    if (/^[=+\-@\t]/.test(v)) v = "'" + v;
     if (/[",\r\n]/.test(v)) v = '"' + v.replace(/"/g, '""') + '"';
     return v;
   };
@@ -232,6 +237,18 @@ routerAdd('POST', '/api/cc/exports', (e) => {
     }
   }
 
+  // 创建限流（防大批量导出滥用）：per 机构 10 次/小时、per 超管 20 次/小时，
+  // 滑窗状态存 $app.store()（JSVM 请求间无共享内存，与 lib/ratelimit.pb.js 同存储约定）
+  const rlKey = 'cc_rl|export|' + (role === 'admin' ? auth.get('organization_id') : auth.id);
+  const rlMax = role === 'admin' ? 10 : 20;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const rlKept = ($app.store().get(rlKey) || []).filter((ts) => ts > nowSec - 3600);
+  if (rlKept.length >= rlMax) {
+    return jsonError(e, 429, 'TOO_MANY_ATTEMPTS', '导出请求过于频繁，请稍后再试');
+  }
+  rlKept.push(nowSec);
+  $app.store().set(rlKey, rlKept);
+
   const body = e.requestInfo().body || {};
   const scope = body.scope || {};
   const includePii = body.include_pii === true;
@@ -244,6 +261,14 @@ routerAdd('POST', '/api/cc/exports', (e) => {
   // --- 范围服务端校验（FR-EXP-004）：忽略客户端越权参数，机构范围由身份推导 ---
   const type = scope.type;
   const dateRange = scope.date_range || {};
+  // from/to 仅接受纯日期（YYYY-MM-DD），非法格式 400；to 的当日结束边界在校验通过后拼接
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  if (dateRange.from && (typeof dateRange.from !== 'string' || !DATE_RE.test(dateRange.from))) {
+    return jsonError(e, 400, 'validation_failed', 'scope.date_range.from 须为 YYYY-MM-DD 格式');
+  }
+  if (dateRange.to && (typeof dateRange.to !== 'string' || !DATE_RE.test(dateRange.to))) {
+    return jsonError(e, 400, 'validation_failed', 'scope.date_range.to 须为 YYYY-MM-DD 格式');
+  }
   let orgConstraint = null; // null = 全平台
   if (role === 'admin') {
     orgConstraint = auth.get('organization_id');
@@ -682,38 +707,42 @@ routerAdd('POST', '/api/cc/exports', (e) => {
     genError = err;
   }
 
-  // export_jobs 留痕（导出人/范围/时间/是否含个人信息/文件校验信息，PRD §10.3）
-  const jobsCol = $app.findCollectionByNameOrId('export_jobs');
-  const job = new Record(jobsCol);
-  if (orgIdForJob) job.set('organization_id', orgIdForJob);
-  job.set('scope_json', scopeJson);
-  job.set('include_pii', includePii);
-  job.set('file_path', genError ? '-' : EXPORT_DIR + '/' + fileName);
-  job.set('file_checksum', genError ? '' : checksum);
-  job.set('status', genError ? 'failed' : 'done');
-  job.set('created_by', auth.id);
-  $app.save(job);
+  // export_jobs 留痕（导出人/范围/时间/是否含个人信息/文件校验信息，PRD §10.3）；
+  // job + 审计同事务提交（留痕与审计不可分）
+  let job = null;
+  $app.runInTransaction((txApp) => {
+    const jobsCol = txApp.findCollectionByNameOrId('export_jobs');
+    job = new Record(jobsCol);
+    if (orgIdForJob) job.set('organization_id', orgIdForJob);
+    job.set('scope_json', scopeJson);
+    job.set('include_pii', includePii);
+    job.set('file_path', genError ? '-' : EXPORT_DIR + '/' + fileName);
+    job.set('file_checksum', genError ? '' : checksum);
+    job.set('status', genError ? 'failed' : 'done');
+    job.set('created_by', auth.id);
+    txApp.save(job);
 
-  // 审计：普通导出 / 敏感导出（security-privacy §8.1 数据类）
-  writeAudit($app, {
-    actorId: auth.id,
-    actorRole: role === 'admin' ? 'admin' : 'super_admin',
-    organizationId: orgIdForJob || undefined,
-    action: includePii ? 'export.sensitive' : 'export.normal',
-    targetType: 'export_job',
-    targetId: job.id,
-    result: genError ? 'failure' : 'success',
-    metadata: {
-      scope: scopeJson,
-      include_pii: includePii,
-      confirm: body.confirm === true,
-      activity_count: activities.length,
-      error: genError ? String(genError) : undefined,
-    },
+    // 审计：普通导出 / 敏感导出（security-privacy §8.1 数据类）
+    writeAudit(txApp, {
+      actorId: auth.id,
+      actorRole: role === 'admin' ? 'admin' : 'super_admin',
+      organizationId: orgIdForJob || undefined,
+      action: includePii ? 'export.sensitive' : 'export.normal',
+      targetType: 'export_job',
+      targetId: job.id,
+      result: genError ? 'failure' : 'success',
+      metadata: {
+        scope: scopeJson,
+        include_pii: includePii,
+        confirm: body.confirm === true,
+        activity_count: activities.length,
+        error: genError ? String(genError) : undefined,
+      },
+    });
   });
 
   if (genError) {
-    return jsonError(e, 500, 'internal_error', '导出文件生成失败：' + genError);
+    return jsonError(e, 500, 'internal_error', '导出文件生成失败，请稍后重试');
   }
   return e.json(200, {
     export_job: {
@@ -734,9 +763,9 @@ routerAdd('GET', '/api/cc/exports/{id}/download', (e) => {
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -764,6 +793,26 @@ routerAdd('GET', '/api/cc/exports/{id}/download', (e) => {
       return auth;
     }
     ccError(500, 'INVALID_ROLE', '内部错误：未知的身份角色要求');
+  };
+  // 写一条审计日志（与 lib/audit.pb.js 同源）
+  const writeAudit = (app, entry) => {
+    const collection = app.findCollectionByNameOrId('audit_logs');
+    const record = new Record(collection);
+    record.set('actor_id', entry.actorId);
+    record.set('actor_role', entry.actorRole);
+    record.set('organization_id', entry.organizationId || '');
+    record.set('action', entry.action);
+    record.set('target_type', entry.targetType);
+    record.set('target_id', entry.targetId);
+    record.set('result', entry.result);
+    record.set('reason', entry.reason || '');
+    record.set('metadata', entry.metadata || null);
+    app.save(record);
+    return record;
+  };
+  // JSON 字段读出为原始字节，须 String 化后 JSON.parse（0.28.4 实测）
+  const decodeJson = (val, fallback) => {
+    try { const v = JSON.parse(String(val == null ? '' : val)); return v == null ? fallback : v; } catch (err) { return fallback; }
   };
   const EXPORT_DIR = $app.dataDir() + '/exports'; // 与生成端一致
 
@@ -806,6 +855,18 @@ routerAdd('GET', '/api/cc/exports/{id}/download', (e) => {
   } catch (_) {
     return jsonError(e, 404, 'file_missing', '导出文件不存在或已被移除');
   }
+
+  // 审计：导出文件下载成功（security-privacy §8.1 数据类，留痕下载动作）
+  writeAudit($app, {
+    actorId: auth.id,
+    actorRole: role === 'admin' ? 'admin' : 'super_admin',
+    organizationId: job.get('organization_id') || undefined,
+    action: 'export.download',
+    targetType: 'export_job',
+    targetId: job.id,
+    result: 'success',
+    metadata: { export_job_id: job.id, scope: decodeJson(job.get('scope_json'), null) },
+  });
 
   e.response.header().set('Content-Disposition', 'attachment; filename="chatcircles_export_' + job.id + '.zip"');
   return e.blob(200, 'application/zip', bytes);
