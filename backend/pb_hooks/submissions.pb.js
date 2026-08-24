@@ -11,7 +11,8 @@
 // - GET /api/cc/me/overview：参与者「我的」中心聚合（FR-PAR-001、PRD §6.7）：
 //   { registrations: [{ registration, activity }], open_surveys: [{ survey（含 qr_token）,
 //   activity_title, my_submission }], submissions: [{ submission, survey_title,
-//   survey_qr_token, activity_title }] }。
+//   survey_qr_token, activity_title }], has_approved_listener_registration: bool
+//   （存在 approved 聆听者报名，供培训入口显隐，见 trainings.pb.js） }。
 // 资格四条件（登录 / 报名已通过 / 角色匹配 / 开放中）服务端逐项校验（FR-SUR-006），未签到不强制（PRD §5.6）。
 // 守卫：submissions / answers 的直连 API 写操作一律禁止，必须走上述端点（唯一服务端强制点）。
 //
@@ -830,6 +831,12 @@ routerAdd('GET', '/api/cc/me/overview', (e) => {
     { pid: auth.id },
   );
 
+  // 聆听者培训资格标记：存在任一 approved 的 listener 报名（培训页入口显隐，与
+  // trainings.pb.js 的资格校验同一口径）
+  const hasApprovedListenerRegistration = registrations.some(
+    (r) => r.get('status') === 'approved' && r.get('activity_role') === 'listener',
+  );
+
   const activityCache = {};
   const getActivity = (id) => {
     if (!activityCache[id]) {
@@ -918,6 +925,7 @@ routerAdd('GET', '/api/cc/me/overview', (e) => {
     })),
     open_surveys: openSurveys,
     submissions: submitted,
+    has_approved_listener_registration: hasApprovedListenerRegistration,
   });
 });
 

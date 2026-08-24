@@ -167,6 +167,8 @@ routerAdd('GET', '/api/cc/public/activities/{id}', (e) => {
       is_sensitive: !!def.get('is_sensitive'),
       required: cfg.required != null ? !!cfg.required : !!def.get('required_default'),
       options_json: ccJson(def.get('options_json'), null),
+      // 字段适用角色（both/speaker/listener，分角色报名问卷）；存量缺省按 both 归一
+      role_scope: def.get('role_scope') || 'both',
     });
   }
 

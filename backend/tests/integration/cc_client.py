@@ -9,6 +9,10 @@ import json
 import urllib.error
 import urllib.request
 
+# 集成测试只打本机回环实例：禁用代理（urllib 在 macOS 会拾取系统代理设置，
+# 本机代理转发 127.0.0.1 会 502 空响应；curl 不读系统代理故手工 curl 正常）
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 
 def call(base, method, path, body=None, token=None, raw=False):
     """发起一次 HTTP 调用，返回 (status, 解析后的 JSON / raw=True 时为原始字节)。"""
@@ -18,7 +22,7 @@ def call(base, method, path, body=None, token=None, raw=False):
         req.add_header('Authorization', token)
     data = json.dumps(body).encode() if body is not None else None
     try:
-        with urllib.request.urlopen(req, data, timeout=30) as res:
+        with _OPENER.open(req, data, timeout=30) as res:
             payload = res.read()
             return res.status, (payload if raw else json.loads(payload or b'{}'))
     except urllib.error.HTTPError as e:
