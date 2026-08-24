@@ -562,7 +562,13 @@ def main():
     # ---------------- 机构管理员 ----------------
     row = get_one(base, 'admin_accounts', "username='%s'" % ADMIN_USERNAME, ST)
     if row:
-        info('管理员 %s 已存在，跳过（密码不重置）' % ADMIN_USERNAME)
+        if row.get('organization_id') != org_id:
+            # 用户名全局唯一：被其它机构占用时静默跳过会让本机构没有可用管理员
+            print('[FAIL] 管理员用户名 %s 已被其它机构占用（organization_id=%s），'
+                  '请改用其它用户名后重试' % (ADMIN_USERNAME, row.get('organization_id')),
+                  file=sys.stderr)
+            return 1
+        info('管理员 %s 已存在且属于本机构，跳过（密码不重置）' % ADMIN_USERNAME)
     else:
         pw = secrets.token_urlsafe(12)
         must(base, 'POST', '/api/collections/admin_accounts/records',
@@ -618,15 +624,36 @@ def main():
         info('活动已创建：%s' % act_id)
 
     # ---------------- 参与者账号 ----------------
+    # 预检：用户名全局唯一，已存在账号须证明源自此前的导入运行才允许复用——
+    # 在本活动已有报名（上次导入所建），或全平台无任何报名（上次在建报名前中断）。
+    # 否则视为平台既有无关账号（撞名），直接中止待人工核对，不把历史数据挂到他人名下。
     pid_of = {}  # username -> participant id
     reused_participants = []
+    foreign = []
     for a in accounts:
         row = get_one(base, 'participant_accounts', "username='%s'" % a['username'], ST)
-        if row:
-            # 用户名全局唯一：已存在账号可能是上次导入所建（重跑正常），也可能是
-            # 平台既有无关账号（撞名）。无法经 API 区分，故显式列出供人工核对。
-            pid_of[a['username']] = row['id']
+        if not row:
+            continue
+        pid = row['id']
+        has_here = bool(get_one(base, 'registrations',
+                                "activity_id='%s'&&participant_id='%s'" % (act_id, pid), ST))
+        if has_here:
+            pid_of[a['username']] = pid
             reused_participants.append(a['username'])
+            continue
+        total = count_of(base, 'registrations', "participant_id='%s'" % pid, ST)
+        if total == 0:
+            pid_of[a['username']] = pid
+            reused_participants.append('%s（无报名记录，按中断续跑复用）' % a['username'])
+        else:
+            foreign.append(a['username'])
+    if foreign:
+        print('[FAIL] 以下用户名已是平台既有参与者且与本活动无关，拒绝复用：%s\n'
+              '请人工核对后调整账号映射（如为撞名，请修改源数据映射关系）再执行。'
+              % ', '.join(foreign), file=sys.stderr)
+        return 1
+    for a in accounts:
+        if a['username'] in pid_of:
             continue
         pw = secrets.token_urlsafe(12)
         r = must(base, 'POST', '/api/collections/participant_accounts/records',
@@ -637,7 +664,7 @@ def main():
         new_participants += 1
     info('参与者账号就绪：%d 个（新建 %d）' % (len(pid_of), new_participants))
     if reused_participants:
-        info('警告：%d 个用户名已存在并被复用（重跑属正常；首次执行出现请人工核对）：%s'
+        info('复用已存在账号 %d 个（均有本活动报名或无报名记录，视为此前导入所建）：%s'
              % (len(reused_participants), ', '.join(reused_participants)))
 
     # ---------------- 报名记录 + 答案 ----------------
@@ -805,15 +832,6 @@ def main():
     if skipped_rows:
         info('警告：%d 个单元格被跳过：%s' % (len(skipped_rows), '；'.join(skipped_rows[:10])))
 
-    # ---------------- 审计 ----------------
-    must(base, 'POST', '/api/collections/audit_logs/records',
-         {'actor_id': su_id, 'actor_role': 'system', 'organization_id': org_id,
-          'action': 'import.historical', 'target_type': 'activity', 'target_id': act_id,
-          'result': 'success', 'reason': '2026-06-12 凯德专场历史数据导入',
-          'metadata': {'activity_code': ACTIVITY_CODE, 'accounts': len(accounts),
-                       'registrations': len(reg_id_of), 'surveys': len(survey_ids),
-                       'submissions_created': new_subs, 'answers_created': new_answers}}, ST, '写审计')
-
     # ---------------- 对账 ----------------
     print()
     print('===== 对账 =====')
@@ -848,6 +866,16 @@ def main():
         all_ok = all_ok and ok
         print('问卷 %s：答卷预期/实际 %d/%d，答案预期/实际 %d/%d %s'
               % (spec['suffix'], expect, actual, expect_ans, actual_ans, 'OK' if ok else 'MISMATCH'))
+
+    # ---------------- 审计（对账之后，按实际结果记录） ----------------
+    must(base, 'POST', '/api/collections/audit_logs/records',
+         {'actor_id': su_id, 'actor_role': 'system', 'organization_id': org_id,
+          'action': 'import.historical', 'target_type': 'activity', 'target_id': act_id,
+          'result': 'success' if all_ok else 'failure',
+          'reason': '2026-06-12 凯德专场历史数据导入' + ('' if all_ok else '（对账存在 MISMATCH）'),
+          'metadata': {'activity_code': ACTIVITY_CODE, 'accounts': len(accounts),
+                       'registrations': len(reg_id_of), 'surveys': len(survey_ids),
+                       'submissions_created': new_subs, 'answers_created': new_answers}}, ST, '写审计')
 
     # ---------------- 凭据输出 ----------------
     if os.path.exists(args.accounts_out):
