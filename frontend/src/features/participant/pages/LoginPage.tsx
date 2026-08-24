@@ -1,4 +1,4 @@
-import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { hasAnySession, participantAuth } from '../../../shared/auth';
 import { Card, PageLayout } from '../../../shared/ui';
 import { ParticipantAuthForm } from '../components/ParticipantAuthForm';
@@ -25,16 +25,7 @@ export function LoginPage() {
   }
 
   return (
-    <PageLayout
-      section="参与者端"
-      title="平台通用登录"
-      className="ccp-root"
-      actions={
-        <Link to="/" className="cc-btn cc-btn-secondary">
-          返回首页
-        </Link>
-      }
-    >
+    <PageLayout section="参与者端" title="平台通用登录" className="ccp-root" backTo="/">
       <div className="ccp-auth-mark" aria-hidden="true">
         <span />
         <span />

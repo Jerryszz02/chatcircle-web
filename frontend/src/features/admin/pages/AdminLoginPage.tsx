@@ -40,15 +40,7 @@ export function AdminLoginPage() {
   };
 
   return (
-    <PageLayout
-      section="机构管理端"
-      title="管理员登录"
-      actions={
-        <Link to="/" className="cc-btn cc-btn-secondary">
-          返回首页
-        </Link>
-      }
-    >
+    <PageLayout section="机构管理端" title="管理员登录" backTo="/">
       <form onSubmit={handleSubmit} noValidate>
         <Input
           label="用户名"

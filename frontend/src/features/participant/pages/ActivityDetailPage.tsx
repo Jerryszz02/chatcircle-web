@@ -16,11 +16,7 @@ export function ActivityDetailPage() {
       section="参与者端"
       title="公开活动详情"
       className="ccp-root ccp-has-sticky-cta"
-      actions={
-        <Link to="/" className="cc-btn cc-btn-secondary">
-          返回首页
-        </Link>
-      }
+      backTo="/"
     >
       {loading ? <Loading fullscreen /> : null}
 
