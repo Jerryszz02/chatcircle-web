@@ -9,6 +9,8 @@ import {
   MePage,
   RegisterPage,
   SurveyPage,
+  TrainingCheckinPage,
+  TrainingsPage,
 } from './features/participant/pages';
 import {
   AdminActivitiesPage,
@@ -18,6 +20,8 @@ import {
   AdminExportsPage,
   AdminLoginPage,
   AdminRegisterPage,
+  AdminTrainingDetailPage,
+  AdminTrainingsPage,
 } from './features/admin/pages';
 import {
   SuperActivitiesPage,
@@ -62,6 +66,22 @@ export function AppRoutes() {
         }
       />
       <Route
+        path="/trainings"
+        element={
+          <RequireRole role="participant">
+            <TrainingsPage />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="/training-checkin/:token"
+        element={
+          <RequireRole role="participant">
+            <TrainingCheckinPage />
+          </RequireRole>
+        }
+      />
+      <Route
         path="/survey/:qrToken"
         element={
           <RequireRole role="participant">
@@ -86,6 +106,22 @@ export function AppRoutes() {
         element={
           <RequireRole role="admin">
             <AdminActivityDetailPage />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="/admin/trainings"
+        element={
+          <RequireRole role="admin">
+            <AdminTrainingsPage />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="/admin/trainings/:trainingId"
+        element={
+          <RequireRole role="admin">
+            <AdminTrainingDetailPage />
           </RequireRole>
         }
       />

@@ -4,12 +4,13 @@ import type {
   ActivityRecord,
   FieldType,
   RegistrationFieldDefRecord,
+  RoleScope,
 } from '../../../shared/api/types';
 import { adminAuth } from '../../../shared/auth';
 import { normalizeApiError } from '../../../shared/api/http';
 import type { AdminAccountRecord } from '../../../shared/api/types';
 import { Button, Input, Loading } from '../../../shared/ui';
-import { FIELD_TYPE_LABELS, SOURCE_TYPE_LABELS } from '../lib/labels';
+import { FIELD_TYPE_LABELS, ROLE_SCOPE_LABELS, SOURCE_TYPE_LABELS } from '../lib/labels';
 import { fromInputDateTime, toInputDateTime } from '../lib/format';
 import {
   mergeFormConfig,
@@ -30,7 +31,9 @@ import { StatusTag } from './StatusTag';
  *   由服务端生成（防伪造/防覆盖），创建/详情响应带回，前端不生成；初始状态固定 draft。
  * - 名额只填总名额（正偶数），倾诉者/聆听者名额由总名额对半派生；
  *   编辑时按 FR-ACT-006 做「不得低于当前已通过人数」的前端提示（服务端 hooks 硬校验兜底）。
- * - 报名表配置：标准字段启用/必填 + 机构自定义字段新增（含敏感标记，security-privacy §4.2）；
+ * - 报名表配置：标准字段启用/必填 + 机构自定义字段新增（含敏感标记与适用角色，
+ *   security-privacy §4.2）；适用角色（role_scope）决定字段对哪个报名角色出现并参与校验，
+ *   自定义字段可在此修改，平台标准字段只读（由超管经集合 API 维护）。
  *   配置存 activities.form_config_json（database-design D-3），结构见 lib/rules.parseFormConfig。
  *   字段定义加载中/加载失败时禁止提交：此时 fieldConfigs 为空数组，提交会用空配置
  *   覆盖既有 form_config_json（数据丢失）。
@@ -93,6 +96,8 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
   const [newSensitive, setNewSensitive] = useState(false);
   const [newRequiredDefault, setNewRequiredDefault] = useState(false);
   const [newOptions, setNewOptions] = useState('');
+  const [newRoleScope, setNewRoleScope] = useState<RoleScope>('both');
+  const [roleScopeError, setRoleScopeError] = useState('');
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitError, setSubmitError] = useState('');
@@ -158,6 +163,7 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
         is_sensitive: newSensitive,
         options_json: parseOptionsInput(newOptions),
         required_default: newRequiredDefault,
+        role_scope: newRoleScope,
         status: 'active',
       });
       setFieldDefs((prev) => [...(prev ?? []), created]);
@@ -170,8 +176,26 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
       setNewSensitive(false);
       setNewRequiredDefault(false);
       setNewOptions('');
+      setNewRoleScope('both');
     } catch (err) {
       setErrors((prev) => ({ ...prev, new_field_label: normalizeApiError(err).message }));
+    }
+  };
+
+  /** 修改自定义字段的适用角色（仅本机构 custom 字段可改，由服务端 guards 强制；标准字段只读）。 */
+  const changeRoleScope = async (def: RegistrationFieldDefRecord, roleScope: RoleScope) => {
+    setRoleScopeError('');
+    const prevScope = def.role_scope;
+    setFieldDefs((prev) =>
+      (prev ?? []).map((d) => (d.id === def.id ? { ...d, role_scope: roleScope } : d)),
+    );
+    try {
+      await adminCollections().registrationFieldDefs.update(def.id, { role_scope: roleScope });
+    } catch (err) {
+      setFieldDefs((prev) =>
+        (prev ?? []).map((d) => (d.id === def.id ? { ...d, role_scope: prevScope } : d)),
+      );
+      setRoleScopeError(`「${def.label}」适用角色保存失败：${normalizeApiError(err).message}`);
     }
   };
 
@@ -346,10 +370,15 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
       </div>
 
       <fieldset className="admin-section">
-        <legend>报名表配置（标准字段启用/必填；自定义字段含敏感标记）</legend>
+        <legend>报名表配置（标准字段启用/必填；自定义字段含敏感标记与适用角色）</legend>
         {defsError ? (
           <p className="cc-error" role="alert">
             字段定义加载失败：{defsError}
+          </p>
+        ) : null}
+        {roleScopeError ? (
+          <p className="cc-error" role="alert">
+            {roleScopeError}
           </p>
         ) : null}
         {fieldDefs === null && !defsError ? <Loading label="字段定义加载中…" /> : null}
@@ -365,6 +394,22 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
                 </span>
               </span>
               {def.is_sensitive ? <StatusTag label="敏感" tone="danger" /> : null}
+              {def.source_type === 'custom' ? (
+                <select
+                  className="admin-select"
+                  aria-label={`${def.label} 适用角色`}
+                  value={def.role_scope}
+                  onChange={(e) => void changeRoleScope(def, e.target.value as RoleScope)}
+                >
+                  {Object.entries(ROLE_SCOPE_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="admin-muted">适用：{ROLE_SCOPE_LABELS[def.role_scope]}</span>
+              )}
               <label className="admin-checkbox-row">
                 <input
                   type="checkbox"
@@ -401,6 +446,23 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
                 onChange={(e) => setNewType(e.target.value as FieldType)}
               >
                 {Object.entries(FIELD_TYPE_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="cc-field">
+              <label className="cc-label" htmlFor="new-field-role-scope">
+                适用角色
+              </label>
+              <select
+                id="new-field-role-scope"
+                className="admin-select"
+                value={newRoleScope}
+                onChange={(e) => setNewRoleScope(e.target.value as RoleScope)}
+              >
+                {Object.entries(ROLE_SCOPE_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}
                   </option>

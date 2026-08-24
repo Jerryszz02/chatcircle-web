@@ -11,3 +11,5 @@ export { AdminActivityDetailPage } from './pages/AdminActivityDetailPage';
 export { AdminDashboardPage } from './pages/AdminDashboardPage';
 export { AdminExportsPage } from './pages/AdminExportsPage';
 export { AdminAuditPage } from './pages/AdminAuditPage';
+export { AdminTrainingsPage } from './pages/AdminTrainingsPage';
+export { AdminTrainingDetailPage } from './pages/AdminTrainingDetailPage';
