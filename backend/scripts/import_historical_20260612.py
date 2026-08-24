@@ -12,7 +12,7 @@ superuser 豁免，见 submissions.pb.js / surveys.pb.js 守卫注释），不�
 
 导入内容：机构「凯德管理（上海）有限公司」+ 管理员 kaide_admin、16+1 个机构自定义
 报名字段、活动 CC20260612KD（closed）、54+ 个参与者账号（密码随机，写本地 CSV）、
-报名记录（全部 approved，含报名表答案）、8 个问卷模板 + 8 个活动问卷（ended）、
+报名记录（倾听者/Chatter 为 approved，机构方占位为 cancelled，含报名表答案）、8 个问卷模板 + 8 个活动问卷（ended）、
 全部 submissions/answers。幂等：全部按唯一键先查后建，可安全重跑。
 
 用法：
@@ -642,10 +642,19 @@ def main():
             else:
                 r3 = next(r for r in SURVEYS[-1]['rows'] if cell(r, 0) == a['name'])
                 submitted = to_cst(cell(r3, 2))
+            # 机构方占位报名直接建成 cancelled：非活动参与者，不计入名额与
+            # survey_completion_rate 分母（metrics.pb.js 按 approved 计数）；
+            # 其答卷的可见性与导出不依赖报名状态，故不受影响
+            if a['role'] == 'partner':
+                reg_status = 'cancelled'
+                reg_reason = '机构方占位账号，非活动参与者（仅为挂接问卷3答卷；不计入名额与完成率口径）'
+            else:
+                reg_status = 'approved'
+                reg_reason = '历史数据导入：最终名单'
             r = must(base, 'POST', '/api/collections/registrations/records',
                      {'activity_id': act_id, 'participant_id': pid_of[uname], 'activity_role': role,
-                      'status': 'approved', 'submitted_at': submitted,
-                      'status_reason': '历史数据导入：最终名单'}, ST, '创建报名 %s' % uname)
+                      'status': reg_status, 'submitted_at': submitted,
+                      'status_reason': reg_reason}, ST, '创建报名 %s' % uname)
             reg_id_of[uname] = r['id']
             new_regs += 1
         # 报名答案按 (registration_id, field_def_id) 补齐：中断重跑只补缺失项，不整行跳过
