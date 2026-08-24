@@ -161,6 +161,8 @@ export interface RegistrationFieldDefRecord extends BaseRecord {
   is_sensitive: boolean;
   options_json?: unknown;
   required_default: boolean;
+  /** 适用角色：both=两角色均适用；speaker/listener=仅对应角色报名时需要作答。 */
+  role_scope: RoleScope;
   status: ActiveStatus;
 }
 
@@ -297,6 +299,8 @@ export interface AnswerRecord extends BaseRecord {
 /** 导出范围（scope_json）：服务端按身份校验允许范围（FR-EXP-004）。 */
 export interface ExportScope {
   type: 'platform' | 'organization' | 'activity';
+  /** type=organization 时必填（超管机构范围导出；管理员机构导出由服务端按身份注入）。 */
+  organization_id?: string;
   activity_id?: string;
   date_range?: { from: string; to: string };
 }
@@ -330,4 +334,51 @@ export interface AuditLogRecord extends BaseRecord {
   reason?: string;
   /** 前后状态、上下文；不得含密码或完整敏感答案（PRD §11.2）。 */
   metadata?: unknown;
+}
+
+// ---------- 培训体系（与活动解绑的平行结构，报名问卷角色化改造同期引入） ----------
+
+/** 培训 3 态：draft=草稿，published=已发布（可签到），closed=已关闭。 */
+export type TrainingStatus = 'draft' | 'published' | 'closed';
+
+// ---------- trainings — 聆听者培训主数据 ----------
+
+export interface TrainingRecord extends BaseRecord {
+  organization_id: string;
+  title: string;
+  /** 可读稳定代码，同活动 activity_code 口径。 */
+  training_code: string;
+  description?: string;
+  location?: string;
+  start_time: string;
+  end_time: string;
+  status: TrainingStatus;
+  /** 固定签到二维码 token（服务端创建时生成，前端只读）。 */
+  checkin_qr_token: string;
+}
+
+// ---------- training_checkin_sessions — 培训签到开放状态 ----------
+
+export interface TrainingCheckinSessionRecord extends BaseRecord {
+  training_id: string;
+  status: CheckinSessionStatus;
+  opened_at: string;
+  closed_at?: string;
+  /** 操作管理员 id。 */
+  opened_by: string;
+}
+
+// ---------- training_attendances — 培训签到记录（培训通过 = 存在 valid 记录） ----------
+
+export interface TrainingAttendanceRecord extends BaseRecord {
+  training_id: string;
+  participant_id: string;
+  source: CheckinSource;
+  status: CheckinStatus;
+  checked_in_at: string;
+  /** 补签/撤销操作管理员 id；自助签到为空。 */
+  operator_id?: string;
+  /** 补签/撤销必填原因。 */
+  reason?: string;
+  revoked_at?: string;
 }

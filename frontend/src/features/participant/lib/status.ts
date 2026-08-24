@@ -120,7 +120,7 @@ export function surveyIneligibleCopy(reason: SurveyIneligibleReason | string): {
   }
 }
 
-/** 签到失败展示（POST /api/cc/checkin/:activityId/self 的错误码映射，FR-CHK-002/003）。 */
+/** 签到失败展示（POST /api/cc/checkin/self 的错误码映射，FR-CHK-002/003）。 */
 export function checkinFailureCopy(err: ApiError): { title: string; detail: string } {
   switch (bizCodeOf(err)) {
     case 'checkin_not_open':
@@ -135,6 +135,28 @@ export function checkinFailureCopy(err: ApiError): { title: string; detail: stri
     default:
       return { title: '签到失败', detail: err.message || '签到未完成，请稍后重试。' };
   }
+}
+
+/** 培训签到失败展示（POST /api/cc/training-checkin/self 的错误码映射，照搬活动签到分支）。 */
+export function trainingCheckinFailureCopy(err: ApiError): { title: string; detail: string } {
+  switch (bizCodeOf(err)) {
+    case 'checkin_not_open':
+      return { title: '签到未开放', detail: '本场培训签到还没有开放，请按工作人员指引操作。' };
+    case 'checkin_closed':
+      return { title: '签到已结束', detail: '本场培训签到已结束。如需补签请联系现场工作人员。' };
+    case 'listener_not_approved':
+      return {
+        title: '暂未开放培训签到',
+        detail: '需要先报名聆听者并通过审核后才能参加培训签到。请先选择活动报名聆听者，审核通过后再扫码。',
+      };
+    default:
+      return { title: '签到失败', detail: err.message || '签到未完成，请稍后重试。' };
+  }
+}
+
+/** 培训状态短标签（参与者端培训列表展示用）。 */
+export function trainingStatusLabel(status: 'published' | 'closed'): string {
+  return status === 'published' ? '进行中' : '已结束';
 }
 
 const pad2 = (n: number) => String(n).padStart(2, '0');

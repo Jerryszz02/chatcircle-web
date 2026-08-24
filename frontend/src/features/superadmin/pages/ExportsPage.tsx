@@ -11,6 +11,7 @@ import { Button, Card, Loading, Modal } from '../../../shared/ui';
 import { SuperLayout } from '../SuperLayout';
 import { useSuperToast } from '../hooks';
 import { createExportJob, downloadExportFile } from '../api';
+import { buildExportScope } from '../lib/exportScope';
 import { formatDateTime } from '../lib/format';
 import { EXPORT_SCOPE_TYPE_LABELS, EXPORT_STATUS_LABELS } from '../lib/labels';
 
@@ -22,6 +23,8 @@ type ExportJobWithOrg = ExportJobRecord & {
 };
 
 const PER_PAGE = 20;
+/** 活动下拉选项上限：全平台活动可能很多，只取最近创建的若干条（超出时给提示）。 */
+const ACTIVITY_OPTION_LIMIT = 200;
 
 /** 导出范围的可读摘要（确认框与记录列表共用）。 */
 function scopeSummary(
@@ -60,6 +63,7 @@ export function SuperExportsPage() {
   // 选项数据
   const [orgs, setOrgs] = useState<OrganizationRecord[]>([]);
   const [activities, setActivities] = useState<ActivityWithOrg[]>([]);
+  const [activitiesTruncated, setActivitiesTruncated] = useState(false);
 
   // 记录列表
   const [jobs, setJobs] = useState<ExportJobWithOrg[] | null>(null);
@@ -71,12 +75,17 @@ export function SuperExportsPage() {
     let cancelled = false;
     void Promise.all([
       cc.organizations.getFullList({ sort: 'created' }),
-      cc.activities.getFullList<ActivityWithOrg>({ sort: '-created', expand: 'organization_id' }),
+      // 下拉选项分页拉取（不用 getFullList 全量）：超出上限时提示仅展示最近活动
+      cc.activities.getList<ActivityWithOrg>(1, ACTIVITY_OPTION_LIMIT, {
+        sort: '-created',
+        expand: 'organization_id',
+      }),
     ])
-      .then(([orgList, actList]) => {
+      .then(([orgList, actRes]) => {
         if (!cancelled) {
           setOrgs(orgList);
-          setActivities(actList);
+          setActivities(actRes.items);
+          setActivitiesTruncated(actRes.totalItems > actRes.items.length);
         }
       })
       .catch((err) => {
@@ -128,17 +137,7 @@ export function SuperExportsPage() {
     [activities],
   );
 
-  const buildScope = (): ExportScope | null => {
-    if (scopeType === 'organization') {
-      if (!scopeOrgId) return null;
-      return { type: 'organization', activity_id: undefined };
-    }
-    if (scopeType === 'activity') {
-      if (!scopeActivityId) return null;
-      return { type: 'activity', activity_id: scopeActivityId };
-    }
-    return { type: 'platform' };
-  };
+  const buildScope = (): ExportScope | null => buildExportScope(scopeType, scopeOrgId, scopeActivityId);
 
   const onSubmit = () => {
     const scope = buildScope();
@@ -242,6 +241,11 @@ export function SuperExportsPage() {
                 </option>
               ))}
             </select>
+            {activitiesTruncated ? (
+              <p className="cc-hint">
+                仅显示最近创建的 {ACTIVITY_OPTION_LIMIT} 个活动；更早的活动请前往对应机构的管理端导出。
+              </p>
+            ) : null}
           </div>
         ) : null}
 

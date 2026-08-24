@@ -85,6 +85,23 @@ def create_admin(base, st, org_id, username, password=PASSWORD):
     return reg['record']['id'], auth['token']
 
 
+def create_admin_via_impersonate(base, st, org_id, username, password=PASSWORD):
+    """超管直建管理员 + impersonate 取登录态，返回 (admin_id, token)。
+
+    内置 auth-with-password 有 per-IP 限流（20 次/10 分钟，一轮全量余量为 0，
+    见 backend/tests/README.md 与 suite_hardening 头注释）：新增套件需要管理员
+    token 时一律用本函数，不得再走邀请码 + auth-with-password 登录。
+    """
+    s, r = call(base, 'POST', '/api/collections/admin_accounts/records',
+                {'username': username, 'password': password, 'passwordConfirm': password,
+                 'organization_id': org_id, 'status': 'active'}, st)
+    assert s == 200, '超管直建管理员失败：%s' % r
+    admin_id = r['id']
+    s, imp = call(base, 'POST', '/api/collections/admin_accounts/impersonate/%s' % admin_id, {}, st)
+    assert s == 200 and imp.get('token'), 'impersonate 取管理员登录态失败：%s' % imp
+    return admin_id, imp['token']
+
+
 def create_participant(base, username, password=PASSWORD):
     """参与者自动注册（用户名已存在则为登录），返回 (participant_id, token, created)。"""
     s, r = call(base, 'POST', '/api/cc/auth/participant', {'username': username, 'password': password})
@@ -107,7 +124,7 @@ def create_activity(base, at, org_id, code, title, fields=None, caps=(10, 5, 5),
         'status': 'draft', 'capacity_total': caps[0], 'capacity_speaker': caps[1],
         'capacity_listener': caps[2], 'registration_open': True,
         'registration_start_at': '2026-08-01 00:00:00Z', 'registration_end_at': '2026-12-31 23:59:59Z',
-        'checkin_qr_token': 'ckqr_' + code.lower(), 'group_tag': '',
+        'group_tag': '',
         'form_config_json': {'fields': field_cfg}}, at)
     assert s == 200, '创建活动失败：%s' % act
     aid = act['id']
@@ -115,6 +132,22 @@ def create_activity(base, at, org_id, code, title, fields=None, caps=(10, 5, 5),
         s, pub = call(base, 'POST', '/api/cc/activities/%s/publish' % aid, {}, at)
         assert s == 200, '发布活动失败：%s' % pub
     return aid
+
+
+def checkin_token(base, at, act_id):
+    """读取活动的服务端生成签到二维码 token（checkin_qr_token，FR-CHK-001）。
+
+    安全加固后 token 由 activities.pb.js onRecordCreate 模型钩子生成（客户端不可指定、
+    不可变更），管理员经原生 view 读本机构活动记录获取（匿名/参与者原生 view 已关闭）。
+    """
+    s, r = call(base, 'GET', '/api/collections/activities/records/%s' % act_id, token=at)
+    assert s == 200 and r.get('checkin_qr_token'), '读取活动签到 token 失败：%s' % r
+    return r['checkin_qr_token']
+
+
+def self_checkin(base, qr_token, pt):
+    """参与者自助签到（POST /api/cc/checkin/self {token}），返回 (status, body)，不断言。"""
+    return call(base, 'POST', '/api/cc/checkin/self', {'token': qr_token}, pt)
 
 
 def register(base, pt, act_id, role, answers):
@@ -156,3 +189,24 @@ def create_survey(base, at, act_id, ver_id, title, role_scope='both'):
                  {'template_version_id': ver_id, 'title': title, 'role_scope': role_scope}, at)
     assert s == 200, '创建问卷失败：%s' % sv
     return sv['survey']['id'], sv['survey']['qr_token']
+
+
+def create_training(base, at, org_id, code, title, status='draft'):
+    """直连集合 API 创建培训（guards 强制非超管 status=draft），返回 (status, body)，不断言。"""
+    return call(base, 'POST', '/api/collections/trainings/records', {
+        'organization_id': org_id, 'title': title, 'training_code': code,
+        'description': '集成测试培训', 'location': '线上',
+        'start_time': '2026-08-15 12:00:00Z', 'end_time': '2026-08-15 14:00:00Z',
+        'status': status}, at)
+
+
+def training_token(base, at, training_id):
+    """读取培训的服务端生成签到二维码 token（同 checkin_token 口径：管理员原生 view 读本机构记录）。"""
+    s, r = call(base, 'GET', '/api/collections/trainings/records/%s' % training_id, token=at)
+    assert s == 200 and r.get('checkin_qr_token'), '读取培训签到 token 失败：%s' % r
+    return r['checkin_qr_token']
+
+
+def self_training_checkin(base, qr_token, pt):
+    """参与者培训自助签到（POST /api/cc/training-checkin/self {token}），返回 (status, body)，不断言。"""
+    return call(base, 'POST', '/api/cc/training-checkin/self', {'token': qr_token}, pt)

@@ -7,8 +7,8 @@
 //   写审计 invite.revoke。
 // - GET /api/cc/super/backup-status：读取最近一次备份审计（action=backup.*），
 //   失败时 alert=true，供超级管理端显著告警（PRD §12.3、AC-23）。
-// - POST /api/cc/super/backup/run：手动触发一次备份并写审计（成功 backup.success /
-//   失败 backup.failed）；支持 force_fail 故障注入参数（仅用于 AC-23 验收演练）。
+// - POST /api/cc/super/backup/run：已下线（410 Gone，假备份治理：JSVM 库文件复制非一致性
+//   快照）；每日一致性快照由 deploy/backup.sh 负责（technical-design §5.8）。
 // - POST /api/cc/super/templates：新建问卷模板 + 首个版本（事务：建模板 → 建首版 →
 //   回补 current_version_id 循环引用，FR-SUR-001），写审计 template.create（PRD §11.3）。
 // - POST /api/cc/super/templates/{id}/publish：发布模板新版本（事务：校验并规范化
@@ -44,9 +44,9 @@ routerAdd('POST', '/api/cc/super/invites', (e) => {
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -80,7 +80,11 @@ routerAdd('POST', '/api/cc/super/invites', (e) => {
   try {
     auth = requireAuth(e, 'super');
   } catch (err) {
-    return jsonError(e, err.status || 401, (err.data && typeof err.data.code === 'string' ? err.data.code : 'unauthorized'), err.message || '需要超级管理员登录');
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
   }
 
   const body = e.requestInfo().body || {};
@@ -160,9 +164,9 @@ routerAdd('POST', '/api/cc/super/invites/{id}/revoke', (e) => {
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -196,7 +200,11 @@ routerAdd('POST', '/api/cc/super/invites/{id}/revoke', (e) => {
   try {
     auth = requireAuth(e, 'super');
   } catch (err) {
-    return jsonError(e, err.status || 401, (err.data && typeof err.data.code === 'string' ? err.data.code : 'unauthorized'), err.message || '需要超级管理员登录');
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
   }
 
   let invite;
@@ -209,19 +217,22 @@ routerAdd('POST', '/api/cc/super/invites/{id}/revoke', (e) => {
     return jsonError(e, 400, 'invalid_transition', '仅未使用的邀请码可撤销，当前状态：' + invite.get('status'));
   }
 
-  const from = invite.get('status');
-  invite.set('status', 'revoked');
-  $app.save(invite);
+  // 业务写 + 审计同事务提交（状态变更与留痕不可分）
+  $app.runInTransaction((txApp) => {
+    const from = invite.get('status');
+    invite.set('status', 'revoked');
+    txApp.save(invite);
 
-  writeAudit($app, {
-    actorId: auth.id,
-    actorRole: 'super_admin',
-    organizationId: invite.get('organization_id'),
-    action: 'invite.revoke',
-    targetType: 'admin_invite',
-    targetId: invite.id,
-    result: 'success',
-    metadata: { from, to: 'revoked' },
+    writeAudit(txApp, {
+      actorId: auth.id,
+      actorRole: 'super_admin',
+      organizationId: invite.get('organization_id'),
+      action: 'invite.revoke',
+      targetType: 'admin_invite',
+      targetId: invite.id,
+      result: 'success',
+      metadata: { from, to: 'revoked' },
+    });
   });
 
   return e.json(200, { id: invite.id, status: 'revoked' });
@@ -234,9 +245,9 @@ routerAdd('GET', '/api/cc/super/backup-status', (e) => {
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -269,7 +280,11 @@ routerAdd('GET', '/api/cc/super/backup-status', (e) => {
   try {
     requireAuth(e, 'super');
   } catch (err) {
-    return jsonError(e, err.status || 401, (err.data && typeof err.data.code === 'string' ? err.data.code : 'unauthorized'), err.message || '需要超级管理员登录');
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
   }
 
   const recent = $app.findRecordsByFilter(
@@ -304,32 +319,19 @@ routerAdd('GET', '/api/cc/super/backup-status', (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/cc/super/backup/run — 手动触发一次备份，写审计；失败时 backup-status 告警
-// body: { force_fail?: boolean } — 故障注入，仅供 AC-23 验收演练使用
+// POST /api/cc/super/backup/run — 已下线（410 Gone）
+// JSVM 无法调用 PocketBase 内部一致性备份（createBackup 需 Go context，hooks 内不可用），
+// 原「库文件复制」并非一致性快照（假备份，可能截断写入中的页）；每日一致性快照由
+// deploy/backup.sh（POST /api/backups，SQLite 在线备份）负责（technical-design §5.8）。
+// 不再写 backup.success 审计，force_fail 故障注入参数一并移除。
 // ---------------------------------------------------------------------------
 routerAdd('POST', '/api/cc/super/backup/run', (e) => {
-    const writeAudit = (app, entry) => {
-    // 与 lib/audit.pb.js 同实现（内联，原因同上）
-    const collection = app.findCollectionByNameOrId('audit_logs');
-    const record = new Record(collection);
-    record.set('actor_id', entry.actorId);
-    record.set('actor_role', entry.actorRole);
-    record.set('organization_id', entry.organizationId || '');
-    record.set('action', entry.action);
-    record.set('target_type', entry.targetType);
-    record.set('target_id', entry.targetId);
-    record.set('result', entry.result);
-    record.set('reason', entry.reason || '');
-    record.set('metadata', entry.metadata || null);
-    app.save(record);
-    return record;
-  };
     // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -359,49 +361,17 @@ routerAdd('POST', '/api/cc/super/backup/run', (e) => {
     ccError(500, 'INVALID_ROLE', '内部错误：未知的身份角色要求');
   };
 
-  let auth;
   try {
-    auth = requireAuth(e, 'super');
+    requireAuth(e, 'super');
   } catch (err) {
-    return jsonError(e, err.status || 401, (err.data && typeof err.data.code === 'string' ? err.data.code : 'unauthorized'), err.message || '需要超级管理员登录');
-  }
-
-  const body = e.requestInfo().body || {};
-  const startedAt = Date.now();
-  const backupName = 'cc_manual_' + new Date().toISOString().replace(/[:.]/g, '-') + '.db';
-  let failReason = null;
-
-  try {
-    if (body.force_fail === true) {
-      throw new Error('故障注入：模拟备份失败（AC-23 演练）');
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
     }
-    // 库文件复制备份：PocketBase 0.28 JSVM 的 createBackup 绑定需要 Go context，hooks 内不可用；
-    // 每日一致性快照备份由 Compose backup service（deploy/backup.sh，technical-design §5.8）负责，
-    // 本端点为手动触发的一次性备份（尽力而为的库文件复制），结果写审计（PRD §12.3）。
-    const dataDir = $app.dataDir();
-    $os.mkdirAll(dataDir + '/backups', 0o700);
-    const dbBytes = $os.readFile(dataDir + '/data.db');
-    $os.writeFile(dataDir + '/backups/' + backupName, dbBytes, 0o600);
-  } catch (err) {
-    failReason = String(err);
+    throw err;
   }
 
-  const durationMs = Date.now() - startedAt;
-  writeAudit($app, {
-    actorId: auth.id,
-    actorRole: 'super_admin',
-    action: failReason ? 'backup.failed' : 'backup.success',
-    targetType: 'backup',
-    targetId: backupName,
-    result: failReason ? 'failure' : 'success',
-    reason: failReason || undefined,
-    metadata: { trigger: 'manual', file: failReason ? undefined : backupName, duration_ms: durationMs },
-  });
-
-  if (failReason) {
-    return jsonError(e, 500, 'backup_failed', '备份失败：' + failReason);
-  }
-  return e.json(200, { ok: true, backup: backupName, duration_ms: durationMs });
+  return jsonError(e, 410, 'backup_deprecated', '手动备份端点已下线：每日一致性快照备份由系统自动执行（deploy/backup.sh），如需恢复备份请联系运维');
 });
 
 // ---------------------------------------------------------------------------
@@ -428,9 +398,9 @@ routerAdd('POST', '/api/cc/super/templates', (e) => {
   // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -513,7 +483,11 @@ routerAdd('POST', '/api/cc/super/templates', (e) => {
   try {
     auth = requireAuth(e, 'super');
   } catch (err) {
-    return jsonError(e, err.status || 401, (err.data && typeof err.data.code === 'string' ? err.data.code : 'unauthorized'), err.message || '需要超级管理员登录');
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
   }
 
   const body = e.requestInfo().body || {};
@@ -580,7 +554,11 @@ routerAdd('POST', '/api/cc/super/templates', (e) => {
       template = tpl;
     });
   } catch (err) {
-    return jsonError(e, 500, 'internal_error', '新建模板失败：' + err);
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    return jsonError(e, 500, 'internal_error', '新建模板失败，请稍后重试');
   }
 
   return e.json(200, {
@@ -619,9 +597,9 @@ routerAdd('POST', '/api/cc/super/templates/{id}/publish', (e) => {
   // --- 内联共享 lib（JSVM 各 hooks 文件作用域完全隔离，lib 为「标准源」契约须内联使用，
   //     与 lib/http.pb.js 同实现；见 lib/audit.pb.js 顶部集成说明）---
   const jsonError = (e, status, code, message) => e.json(status, { code: status, message, data: { code } });
-  const ccError = (status, code, message) => {
-    throw new ApiError(status, message, { code });
-  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -702,7 +680,11 @@ routerAdd('POST', '/api/cc/super/templates/{id}/publish', (e) => {
   try {
     auth = requireAuth(e, 'super');
   } catch (err) {
-    return jsonError(e, err.status || 401, (err.data && typeof err.data.code === 'string' ? err.data.code : 'unauthorized'), err.message || '需要超级管理员登录');
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
   }
 
   let template;
@@ -764,7 +746,12 @@ routerAdd('POST', '/api/cc/super/templates/{id}/publish', (e) => {
       published = { versionId: ver.id, version: nextVersion };
     });
   } catch (err) {
-    return jsonError(e, 500, 'internal_error', '发布新版本失败：' + err);
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    // 内部错误细节不回传客户端（仅服务端日志可读）
+    return jsonError(e, 500, 'internal_error', '发布新版本失败，请稍后重试');
   }
 
   return e.json(200, {

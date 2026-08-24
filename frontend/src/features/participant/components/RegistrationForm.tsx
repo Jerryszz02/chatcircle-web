@@ -7,6 +7,7 @@ import type { PublicRegistrationField, RegistrationAnswerInput } from '../api';
 import {
   buildRegistrationAnswersPayload,
   buildRegistrationFormModel,
+  isFieldApplicable,
   validateRegistrationForm,
   type RegistrationFieldModel,
   type RegistrationFormValues,
@@ -17,6 +18,8 @@ import { activityRoleLabel } from '../lib/status';
  * 报名表单（FR-REG-001/002）：按服务端下发的字段（标准 + 机构自定义）渲染，
  * 选择活动角色（挂在报名上而非账号），敏感字段给出标记提示（security-privacy §4）。
  * 角色名额满时仅禁用该角色选项（FR-ACT-007）；硬校验在服务端事务内。
+ * 字段按 role_scope 分角色渲染：both 字段始终显示，角色字段在选定角色后出现，
+ * 切换角色时清掉不再适用字段的已填值，提交载荷只含适用字段。
  */
 
 /** 剩余名额（undefined 表示服务端未给出，不展示也不禁用）。 */
@@ -24,6 +27,14 @@ export interface RoleRemaining {
   total?: number | null;
   speaker?: number | null;
   listener?: number | null;
+}
+
+/** 文本答案长度上限（与服务端校验上限对齐，超出直接无法输入）。 */
+const REG_ANSWER_TEXT_MAX = 2000;
+
+/** 仅保留指定 key 的记录项（切换角色时清掉不再适用字段的已填值/校验错误）。 */
+function keepKeys<T>(record: Record<string, T>, keys: Set<string>): Record<string, T> {
+  return Object.fromEntries(Object.entries(record).filter(([k]) => keys.has(k)));
 }
 
 function remainingOf(remaining: RoleRemaining, role: ActivityRole): number | null | undefined {
@@ -113,6 +124,7 @@ function FieldInput({
       required={model.required}
       error={error}
       hint={sensitiveHint}
+      maxLength={model.fieldType === 'text' ? REG_ANSWER_TEXT_MAX : undefined}
     />
   );
 }
@@ -132,8 +144,9 @@ export function RegistrationForm({
   }) => Promise<RegistrationRecord>;
   onSubmitted: (registration: RegistrationRecord) => void;
 }) {
-  const models = useMemo(() => buildRegistrationFormModel(fields), [fields]);
   const [role, setRole] = useState<ActivityRole | ''>('');
+  // 按当前角色过滤后的适用字段（未选角色时只含 both 字段）
+  const models = useMemo(() => buildRegistrationFormModel(fields, role), [fields, role]);
   const [values, setValues] = useState<RegistrationFormValues>({});
   const [roleError, setRoleError] = useState<string | undefined>();
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -141,6 +154,17 @@ export function RegistrationForm({
   const [submitting, setSubmitting] = useState(false);
 
   const roles: ActivityRole[] = ['speaker', 'listener'];
+
+  /** 切换角色：清掉不再适用字段的已填值与校验错误，避免隐藏字段随提交带出。 */
+  function handleRoleChange(next: ActivityRole) {
+    if (next === role) return;
+    setRole(next);
+    const applicableIds = new Set(
+      fields.filter((f) => isFieldApplicable(f.role_scope ?? 'both', next)).map((f) => f.id),
+    );
+    setValues((prev) => keepKeys(prev, applicableIds));
+    setFieldErrors((prev) => keepKeys(prev, applicableIds));
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -154,7 +178,7 @@ export function RegistrationForm({
     try {
       const registration = await submitRegistration({
         activity_role: role as ActivityRole,
-        answers: buildRegistrationAnswersPayload(models, values),
+        answers: buildRegistrationAnswersPayload(models, values, role),
       });
       onSubmitted(registration);
     } catch (err) {
@@ -163,6 +187,20 @@ export function RegistrationForm({
       setSubmitting(false);
     }
   }
+
+  // both 字段始终显示；角色专属字段（选定角色后才存在）分组显示并附小标题
+  const commonModels = models.filter((m) => m.roleScope === 'both');
+  const roleModels = models.filter((m) => m.roleScope !== 'both');
+
+  const renderField = (model: RegistrationFieldModel) => (
+    <FieldInput
+      key={model.id}
+      model={model}
+      value={values[model.id]}
+      error={fieldErrors[model.id]}
+      onChange={(v) => setValues((prev) => ({ ...prev, [model.id]: v }))}
+    />
+  );
 
   return (
     <form onSubmit={handleSubmit} noValidate>
@@ -190,7 +228,7 @@ export function RegistrationForm({
                   value={r}
                   checked={role === r}
                   disabled={full}
-                  onChange={() => setRole(r)}
+                  onChange={() => handleRoleChange(r)}
                 />
                 <span>
                   {activityRoleLabel(r)}
@@ -211,15 +249,14 @@ export function RegistrationForm({
         ) : null}
       </fieldset>
 
-      {models.map((model) => (
-        <FieldInput
-          key={model.id}
-          model={model}
-          value={values[model.id]}
-          error={fieldErrors[model.id]}
-          onChange={(v) => setValues((prev) => ({ ...prev, [model.id]: v }))}
-        />
-      ))}
+      {commonModels.map(renderField)}
+
+      {role !== '' && roleModels.length > 0 ? (
+        <>
+          <p className="cc-group-title">{activityRoleLabel(role)}专属问题</p>
+          {roleModels.map(renderField)}
+        </>
+      ) : null}
 
       {formError ? (
         <p className="cc-error" role="alert">

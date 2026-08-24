@@ -15,6 +15,8 @@ RUN npm run build
 # ---- stage 2: PocketBase 运行时 ----
 FROM alpine:3.20
 ARG PB_VERSION=0.28.4
+# 官方 release 校验值（release 页面 checksums.txt），升级 PB_VERSION 时必须同步更新
+ARG PB_SHA256=44161d9e8838d3226fee7f2a857b8033f642ace1f3486a1125b99fd6b8b08532
 RUN apk add --no-cache ca-certificates curl unzip
 WORKDIR /pb
 # 境内 ECS 直连 GitHub Releases 慢且偶发 EOF（2026-08-07 实测 ~16KB/s），
@@ -24,6 +26,8 @@ WORKDIR /pb
 RUN curl -fSL -C - --retry 8 --retry-delay 10 --retry-all-errors --connect-timeout 20 \
       -o /tmp/pocketbase.zip \
       "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip"
+# 供应链校验：下载产物须匹配官方 sha256，不一致直接构建失败（busybox 自带 sha256sum）
+RUN echo "$PB_SHA256  /tmp/pocketbase.zip" | sha256sum -c -
 RUN unzip /tmp/pocketbase.zip -d /pb && rm /tmp/pocketbase.zip
 
 COPY --from=frontend-build /app/dist ./pb_public

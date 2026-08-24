@@ -75,6 +75,55 @@ export function revokeCheckin(id: string, reason: string): Promise<unknown> {
   return apiPost(adminClient(), `/api/cc/checkins/${id}/revoke`, { reason });
 }
 
+/** 培训生命周期动作：publish（草稿→已发布）/ close（已发布→已关闭），机构管理员 + 审计。 */
+export type AdminTrainingAction = 'publish' | 'close';
+
+export function runTrainingAction(id: string, action: AdminTrainingAction): Promise<unknown> {
+  return apiPost(adminClient(), `/api/cc/trainings/${id}/${action}`);
+}
+
+/** 开放培训签到（同活动签到：可重复开放/关闭，同培训至多一条 open 会话）。 */
+export function openTrainingCheckin(trainingId: string): Promise<unknown> {
+  return apiPost(adminClient(), `/api/cc/trainings/${trainingId}/checkin/open`);
+}
+
+/** 关闭培训签到。 */
+export function closeTrainingCheckin(trainingId: string): Promise<unknown> {
+  return apiPost(adminClient(), `/api/cc/trainings/${trainingId}/checkin/close`);
+}
+
+/** 培训管理员补签（reason 必填，写审计；participant_id/username 二选一，照搬活动补签形态）。 */
+export function manualTrainingCheckin(input: {
+  training_id: string;
+  participant_id?: string;
+  username?: string;
+  reason: string;
+}): Promise<unknown> {
+  return apiPost(adminClient(), '/api/cc/training-checkins/manual', input);
+}
+
+/** 培训补签候选人（含用户名；管理员不可读参与者集合，由服务端注入）。 */
+export interface ManualTrainingCheckinCandidate {
+  participant_id: string;
+  username: string;
+}
+
+export async function fetchManualTrainingCheckinCandidates(
+  trainingId: string,
+): Promise<ManualTrainingCheckinCandidate[]> {
+  const res = await apiGet(
+    adminClient(),
+    `/api/cc/trainings/${trainingId}/checkin/manual-candidates`,
+  );
+  return ((res as { candidates?: ManualTrainingCheckinCandidate[] }).candidates ??
+    []) as ManualTrainingCheckinCandidate[];
+}
+
+/** 撤销培训签到（reason 必填，保留原记录，写审计）。 */
+export function revokeTrainingCheckin(id: string, reason: string): Promise<unknown> {
+  return apiPost(adminClient(), `/api/cc/training-checkins/${id}/revoke`, { reason });
+}
+
 /** 从模板复制创建活动问卷（FR-SUR-011：取模板当前版本物化题目）。 */
 export function createActivitySurvey(
   activityId: string,
@@ -107,7 +156,9 @@ export function createExport(input: {
   return apiPost(adminClient(), '/api/cc/exports', input);
 }
 
-/** 看板筛选项（与约定 query 参数一致；organization_id 由服务端按身份注入，前端不传）。 */
+/** 看板筛选项（与约定 query 参数一致；organization_id 由服务端按身份注入，前端不传）。
+ *  from/to 接受纯日期 YYYY-MM-DD（UTC 日边界）或完整 PB datetime（精确边界，from 含 to 不含）；
+ *  页面侧统一经 localDayToPbUtcRange 换算后下发，与活动明细下钻同口径。 */
 export interface MetricFilters {
   from?: string;
   to?: string;

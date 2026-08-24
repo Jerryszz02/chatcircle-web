@@ -24,6 +24,9 @@ backups/
 # 测试与历史数据存档（含个人信息与导入生成的账号凭据，不入库）
 测试数据/
 
+# agent MCP server 的本地数据目录（导出的 CSV 落盘处，含业务数据，不入库）
+mcp/data/
+
 # 系统与编辑器
 .DS_Store
 *.log

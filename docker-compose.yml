@@ -11,6 +11,12 @@ services:
     volumes:
       - pb_data:/pb/pb_data
     restart: unless-stopped
+    # 限制容器日志体积，避免 json-file 长期累积撑满磁盘
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
     # 供 backup 服务 depends_on(service_healthy) 使用；镜像为 alpine 自带 busybox wget
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8090/api/health']
@@ -39,8 +45,14 @@ services:
       PB_SUPERUSER_EMAIL: ${PB_SUPERUSER_EMAIL:?backup 服务需要超管邮箱（.env 注入，不入库）}
       PB_SUPERUSER_PASSWORD: ${PB_SUPERUSER_PASSWORD:?backup 服务需要超管密码（.env 注入，不入库）}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      # crond 每日任务按容器本地时区凌晨触发：默认 UTC 会落在北京时间上午，
+      # 固定 Asia/Shanghai 让每日备份在业务低谷（北京 02:00）执行
+      TZ: Asia/Shanghai
+    # alpine 基础镜像未内置 tzdata，命名时区 Asia/Shanghai 需其数据文件，
+    # 启动时安装（约 1MB），否则 TZ 解析失败会静默回落 UTC
     command: >
-      sh -c "mkdir -p /etc/periodic/daily
+      sh -c "apk add --no-cache tzdata
+      && mkdir -p /etc/periodic/daily
       && cp /deploy/backup.sh /etc/periodic/daily/backup
       && chmod +x /etc/periodic/daily/backup
       && crond -f -d 8"
@@ -48,6 +60,11 @@ services:
       - source: backup_script
         target: /deploy/backup.sh
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
 
   # HTTPS 反代（technical-design §5.7 / deploy/README.md §5）：Caddy 终止 TLS，
   # 经阿里云 DNS-01 挑战自动签发/续期 Let's Encrypt 证书（未备案期间 80/443 被
@@ -70,6 +87,11 @@ services:
       ALIYUN_ACCESS_KEY_ID: ${ALIYUN_ACCESS_KEY_ID:?caddy 需要阿里云 AccessKey ID 做 DNS-01 验证（.env 注入，不入库）}
       ALIYUN_ACCESS_KEY_SECRET: ${ALIYUN_ACCESS_KEY_SECRET:?caddy 需要阿里云 AccessKey Secret 做 DNS-01 验证（.env 注入，不入库）}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
 
 configs:
   backup_script:

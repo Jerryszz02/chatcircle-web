@@ -13,6 +13,7 @@ import type {
   SourceType,
   SubmissionStatus,
   SurveyStatus,
+  TrainingStatus,
 } from '../../../shared/api/types';
 
 /**
@@ -114,4 +115,10 @@ export const AUDIT_ACTOR_ROLE_LABELS: Record<AuditActorRole, string> = {
   admin: '机构管理员',
   participant: '参与者',
   system: '系统',
+};
+
+export const TRAINING_STATUS_LABELS: Record<TrainingStatus, string> = {
+  draft: '草稿',
+  published: '已发布',
+  closed: '已关闭',
 };

@@ -5,7 +5,7 @@ import { Button } from '../../../shared/ui';
 /**
  * 固定二维码展示（FR-CHK-001、PRD §9.1 qr_token）。
  *
- * 二维码内容 = 完整落地链接（签到 /checkin/:activityId、问卷 /survey/:qrToken，
+ * 二维码内容 = 完整落地链接（签到 /checkin/:token、问卷 /survey/:qrToken，
  * 由调用方以 window.location.origin 拼绝对 URL），内容固定、有效性由服务端开放状态
  * 控制，与二维码本身无关。
  *

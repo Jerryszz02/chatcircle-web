@@ -127,4 +127,26 @@ describe('MePage 我的中心', () => {
     expect(screen.getByText('当前没有可填写的问卷。')).toBeInTheDocument();
     expect(screen.getByText('还没有已提交的答卷。')).toBeInTheDocument();
   });
+
+  it('聆听者报名已通过（has_approved_listener_registration）：显示培训入口卡片', async () => {
+    stubApi({
+      'GET /api/cc/me/overview': {
+        body: overviewBody({ has_approved_listener_registration: true }),
+      },
+    });
+    renderMe();
+    expect(await screen.findByText('聆听者培训')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '查看培训' })).toHaveAttribute('href', '/trainings');
+  });
+
+  it('无已通过聆听者报名：不显示培训入口', async () => {
+    stubApi({
+      'GET /api/cc/me/overview': {
+        body: overviewBody({ has_approved_listener_registration: false }),
+      },
+    });
+    renderMe();
+    expect(await screen.findByText('八月光影茶话会')).toBeInTheDocument();
+    expect(screen.queryByText('聆听者培训')).not.toBeInTheDocument();
+  });
 });

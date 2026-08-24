@@ -52,24 +52,19 @@ export function MePage() {
   const username = (participantAuth.record as ParticipantAccountRecord | null)?.username ?? '';
 
   const headerActions = (
-    <>
-      <Link to="/" className="cc-btn cc-btn-secondary">
-        返回首页
-      </Link>
-      <Button
-        variant="secondary"
-        onClick={() => {
-          participantAuth.logout();
-          navigate('/login', { replace: true });
-        }}
-      >
-        退出登录
-      </Button>
-    </>
+    <Button
+      variant="secondary"
+      onClick={() => {
+        participantAuth.logout();
+        navigate('/login', { replace: true });
+      }}
+    >
+      退出登录
+    </Button>
   );
 
   return (
-    <PageLayout section="参与者端" title="我的中心" actions={headerActions} className="ccp-root">
+    <PageLayout section="参与者端" title="我的中心" actions={headerActions} className="ccp-root" backTo="/">
       {username ? <p className="cc-hint">当前账号：{username}</p> : null}
       {loading ? <Loading fullscreen /> : null}
 
@@ -81,6 +76,17 @@ export function MePage() {
 
       {!loading && data ? (
         <>
+          {data.has_approved_listener_registration ? (
+            <Card title="聆听者培训">
+              <p className="cc-hint">
+                你的聆听者报名已通过审核，可查看培训安排并参加培训签到；完成培训后获得聆听者资质。
+              </p>
+              <Link to="/trainings" className="cc-btn cc-btn-primary cc-btn-block">
+                查看培训
+              </Link>
+            </Card>
+          ) : null}
+
           <Card title="我的报名">
             {data.registrations.length === 0 ? (
               <p className="cc-empty">暂无报名记录。扫描活动二维码或打开活动链接即可报名。</p>

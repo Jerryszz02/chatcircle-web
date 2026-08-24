@@ -35,7 +35,7 @@ export interface RoleAuth {
   readonly client: PocketBase;
   /** 登录成功后将 token + record 写入本角色的持久化 authStore。 */
   login(identity: string, password: string): Promise<AuthModel>;
-  /** 主动退出：清空本角色会话，token 立即失效（FR-AUTH-006、§12.4）。 */
+  /** 主动退出：仅清除本地会话，服务端 token 自然过期（FR-AUTH-006、§12.4）。 */
   logout(): void;
   /** 当前是否持有有效（未过期）的本角色会话。 */
   isValid(): boolean;
@@ -105,12 +105,8 @@ export const superAuth: RoleAuth = makeRoleAuth('super', async (identity, passwo
   return res.record;
 });
 
-/** 各角色未登录时的重定向目标（technical-design §5.3 路由表）。 */
-export const LOGIN_PATHS: Record<Role, string> = {
-  participant: '/login',
-  admin: '/admin/login',
-  super: '/super/login',
-};
+/** 各角色未登录时的重定向目标：定义在 pocketbase.ts（401 统一处理同用，避免循环依赖），此处再导出保持既有引用不变。 */
+export { LOGIN_PATHS } from './pocketbase';
 
 /** 按角色取认证封装。 */
 export function authFor(role: Role): RoleAuth {

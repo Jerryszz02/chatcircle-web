@@ -1,6 +1,6 @@
 # Chat Circles
 
-Empact 多机构活动管理 / 报名审核 / 签到 / 问卷平台（V1）。
+Empact 多机构活动管理 / 报名审核 / 签到 / 问卷 / 聆听者培训平台（V1）。
 
 - 前端：React 18 + Vite + TypeScript 单 SPA，按角色路由分区（参与者端 `/`、机构管理端 `/admin`、超级管理端 `/super`，手机优先）
 - 后端：PocketBase（认证、API rules、`pb_migrations` 版本化 schema、`pb_hooks` 服务端业务规则、SQLite）
@@ -12,6 +12,7 @@ Empact 多机构活动管理 / 报名审核 / 签到 / 问卷平台（V1）。
 ```
 ├── frontend/            # React SPA（src/features/{participant,admin,superadmin} + src/shared/）
 ├── backend/             # PocketBase：pb_migrations/、pb_hooks/、tests/（集成套件）、scripts/（种子），见 backend/README.md
+├── mcp/                 # agent 数据取送 MCP server（取数走导出 API、报告回传 reports 集合），见 mcp/README.md
 ├── deploy/              # 备份脚本等部署辅助
 ├── docs/                # PRD 与 planning/ 规划文档（技术设计、数据库设计、测试计划等）
 ├── .github/workflows/   # CI
@@ -72,7 +73,7 @@ docker compose up --build
 | --- | --- |
 | `frontend` | `npm ci` → lint → typecheck → 单元测试（Vitest）→ build |
 | `backend-migrations` | 下载指定版本 PocketBase → 空目录跑通 `migrate up` → `node --check` 全部 `pb_hooks/**/*.pb.js` |
-| `backend-integration` | 下载指定版本 PocketBase → `backend/tests/run_integration.sh` 全量集成套件（越权矩阵 AC-03、名额并发 AC-08、状态机 AC-07、签到 AC-09/20、问卷资格、导出 AC-16/17、限流 AC-21、备份告警 AC-23、无硬删除 AC-18） |
+| `backend-integration` | 下载指定版本 PocketBase → `backend/tests/run_integration.sh` 全量集成套件（越权矩阵 AC-03、名额并发 AC-08、状态机 AC-07、签到 AC-09/20、聆听者培训体系、问卷资格、导出 AC-16/17、限流 AC-21、备份告警 AC-23、无硬删除 AC-18） |
 
 三个 job 均为 PR 必过。**建议在 GitHub 仓库创建后为 `main` 配置 branch protection**（Settings → Branches → 要求上述状态检查通过 + 至少 1 人 review，见 test-plan §8 合并门禁）。
 

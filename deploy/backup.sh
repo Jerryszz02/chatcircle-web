@@ -5,16 +5,21 @@
 # 对 WAL 活跃库可生成一致快照；ZIP 内含 data.db 与上传文件），替代旧的 tar 直打包
 # （tar 复制活跃 SQLite 文件不保证一致性）。
 #
-# 流程：健康等待 → 超管登录（凭据仅经环境变量注入，不写日志不落库）→ 创建备份
-#       → 下载到 backups 卷 → 校验 ZIP → 删除服务端副本 → 滚动清理 30 天 → 写结果标记。
+# 流程：健康等待 → 超管登录（凭据仅经环境变量注入；请求体走 600 权限临时文件
+#       --post-file，密码不进进程列表）→ 创建备份 → 下载到 backups 卷 → 校验 ZIP
+#       → 删除服务端副本（成功/失败路径都删）→ 滚动清理 30 天 → 原子写结果标记。
 #
-# 结果标记：写 $BACKUP_DEST/last_backup.json（result/file/bytes/duration/reason）。
+# 结果标记：写 $BACKUP_DEST/last_backup.json（result/file/bytes/duration/reason），
+# 先写临时文件再 mv 原子替换；脚本任何非零退出（fail 或 set -e 意外中断）都会
+# 留下 failure 标记，避免外部监控读到陈旧的成功标记。
 # 与 super.pb.js 的分工（详见 deploy/README.md「备份分工」）：
-#   - 本脚本：每日自动一致性快照，结果写标记文件；
-#   - POST /api/cc/super/backup/run：手动演练入口，结果写审计（backup.success/failed），
-#     GET /api/cc/super/backup-status 据此驱动超管后台告警（AC-23）。
+#   - 本脚本：每日自动一致性快照，结果写标记文件（backups/last_backup.json）；
+#   - GET /api/cc/super/backup-status：超管后台告警读取（聚合 backup.* 审计，AC-23）。
+#   - POST /api/cc/super/backup/run 已下线（410 Gone，2026-08 安全加固）：原 JSVM
+#     库文件复制并非一致性快照（假备份），不再写 backup.success/failed 审计，
+#     手动演练一律改用本脚本（见 docs/security-hardening-2026-08.md §3）。
 #   - TODO(待后端配合)：每日备份结果接入 audit_logs 需 hook 侧提供内部写入端点，
-#     属后端改动，已回报主流程；接入前 AC-23 告警以 backup/run 演练链路为准。
+#     属后端改动，已回报主流程；接入前 AC-23 告警巡检以 last_backup.json 标记为准。
 set -eu
 
 PB_URL=${PB_URL:-http://app:8090}
@@ -29,13 +34,32 @@ TS=$(date +%Y%m%d_%H%M%S)
 NAME="cc_daily_${TS}.zip"
 MARKER="$DEST/last_backup.json"
 STARTED=$(date +%s)
+# 结果标记是否已写：fail() 写过后 trap 兜底不再覆盖
+MARKER_WRITTEN=0
+# 超管登录请求体临时文件路径（--post-file 用），trap 兜底清理
+AUTH_BODY=""
 
-# 结果标记：供运维巡检与外部告警轮询读取（JSON 单行，字段与审计 metadata 对齐）
+# JSON 字符串转义（busybox 无 jq）：转义会破坏 JSON 结构的反斜杠与双引号
+json_escape() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+# 销毁敏感临时文件：优先 shred 覆写，无 shred 时退化为 rm
+secure_rm() {
+    shred -u "$1" 2>/dev/null || rm -f "$1"
+}
+
+# 结果标记：供运维巡检与外部告警轮询读取（JSON 单行，字段与审计 metadata 对齐）。
+# 先写同目录临时文件再 mv 原子替换，避免轮询方读到半截 JSON；字段值经 JSON 转义
 write_marker() {
     # $1=result(success/failure) $2=file $3=bytes $4=reason
     NOW_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    TMP_MARKER=$(mktemp "$DEST/.last_backup.XXXXXX")
     printf '{"result":"%s","file":"%s","bytes":%s,"duration_ms":%s,"reason":"%s","finished_at":"%s"}\n' \
-        "$1" "$2" "$3" "$(( ($(date +%s) - STARTED) * 1000 ))" "$4" "$NOW_ISO" > "$MARKER"
+        "$1" "$(json_escape "$2")" "$3" "$(( ($(date +%s) - STARTED) * 1000 ))" "$(json_escape "$4")" "$NOW_ISO" \
+        > "$TMP_MARKER"
+    mv "$TMP_MARKER" "$MARKER"
+    MARKER_WRITTEN=1
 }
 
 fail() {
@@ -43,6 +67,22 @@ fail() {
     write_marker failure "" 0 "$1"
     exit 1
 }
+
+# 兜底：未走 fail() 的非零退出（set -e 中断、命令意外失败）也写 failure 标记；
+# fail() 已写标记时（MARKER_WRITTEN=1）不重复覆盖
+on_exit() {
+    rc=$?
+    if [ "$rc" -ne 0 ] && [ "$MARKER_WRITTEN" -eq 0 ]; then
+        write_marker failure "" 0 "脚本异常退出（exit=$rc）" || true
+    fi
+    [ -z "$AUTH_BODY" ] || secure_rm "$AUTH_BODY"
+}
+trap on_exit EXIT
+
+# 入口校验：保留天数必须为纯数字（供 find -mtime 使用，非法值直接失败）
+case "$RETENTION_DAYS" in
+    ''|*[!0-9]*) fail "BACKUP_RETENTION_DAYS 非法（须为非负整数）：$RETENTION_DAYS" ;;
+esac
 
 # 1. 等待 PocketBase 就绪（容器同启时 app 可能尚未起来）
 i=0
@@ -52,11 +92,22 @@ until wget -qO- "$PB_URL/api/health" >/dev/null 2>&1; do
     sleep 2
 done
 
-# 2. 超管登录取 token（不打印 token；busybox 环境无 jq，用 sed 提取）
-AUTH_JSON=$(wget -qO- \
-    --post-data "{\"identity\":\"$PB_SUPERUSER_EMAIL\",\"password\":\"$PB_SUPERUSER_PASSWORD\"}" \
+# 2. 超管登录取 token（不打印 token；busybox 环境无 jq，用 sed 提取）。
+#    请求体写入 600 权限临时文件走 --post-file：--post-data 会把密码暴露在进程列表；
+#    邮箱/密码中的双引号与反斜杠先 JSON 转义，用完即销毁
+AUTH_BODY=$(mktemp)
+chmod 600 "$AUTH_BODY"
+printf '{"identity":"%s","password":"%s"}' \
+    "$(json_escape "$PB_SUPERUSER_EMAIL")" \
+    "$(json_escape "$PB_SUPERUSER_PASSWORD")" > "$AUTH_BODY"
+if ! AUTH_JSON=$(wget -qO- \
+    --post-file "$AUTH_BODY" \
     --header 'Content-Type: application/json' \
-    "$PB_URL/api/collections/_superusers/auth-with-password") || fail "超管登录请求失败"
+    "$PB_URL/api/collections/_superusers/auth-with-password"); then
+    secure_rm "$AUTH_BODY"; AUTH_BODY=""
+    fail "超管登录请求失败"
+fi
+secure_rm "$AUTH_BODY"; AUTH_BODY=""
 TOKEN=$(printf '%s' "$AUTH_JSON" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 [ -n "$TOKEN" ] || fail "超管登录未返回 token（凭据错误？）"
 
@@ -75,18 +126,29 @@ FILE_TOKEN=$(wget -qO- \
     --header "Authorization: $TOKEN" \
     "$PB_URL/api/files/token" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 [ -n "$FILE_TOKEN" ] || fail "获取文件下载 token 失败"
-wget -qO "$DEST/$NAME" \
-    "$PB_URL/api/backups/$NAME?token=$FILE_TOKEN" || fail "下载备份文件失败"
+
+# 删除服务端 pb_data/backups 副本（pb_data 卷不积累每日归档，备份卷才是归档归属；
+# PocketBase 会为每个备份生成同名 .attrs 元数据边车文件，一并清理）。
+# 成功/失败路径都要调用，避免失败时服务端副本残留
+cleanup_server_copy() {
+    rm -f "$PBDATA/backups/$NAME" "$PBDATA/backups/$NAME.attrs" \
+        || echo "[backup] warn: 未能删除服务端副本 $PBDATA/backups/$NAME" >&2
+}
+
+if ! wget -qO "$DEST/$NAME" \
+    "$PB_URL/api/backups/$NAME?token=$FILE_TOKEN"; then
+    cleanup_server_copy
+    rm -f "$DEST/$NAME"  # 清掉可能的半截下载文件，避免被误当有效归档
+    fail "下载备份文件失败"
+fi
 
 # 5. 校验：非空且为 ZIP（PK 头）
 [ -s "$DEST/$NAME" ] || fail "备份文件为空"
 [ "$(head -c 2 "$DEST/$NAME")" = "PK" ] || fail "备份文件非 ZIP 格式"
 BYTES=$(wc -c < "$DEST/$NAME" | tr -d ' ')
 
-# 6. 删除服务端副本（pb_data 卷不积累每日归档，备份卷才是归档归属；
-#    PocketBase 会为每个备份生成同名 .attrs 元数据边车文件，一并清理）
-rm -f "$PBDATA/backups/$NAME" "$PBDATA/backups/$NAME.attrs" \
-    || echo "[backup] warn: 未能删除服务端副本 $PBDATA/backups/$NAME" >&2
+# 6. 删除服务端副本
+cleanup_server_copy
 
 # 7. 滚动清理：删除超过保留天数的归档
 find "$DEST" -name 'cc_daily_*.zip' -type f -mtime "+${RETENTION_DAYS}" -delete

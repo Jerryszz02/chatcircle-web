@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { normalizeApiError } from '../../../shared/api/http';
 import { collectionsForRole } from '../../../shared/api/collections';
 import { participantAuth } from '../../../shared/auth';
+import { useSessionSnapshot } from '../../../shared/session';
 import { pbClients } from '../../../shared/pocketbase';
 import type { RegistrationRecord } from '../../../shared/api/types';
 import { Button, Card, Loading, PageLayout } from '../../../shared/ui';
@@ -76,6 +77,8 @@ export function RegisterPage() {
   const [regCheck, setRegCheck] = useState<RegCheck>({ phase: 'idle' });
   const [submitted, setSubmitted] = useState<RegistrationRecord | null>(null);
 
+  // 订阅会话变化：登录/登出（含其它链路触发的登出）后表单区即时切换
+  useSessionSnapshot();
   const authed = participantAuth.isValid();
   const registrationOpen = data?.registration.open ?? false;
 

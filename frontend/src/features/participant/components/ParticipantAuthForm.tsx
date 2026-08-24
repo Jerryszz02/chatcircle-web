@@ -5,6 +5,7 @@ import { normalizeApiError } from '../../../shared/api/http';
 import { Button, Input } from '../../../shared/ui';
 import {
   normalizeUsername,
+  USERNAME_MAX,
   USERNAME_PRIVACY_NOTICE,
   USERNAME_RULE_HINT,
   validatePassword,
@@ -18,6 +19,8 @@ import {
  * - 错误密码由服务端返回错误（不建号，AC-06），前端原样展示服务端文案；
  * - 连续失败触发限流后的拒绝文案同样来自服务端（FR-AUTH-007）。
  * 本组件不做「注册/登录」切换：语义统一为「输入用户名和密码，继续」。
+ * 用户名上限与服务端 pattern（4–20 位）对齐；密码框按自动注册场景标记
+ * new-password，避免密码管理器把既有凭据回填进「创建账号」语境。
  */
 export function ParticipantAuthForm({
   submitLabel = '继续',
@@ -75,7 +78,7 @@ export function ParticipantAuthForm({
         autoComplete="username"
         autoCapitalize="none"
         autoCorrect="off"
-        maxLength={32}
+        maxLength={USERNAME_MAX}
       />
       <Input
         label="密码"
@@ -85,7 +88,7 @@ export function ParticipantAuthForm({
         hint="至少 8 位；请牢记，平台不提供找回"
         error={passwordError}
         required
-        autoComplete="current-password"
+        autoComplete="new-password"
       />
       {formError ? (
         <p className="cc-error" role="alert">

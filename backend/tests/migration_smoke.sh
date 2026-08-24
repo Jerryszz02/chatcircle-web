@@ -5,9 +5,10 @@
 #   1. 空库 migrate up 成功；
 #   2. migrate down 全部回滚 → 再次 migrate up，往返成功；
 #   3. serve 启动后经 API 抽查：
-#      - 19 个业务集合全部存在（字段/规则随集合定义）；
+#      - 23 个业务集合全部存在（字段/规则随集合定义）；
 #      - 未认证访问业务集合被拒或为空（无公开广场，FR-ACT-002）；
-#      - 活动公开详情 viewRule 生效（published 可看、draft 不可看，FR-ACT-003）；
+#      - 活动公开详情经 /api/cc/public/activities 白名单端点可达，原生 viewRule 仅本机构
+#        管理员（匿名/参与者 404，FR-ACT-003 收敛后形态）；
 #      - 复合唯一索引生效（registrations 参与者×活动，FR-REG-003）；
 #      - 参与者/管理员/超管三类身份的隔离规则生效（database-design §5.4）；
 #      - 业务集合 delete 关闭（无硬删除，FR-AUD-001）。
@@ -98,9 +99,9 @@ info "步骤 2/4：migrate down ${MIG_COUNT}（全部回滚）→ 再 migrate up
 echo y | run_migrate "migrate down 全部回滚成功" "$WORK/down.log" down "$MIG_COUNT"
 
 if command -v sqlite3 >/dev/null 2>&1; then
-  # 回滚后 19 个业务集合应全部不存在（PocketBase 系统集合与本版本默认 users 集合不受影响）
-  LEFT="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM _collections WHERE name IN ('organizations','admin_invites','admin_accounts','participant_accounts','activities','activity_approvals','registration_field_defs','registrations','registration_answers','checkin_sessions','checkins','survey_templates','survey_template_versions','activity_surveys','survey_questions','submissions','answers','export_jobs','audit_logs');")"
-  check_eq "down 后 19 个业务集合全部不存在" "$LEFT" "0"
+  # 回滚后 23 个业务集合应全部不存在（PocketBase 系统集合与本版本默认 users 集合不受影响）
+  LEFT="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM _collections WHERE name IN ('organizations','admin_invites','admin_accounts','participant_accounts','activities','activity_approvals','registration_field_defs','registrations','registration_answers','checkin_sessions','checkins','survey_templates','survey_template_versions','activity_surveys','survey_questions','submissions','answers','export_jobs','audit_logs','trainings','training_checkin_sessions','training_attendances','reports');")"
+  check_eq "down 后 23 个业务集合全部不存在" "$LEFT" "0"
 else
   info "未安装 sqlite3，跳过 down 后集合计数检查"
 fi
@@ -130,8 +131,8 @@ if [ -n "$STOKEN" ]; then ok "超管认证成功"; else bad "超管认证失败"
 
 info "步骤 4/4：API 抽查（集合存在性 / 未认证拒绝 / 规则与唯一索引）"
 
-# 4.1 19 个业务集合全部存在
-EXPECTED="organizations admin_invites admin_accounts participant_accounts activities activity_approvals registration_field_defs registrations registration_answers checkin_sessions checkins survey_templates survey_template_versions activity_surveys survey_questions submissions answers export_jobs audit_logs"
+# 4.1 23 个业务集合全部存在
+EXPECTED="organizations admin_invites admin_accounts participant_accounts activities activity_approvals registration_field_defs registrations registration_answers checkin_sessions checkins survey_templates survey_template_versions activity_surveys survey_questions submissions answers export_jobs audit_logs trainings training_checkin_sessions training_attendances reports"
 NAMES="$(curl -fsS "$BASE/api/collections?perPage=100" -H "Authorization: $STOKEN" | json_val "' '.join(sorted(c['name'] for c in d['items']))")"
 for name in $EXPECTED; do
   case " $NAMES " in
@@ -167,9 +168,12 @@ else
   bad "fixture 造数失败"; exit 1
 fi
 
-# 4.4 公开活动详情 viewRule（FR-ACT-003）
+# 4.4 公开活动详情：原生 viewRule 已收紧为仅本机构管理员（迁移 20），
+#     匿名/参与者公开访问一律走 /api/cc/public/activities 白名单端点（FR-ACT-003）
 CODE="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/collections/activities/records/$ACT_PUB")"
-check_eq "未认证 view published 活动 = 200" "$CODE" "200"
+check_eq "未认证 view published 活动 = 404（原生公开 view 已关闭）" "$CODE" "404"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/cc/public/activities/$ACT_PUB")"
+check_eq "未认证走公开端点 view published 活动 = 200" "$CODE" "200"
 CODE="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/collections/activities/records/$ACT_DRAFT")"
 check_eq "未认证 view draft 活动 = 404" "$CODE" "404"
 
@@ -196,7 +200,7 @@ check_eq "管理员 username 认证成功" "$([ -n "$ATOKEN" ] && echo yes || ec
 MINE="$(curl -s "$BASE/api/collections/activities/records?perPage=100" -H "Authorization: $ATOKEN" | json_val "d['totalItems']")"
 check_eq "机构A管理员 list activities 仅本机构（=2）" "$MINE" "2"
 CODE="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/collections/activities/records/$ACT_B" -H "Authorization: $ATOKEN")"
-check_eq "机构A管理员 view 机构B草稿活动 = 404（published/closed 为按 id 公开详情，属设计内公开面）" "$CODE" "404"
+check_eq "机构A管理员 view 机构B草稿活动 = 404（跨机构隔离）" "$CODE" "404"
 
 # 4.8 无硬删除与写保护（FR-AUD-001 / FR-AUD-005）
 CODE="$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/collections/registrations/records/$REG1" -H "Authorization: $ATOKEN")"

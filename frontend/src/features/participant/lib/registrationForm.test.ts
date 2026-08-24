@@ -4,6 +4,7 @@ import { parseChoiceOptions } from './choiceOptions';
 import {
   buildRegistrationAnswersPayload,
   buildRegistrationFormModel,
+  isFieldApplicable,
   validateFieldValue,
   validateRegistrationForm,
   type RegistrationFieldModel,
@@ -11,7 +12,7 @@ import {
 
 /**
  * 报名表渲染与校验逻辑单测（FR-REG-001/002；test-plan §2 表单组件）。
- * 覆盖：选项解析、标准+自定义字段渲染模型、各题型校验、提交载荷组装。
+ * 覆盖：选项解析、标准+自定义字段渲染模型、按角色过滤、各题型校验、提交载荷组装。
  */
 
 function field(partial: Partial<PublicRegistrationField>): PublicRegistrationField {
@@ -23,6 +24,7 @@ function field(partial: Partial<PublicRegistrationField>): PublicRegistrationFie
     source_type: 'standard',
     is_sensitive: false,
     required: false,
+    role_scope: 'both',
     ...partial,
   };
 }
@@ -80,6 +82,7 @@ describe('buildRegistrationFormModel 渲染模型（标准 + 机构自定义字�
       isSensitive: true,
       required: true,
       sourceType: 'standard',
+      roleScope: 'both',
       options: [],
     });
     expect(models[1]).toMatchObject({
@@ -97,6 +100,38 @@ describe('buildRegistrationFormModel 渲染模型（标准 + 机构自定义字�
   });
 });
 
+describe('buildRegistrationFormModel 按角色过滤（role_scope）', () => {
+  const fields = [
+    field({ id: 'fd_both', label: '通用' }),
+    field({ id: 'fd_speaker', label: '倾诉者专属', role_scope: 'speaker' }),
+    field({ id: 'fd_listener', label: '聆听者专属', role_scope: 'listener' }),
+  ];
+
+  it('未选角色：只出 both 字段', () => {
+    const models = buildRegistrationFormModel(fields, '');
+    expect(models.map((m) => m.id)).toEqual(['fd_both']);
+  });
+
+  it('选定倾诉者：both + speaker 字段', () => {
+    const models = buildRegistrationFormModel(fields, 'speaker');
+    expect(models.map((m) => m.id)).toEqual(['fd_both', 'fd_speaker']);
+  });
+
+  it('选定聆听者：both + listener 字段', () => {
+    const models = buildRegistrationFormModel(fields, 'listener');
+    expect(models.map((m) => m.id)).toEqual(['fd_both', 'fd_listener']);
+  });
+
+  it('isFieldApplicable：both 恒适用，角色字段仅对应角色适用', () => {
+    expect(isFieldApplicable('both', '')).toBe(true);
+    expect(isFieldApplicable('both', 'speaker')).toBe(true);
+    expect(isFieldApplicable('speaker', '')).toBe(false);
+    expect(isFieldApplicable('speaker', 'speaker')).toBe(true);
+    expect(isFieldApplicable('speaker', 'listener')).toBe(false);
+    expect(isFieldApplicable('listener', 'listener')).toBe(true);
+  });
+});
+
 function modelOf(partial: Partial<RegistrationFieldModel>): RegistrationFieldModel {
   return {
     id: 'fd1',
@@ -106,6 +141,7 @@ function modelOf(partial: Partial<RegistrationFieldModel>): RegistrationFieldMod
     sourceType: 'standard',
     isSensitive: false,
     required: true,
+    roleScope: 'both',
     options: [],
     ...partial,
   };
@@ -173,6 +209,22 @@ describe('validateRegistrationForm 整表校验（角色必选，FR-REG-002）',
     const res = validateRegistrationForm(models, { fd1: '张三' }, 'speaker');
     expect(res.ok).toBe(true);
   });
+
+  it('角色专属必填字段：仅对适用角色校验', () => {
+    const scoped = [
+      modelOf({ id: 'fd_both', label: '通用' }),
+      modelOf({ id: 'fd_listener', label: '聆听者专属', roleScope: 'listener' }),
+    ];
+    const values = { fd_both: '已填写' };
+    // 聆听者：专属必填缺失 → 报错
+    const asListener = validateRegistrationForm(scoped, values, 'listener');
+    expect(asListener.ok).toBe(false);
+    expect(asListener.fieldErrors['fd_listener']).toContain('请填写');
+    // 倾诉者：该字段不适用 → 不校验
+    const asSpeaker = validateRegistrationForm(scoped, values, 'speaker');
+    expect(asSpeaker.ok).toBe(true);
+    expect(asSpeaker.fieldErrors['fd_listener']).toBeUndefined();
+  });
 });
 
 describe('buildRegistrationAnswersPayload 提交载荷', () => {
@@ -200,5 +252,21 @@ describe('buildRegistrationAnswersPayload 提交载荷', () => {
       { field_def_id: 'fd_age', value: 25 },
       { field_def_id: 'fd_topics', value: ['a'] },
     ]);
+  });
+
+  it('传入角色时不适用字段的已填值不下发（切换角色残留值不提交）', () => {
+    const models = [
+      modelOf({ id: 'fd_both', fieldType: 'text', label: '通用' }),
+      modelOf({ id: 'fd_listener', fieldType: 'text', label: '聆听者专属', roleScope: 'listener' }),
+    ];
+    const values = { fd_both: '通用答案', fd_listener: '残留答案' };
+    // 不传 role：全量输出（兼容旧调用形态）
+    expect(buildRegistrationAnswersPayload(models, values)).toHaveLength(2);
+    // 传 role=speaker：listener 专属字段不下发
+    expect(buildRegistrationAnswersPayload(models, values, 'speaker')).toEqual([
+      { field_def_id: 'fd_both', value: '通用答案' },
+    ]);
+    // 传 role=listener：两者都下发
+    expect(buildRegistrationAnswersPayload(models, values, 'listener')).toHaveLength(2);
   });
 });

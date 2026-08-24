@@ -247,6 +247,14 @@ body:has(.ccp-root) {
   font-weight: 600;
 }
 
+/* 报名表角色专属问题分组小标题 */
+.cc-group-title {
+  margin: 20px 0 12px;
+  font-size: var(--cc-fs-small);
+  font-weight: 600;
+  color: var(--cc-neutral-600);
+}
+
 /* ---------- 选择项（radio/checkbox 行，触控高度 ≥44px） ---------- */
 
 .cc-fieldset {

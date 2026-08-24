@@ -146,11 +146,7 @@ export function SurveyPage() {
       section="参与者端"
       title={meta ? meta.survey.title : '问卷填写'}
       className="ccp-root"
-      actions={
-        <Link to="/" className="cc-btn cc-btn-secondary">
-          返回首页
-        </Link>
-      }
+      backTo="/"
     >
       {phase.kind === 'loading' ? <Loading fullscreen /> : null}
 

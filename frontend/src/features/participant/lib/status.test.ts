@@ -10,6 +10,8 @@ import {
   registrationClosedReasonCopy,
   registrationStatusMeta,
   surveyIneligibleCopy,
+  trainingCheckinFailureCopy,
+  trainingStatusLabel,
 } from './status';
 
 /**
@@ -76,6 +78,33 @@ describe('checkinFailureCopy 签到失败分支（FR-CHK-002/003）', () => {
   it('bizCodeOf 从 details.code 提取业务码', () => {
     expect(bizCodeOf(errWith('checkin_not_open'))).toBe('checkin_not_open');
     expect(bizCodeOf(new ApiError('x', 400, 'HTTP_ERROR'))).toBeNull();
+  });
+});
+
+describe('trainingCheckinFailureCopy 培训签到失败分支', () => {
+  const errWith = (code: string, status = 409) =>
+    new ApiError('服务端文案', status, 'HTTP_ERROR', { code });
+
+  it('按业务码分开展示', () => {
+    expect(trainingCheckinFailureCopy(errWith('checkin_not_open')).title).toBe('签到未开放');
+    expect(trainingCheckinFailureCopy(errWith('checkin_closed')).title).toBe('签到已结束');
+  });
+
+  it('listener_not_approved 引导先报名聆听者', () => {
+    const copy = trainingCheckinFailureCopy(errWith('listener_not_approved', 403));
+    expect(copy.title).toBe('暂未开放培训签到');
+    expect(copy.detail).toContain('报名聆听者');
+  });
+
+  it('无业务码时用服务端 message 兜底', () => {
+    const copy = trainingCheckinFailureCopy(new ApiError('网络异常', 0, 'NETWORK_ERROR'));
+    expect(copy.title).toBe('签到失败');
+    expect(copy.detail).toBe('网络异常');
+  });
+
+  it('trainingStatusLabel 培训状态标签', () => {
+    expect(trainingStatusLabel('published')).toBe('进行中');
+    expect(trainingStatusLabel('closed')).toBe('已结束');
   });
 });
 

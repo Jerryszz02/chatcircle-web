@@ -1,9 +1,9 @@
-import { useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import type { Role } from './pocketbase';
-import { LOGIN_PATHS, authFor, hasAnySession } from './auth';
-import { pbClients } from './pocketbase';
+import { authFor, hasAnySession } from './auth';
+import { LOGIN_PATHS } from './pocketbase';
+import { useSessionSnapshot } from './session';
 import { ForbiddenPage } from './ui/ForbiddenPage';
 
 /**
@@ -15,20 +15,6 @@ import { ForbiddenPage } from './ui/ForbiddenPage';
  *
  * 守卫只是 UX 引导，真正的权限隔离在 collection API rules 与 pb_hooks（§5.5）。
  */
-
-/** 订阅三个角色 authStore 的变化，使守卫在登录/登出后自动重渲染。 */
-function useSessionSnapshot(): string {
-  return useSyncExternalStore(
-    (onStoreChange) => {
-      const unsubs = Object.values(pbClients).map((c) => c.authStore.onChange(onStoreChange));
-      return () => unsubs.forEach((unsub) => unsub());
-    },
-    () =>
-      (['participant', 'admin', 'super'] as const)
-        .map((r) => `${r}:${pbClients[r].authStore.isValid ? 1 : 0}`)
-        .join(','),
-  );
-}
 
 export function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
   const location = useLocation();

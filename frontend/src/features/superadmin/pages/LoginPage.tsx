@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { normalizeApiError } from '../../../shared/api/http';
 import { hasAnySession, superAuth } from '../../../shared/auth';
 import { Button, Card, Input, PageLayout } from '../../../shared/ui';
@@ -41,14 +41,7 @@ export function SuperLoginPage() {
   };
 
   return (
-    <PageLayout
-      section="超级管理端"
-      actions={
-        <Link to="/" className="cc-btn cc-btn-secondary">
-          返回首页
-        </Link>
-      }
-    >
+    <PageLayout section="超级管理端" backTo="/">
       <Card>
         <h1 className="page-title">超级管理员登录</h1>
         <form onSubmit={(e) => void onSubmit(e)}>

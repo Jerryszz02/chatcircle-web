@@ -1,17 +1,17 @@
-import PocketBase, { LocalAuthStore } from 'pocketbase';
+import PocketBase, { ClientResponseError, LocalAuthStore } from 'pocketbase';
 import type { SendOptions } from 'pocketbase';
 
 /**
  * PocketBase 后端地址。
- * 生产部署时前端产物由 PocketBase 同源伺服（pb_public），VITE_PB_URL 留空即同源——
- * 但空字符串必须落成 window.location.origin：pocketbase SDK 的 buildUrl 会把空/相对
+ * 生产部署时前端产物由 PocketBase 同源伺服（pb_public），VITE_PB_URL 留空即同源；
+ * 本地开发未设置（undefined）时同样回退 window.location.origin——vite dev server
+ * 已配置 /api 代理到 PocketBase（见 vite.config.ts），无需直连端口。
+ * 空字符串/未设置都必须落成绝对 origin：pocketbase SDK 的 buildUrl 会把空/相对
  * baseUrl 拼到当前页面 pathname 之后（如 /login 页 → /login/api/...，全站 API 404）。
- * 本地开发直连默认 8090 端口（vite dev server 亦配置了 /api 代理，见 vite.config.ts），
  * 跨环境直连用 VITE_PB_URL 覆盖（见 technical-design §5.7）。
  */
 const envUrl = import.meta.env.VITE_PB_URL;
-export const PB_URL: string =
-  envUrl === '' ? window.location.origin : (envUrl ?? 'http://127.0.0.1:8090');
+export const PB_URL: string = envUrl ? envUrl : window.location.origin;
 
 /**
  * 三类角色（technical-design §5.3/§5.4）：
@@ -40,6 +40,13 @@ export const ROLE_COLLECTIONS: Record<Role, string> = {
   super: '_superusers',
 };
 
+/** 各角色未登录时的重定向目标（technical-design §5.3 路由表；统一 401 处理同用）。 */
+export const LOGIN_PATHS: Record<Role, string> = {
+  participant: '/login',
+  admin: '/admin/login',
+  super: '/super/login',
+};
+
 /**
  * 剔除 send options 中值为 undefined 的字段（含 options.query 内的字段）。
  *
@@ -64,6 +71,26 @@ function stripUndefinedParams(options: SendOptions): SendOptions {
   return cleaned as SendOptions;
 }
 
+/**
+ * 管理端（admin/super）401 统一处理：会话失效（token 过期/被重置）时清除本地会话
+ * 并跳转对应登录页，避免各页面把过期会话展示为普通业务错误。
+ *
+ * - 参与者端不在此跳转：报名/签到/问卷等页需按场景做「登出 → 登录后回跳」引导
+ *   （见各页面 isUnauthorized 分支）；
+ * - 认证类请求（登录、邀请码注册）的 401 是「凭据错误」的正常信号，不触发跳转，
+ *   否则登录页自身的失败会陷入「401 → 跳登录页 → 再 401」死循环；
+ * - 已在对应登录页时同样不跳转（页内后台请求失败由页面自行展示）。
+ */
+function handleSessionExpired(role: Role, client: PocketBase, path: string, err: unknown): void {
+  if (role === 'participant') return;
+  if (!(err instanceof ClientResponseError) || err.status !== 401 || err.isAbort) return;
+  if (path.includes('/auth-with-password') || path.startsWith('/api/cc/auth/')) return;
+  const loginPath = LOGIN_PATHS[role];
+  if (typeof window !== 'undefined' && window.location.pathname === loginPath) return;
+  client.authStore.clear();
+  window.location.replace(loginPath);
+}
+
 function createClient(role: Role): PocketBase {
   const client = new PocketBase(PB_URL, new LocalAuthStore(AUTH_STORAGE_KEYS[role]));
   // 关闭 SDK 默认的 autoCancellation：React StrictMode / 组件重渲染下同一 URL 的
@@ -72,7 +99,10 @@ function createClient(role: Role): PocketBase {
   client.autoCancellation(false);
   const rawSend = client.send.bind(client);
   client.send = <T,>(path: string, options: SendOptions = {}): Promise<T> =>
-    rawSend<T>(path, stripUndefinedParams(options));
+    rawSend<T>(path, stripUndefinedParams(options)).catch((err: unknown) => {
+      handleSessionExpired(role, client, path, err);
+      throw err;
+    });
   return client;
 }
 

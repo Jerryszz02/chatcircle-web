@@ -5,6 +5,7 @@ import type {
   ActivityRole,
   ActivityStatus,
   CheckinRecord,
+  CheckinStatus,
   FieldType,
   RegistrationRecord,
   RegistrationStatus,
@@ -13,6 +14,7 @@ import type {
   SubmissionStatus,
   SurveyQuestionRecord,
   SurveyStatus,
+  TrainingAttendanceRecord,
 } from '../../shared/api/types';
 
 /**
@@ -35,7 +37,8 @@ import type {
  * 3. 错误响应统一 { code: <http status>, message, data: { code } }【已核对】
  *    （对应后端 lib/http.pb.js jsonError；业务码经 ApiError.details.code 可读，
  *    签到分支 checkin_not_open/checkin_closed/registration_not_approved 实测可读）。
- * 4. POST /api/cc/checkin/:activityId/self → SelfCheckinResult【已核对】
+ * 4. POST /api/cc/checkin/self（body: { token }）→ SelfCheckinResult
+ *    token = 活动 checkin_qr_token（扫码落地页 /checkin/:token 带入，不暴露活动 id）；
  *    幂等重复扫码返回 { checkin, already_checked_in: true }（FR-CHK-004）。
  * 5. GET /api/cc/me/overview → MeOverview【已核对】
  *    { registrations: [{ registration, activity }], open_surveys: [{ survey（含
@@ -77,6 +80,8 @@ export interface PublicRegistrationField {
   is_sensitive: boolean;
   /** 活动级生效必填（服务端解析后下发）。 */
   required: boolean;
+  /** 适用角色：both=两角色均作答；speaker/listener=仅对应角色报名时出现并参与校验。 */
+  role_scope: RoleScope;
   options_json?: unknown;
 }
 
@@ -188,6 +193,8 @@ export interface MeOverview {
   registrations: MeRegistrationItem[];
   open_surveys: MeSurveyEntry[];
   submissions: MeSubmissionItem[];
+  /** 是否存在已通过的聆听者报名（控制「聆听者培训」入口显隐）。 */
+  has_approved_listener_registration: boolean;
 }
 
 /** 「我的」中心总览（FR-PAR-001/002）。 */
@@ -195,7 +202,7 @@ export function getMeOverview(): Promise<MeOverview> {
   return apiGet(pbClients.participant, '/api/cc/me/overview');
 }
 
-/** POST /api/cc/checkin/:activityId/self 响应。 */
+/** POST /api/cc/checkin/self 响应。 */
 export interface SelfCheckinResult {
   checkin: CheckinRecord;
   /** true = 幂等返回的既有签到（FR-CHK-004 重复扫码不报错不新建）。 */
@@ -204,11 +211,68 @@ export interface SelfCheckinResult {
 
 /**
  * 自助签到（幂等：重复扫码返回已有记录，FR-CHK-004、AC-09/AC-20）。
+ * token 为活动 checkin_qr_token（由 /checkin/:token 扫码落地页带入，不暴露活动 id）。
  * 失败时 ApiError.details.code 预期取值：checkin_not_open（未开放）/
  * checkin_closed（已结束）/ registration_not_approved（报名未通过）。
  */
-export function selfCheckin(activityId: string): Promise<SelfCheckinResult> {
-  return apiPost(pbClients.participant, `/api/cc/checkin/${activityId}/self`);
+export function selfCheckin(token: string): Promise<SelfCheckinResult> {
+  return apiPost(pbClients.participant, '/api/cc/checkin/self', { token });
+}
+
+/** 「我的培训」列表项（GET /api/cc/me/trainings 的 trainings 元素）。 */
+export interface MyTrainingItem {
+  id: string;
+  title: string;
+  training_code: string;
+  description?: string;
+  location?: string;
+  start_time: string;
+  end_time: string;
+  status: 'published' | 'closed';
+  /** 本人签到记录（revoked 视为未参加）；null = 未参加。 */
+  my_attendance: { status: CheckinStatus; checked_in_at: string } | null;
+}
+
+/** GET /api/cc/me/trainings 响应。 */
+export interface MyTrainingsOverview {
+  /** 是否有已通过的聆听者报名（无则培训功能不开放）。 */
+  eligible: boolean;
+  /** 是否已完成培训（存在任一 valid 签到，账号级标记，全平台通用）。 */
+  trained: boolean;
+  /** 全部已发布培训 + 本人有记录的已关闭培训。 */
+  trainings: MyTrainingItem[];
+}
+
+/** 我的培训总览（需参与者登录；eligible=false 时培训列表为空）。 */
+export function getMyTrainings(): Promise<MyTrainingsOverview> {
+  return apiGet(pbClients.participant, '/api/cc/me/trainings');
+}
+
+/** POST /api/cc/training-checkin/self 响应（照搬活动签到形态）。 */
+export interface SelfTrainingCheckinResult {
+  attendance: TrainingAttendanceRecord;
+  /** true = 幂等返回的既有签到（重复扫码不报错不新建）。 */
+  already_checked_in?: boolean;
+}
+
+/**
+ * 培训自助签到（幂等，同活动签到语义）。
+ * token 为培训 checkin_qr_token（由 /training-checkin/:token 扫码落地页带入）。
+ * 失败时 ApiError.details.code 预期取值：checkin_not_open（未开放）/
+ * checkin_closed（已结束）/ listener_not_approved（聆听者报名未通过）。
+ * 响应签到记录键名以 attendance 为准，兼容服务端沿用活动签到形态的 checkin 键。
+ */
+export async function selfTrainingCheckin(token: string): Promise<SelfTrainingCheckinResult> {
+  const res = await apiPost<{
+    attendance?: TrainingAttendanceRecord;
+    checkin?: TrainingAttendanceRecord;
+    already_checked_in?: boolean;
+  }>(pbClients.participant, '/api/cc/training-checkin/self', { token });
+  const attendance = res.attendance ?? res.checkin;
+  if (!attendance) {
+    throw new ApiError('服务响应格式异常，请稍后重试', 0, 'INVALID_RESPONSE');
+  }
+  return { attendance, already_checked_in: res.already_checked_in === true };
 }
 
 /** 问卷资格校验失败原因（GET /api/cc/surveys/:qrToken 的 reasons 元素，FR-SUR-006）。 */

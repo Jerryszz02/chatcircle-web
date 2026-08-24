@@ -51,7 +51,7 @@ def run(ctx):
                         fx.field_answers(fields, '越权乙', phone='13800000000'))
     fx.transition(base, AT_B, reg_b, 'approved')
     call(base, 'POST', '/api/cc/activities/%s/checkin/open' % act_b_pub, {}, AT_B)
-    s, ckb = call(base, 'POST', '/api/cc/checkin/%s/self' % act_b_pub, {}, PT_B)
+    s, ckb = fx.self_checkin(base, fx.checkin_token(base, AT_B, act_b_pub), PT_B)
     checkin_b = (ckb.get('checkin') or {}).get('id')
     call(base, 'POST', '/api/cc/activities/%s/checkin/close' % act_b_pub, {}, AT_B)
     sv_b, qr_b = fx.create_survey(base, AT_B, act_b_pub, ver_id, '机构B问卷')
@@ -72,6 +72,19 @@ def run(ctx):
     s, invb = call(base, 'POST', '/api/cc/super/invites', {'organization_id': org_b}, st)
     invite_b = (invb.get('invite') or {}).get('id')
 
+    # 机构B培训 + 签到数据（培训域越权攻击目标）：培训签到前置为 approved 聆听者报名，
+    # P_B 在 act_b_pub 已是 speaker（每活动每人一条报名），故另开资格场注册 listener
+    act_b_lis = fx.create_activity(base, AT_B, org_b, 'CC_IT_ACL_B3', '机构B聆听者资格场',
+                                   fields=fx.nick_field_cfg(fields))
+    reg_b_lis = fx.register(base, PT_B, act_b_lis, 'listener', fx.field_answers(fields, '越权乙听'))
+    fx.transition(base, AT_B, reg_b_lis, 'approved')
+    s, trnb = fx.create_training(base, AT_B, org_b, 'CC_IT_ACL_TRN_B1', '机构B培训')
+    training_b = trnb.get('id')
+    call(base, 'POST', '/api/cc/trainings/%s/publish' % training_b, {}, AT_B)
+    call(base, 'POST', '/api/cc/trainings/%s/checkin/open' % training_b, {}, AT_B)
+    s, tckb = fx.self_training_checkin(base, fx.training_token(base, AT_B, training_b), PT_B)
+    attendance_b = (tckb.get('attendance') or {}).get('id')
+
     # 超管视角取机构B各二级表记录 id（供详情越权断言）
     def sid(coll, flt):
         _, r = call(base, 'GET', '/api/collections/%s/records?perPage=1&filter=(%s)' % (coll, flt), token=st)
@@ -80,12 +93,14 @@ def run(ctx):
 
     reg_ans_b = sid('registration_answers', "registration_id='%s'" % reg_b)
     session_b = sid('checkin_sessions', "activity_id='%s'" % act_b_pub)
+    tsession_b = sid('training_checkin_sessions', "training_id='%s'" % training_b)
     question_b = sid('survey_questions', "activity_survey_id='%s'" % sv_b)
     answer_b = sid('answers', "submission_id='%s'" % sub_b)
     audit_b = sid('audit_logs', "organization_id='%s'" % org_b)
     fixture_ok = all([reg_b, checkin_b, sv_b, sub_b, job_b, field_b, invite_b,
-                      reg_ans_b, session_b, question_b, answer_b, audit_b])
-    rep.check('fixture 双侧数据齐备（B 侧报名/签到/问卷/答卷/导出/审计/自定义字段/邀请码）',
+                      reg_ans_b, session_b, question_b, answer_b, audit_b,
+                      training_b, attendance_b, tsession_b])
+    rep.check('fixture 双侧数据齐备（B 侧报名/签到/问卷/答卷/导出/审计/自定义字段/邀请码/培训/培训签到）',
               fixture_ok)
     if not fixture_ok:
         return
@@ -244,7 +259,8 @@ def run(ctx):
     rep.check('ACL-64 未认证报名列表为空集（无泄露）',
               s == 200 and r.get('totalItems') == 0, r)
     s, r = call(base, 'GET', '/api/collections/activities/records/%s' % act_b_pub)
-    rep.check('ACL-65 未认证可看已发布活动详情（设计内公开面，FR-ACT-003）', s == 200, r)
+    rep.check('ACL-65 未认证原生 view 已发布活动 → 404（公开详情只走 /api/cc/public/activities 白名单端点）',
+              s == 404, r)
     s, r = call(base, 'GET', '/api/collections/activities/records/%s' % act_b_draft)
     rep.check('ACL-66 未认证看草稿活动 → 404', s == 404, r)
     s, r = call(base, 'GET', '/api/cc/metrics/applications')
@@ -257,3 +273,30 @@ def run(ctx):
     rep.check('ACL-69 参与者读补签候选人 → 401/403', s in (401, 403), r)
     s, r = call(base, 'GET', '/api/cc/activities/%s/checkin/manual-candidates' % act_b_pub)
     rep.check('ACL-70 未认证读补签候选人 → 401', s == 401, r)
+
+    # ---------- 8. 培训体系（trainings / training_attendances / training_checkin_sessions） ----------
+    list_clean('trainings', [training_b], 'ACL-71 培训列表不含机构B培训')
+    deny('trainings', training_b, 'ACL-72 详情：机构B培训 → 404')
+    list_clean('training_attendances', [attendance_b], 'ACL-73 培训签到列表不含机构B记录')
+    deny('training_attendances', attendance_b, 'ACL-74 详情：机构B培训签到 → 404')
+    list_clean('training_checkin_sessions', [tsession_b], 'ACL-75 培训签到场次列表不含机构B场次')
+    deny('training_checkin_sessions', tsession_b, 'ACL-76 详情：机构B培训签到场次 → 404')
+    deny_post('/api/cc/trainings/%s/publish' % training_b, {}, 'ACL-77 发布机构B培训 → 404')
+    deny_post('/api/cc/trainings/%s/close' % training_b, {}, 'ACL-78 关闭机构B培训 → 404')
+    deny_post('/api/cc/trainings/%s/checkin/open' % training_b, {},
+              'ACL-79 开放机构B培训签到 → 404')
+    deny_post('/api/cc/trainings/%s/checkin/close' % training_b, {},
+              'ACL-80 关闭机构B培训签到 → 404')
+    deny_post('/api/cc/training-checkins/manual',
+              {'training_id': training_b, 'participant_id': P_B, 'reason': '越权补签'},
+              'ACL-81 对机构B培训补签 → 404')
+    deny_post('/api/cc/training-checkins/%s/revoke' % attendance_b, {'reason': '越权撤销'},
+              'ACL-82 撤销机构B培训签到 → 404')
+    s, r = call(base, 'GET', '/api/cc/trainings/%s/checkin/manual-candidates' % training_b, token=AT_A)
+    rep.check('ACL-83 机构A管理员读机构B培训补签候选人 → 404', s == 404, r)
+    s, r = call(base, 'POST', '/api/cc/trainings/%s/publish' % training_b, {}, PT_A)
+    rep.check('ACL-84 参与者发布培训 → 401/403', s in (401, 403), r)
+    s, r = call(base, 'GET', '/api/cc/trainings/%s/checkin/manual-candidates' % training_b, token=PT_A)
+    rep.check('ACL-85 参与者读培训补签候选人 → 401/403', s in (401, 403), r)
+    s, r = call(base, 'POST', '/api/cc/training-checkin/self', {'token': 'x'})
+    rep.check('ACL-86 未认证培训自助签到 → 401', s == 401, r)
