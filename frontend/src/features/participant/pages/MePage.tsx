@@ -52,24 +52,19 @@ export function MePage() {
   const username = (participantAuth.record as ParticipantAccountRecord | null)?.username ?? '';
 
   const headerActions = (
-    <>
-      <Link to="/" className="cc-btn cc-btn-secondary">
-        返回首页
-      </Link>
-      <Button
-        variant="secondary"
-        onClick={() => {
-          participantAuth.logout();
-          navigate('/login', { replace: true });
-        }}
-      >
-        退出登录
-      </Button>
-    </>
+    <Button
+      variant="secondary"
+      onClick={() => {
+        participantAuth.logout();
+        navigate('/login', { replace: true });
+      }}
+    >
+      退出登录
+    </Button>
   );
 
   return (
-    <PageLayout section="参与者端" title="我的中心" actions={headerActions} className="ccp-root">
+    <PageLayout section="参与者端" title="我的中心" actions={headerActions} className="ccp-root" backTo="/">
       {username ? <p className="cc-hint">当前账号：{username}</p> : null}
       {loading ? <Loading fullscreen /> : null}
 

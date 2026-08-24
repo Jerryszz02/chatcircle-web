@@ -144,6 +144,19 @@ svg {
   max-width: var(--cc-content-max);
 }
 
+/* 左上角「返回首页」入口（PageLayout backTo）；a.cc-btn 全局为 block，这里改回内容宽度 */
+.page-back {
+  margin-bottom: 12px;
+}
+
+.page-back .cc-btn {
+  display: inline-block;
+  width: auto;
+  min-height: 36px;
+  padding: 4px 12px;
+  font-size: var(--cc-fs-small);
+}
+
 .page-section {
   margin: 0 0 8px;
   font-size: var(--cc-fs-label);
