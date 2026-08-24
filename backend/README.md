@@ -6,7 +6,7 @@ Chat Circles 后端为单个 PocketBase 实例：认证、业务 API、collectio
 
 | 路径 | 内容 |
 | --- | --- |
-| `pb_migrations/` | 全部 schema 变更（集合、字段、索引、API rules），版本化管理。**schema 只能经迁移变更**，禁止在生产环境用 admin UI 手工改结构。当前含 19 个业务集合的初始迁移（18 个 JS 文件，按依赖顺序，`1785888000+` 时间戳前缀），对应 database-design §5.2。 |
+| `pb_migrations/` | 全部 schema 变更（集合、字段、索引、API rules），版本化管理。**schema 只能经迁移变更**，禁止在生产环境用 admin UI 手工改结构。当前共 20 个业务集合（`1785888000+` 时间戳前缀的 JS 迁移，按依赖顺序），对应 database-design §5.2。 |
 | `pb_hooks/` | 全部服务端业务规则（JS），按领域分文件（`auth.pb.js`、`registrations.pb.js` 等）。**0.28.4 JSVM 各 hooks 文件作用域完全隔离**，共享函数以 `lib/` 为契约标准源、在 handler 内内联（勿手工改副本）。 |
 | `tests/` | 服务端测试：`integration/` 集成测试套件（L3，CI 必过）+ `migration_smoke.sh` 迁移冒烟，见下文「测试」。 |
 | `scripts/` | 开发辅助脚本：`seed_demo.sh` 演示种子数据注入，见下文「演示种子数据」。 |
@@ -70,7 +70,7 @@ bash backend/tests/run_integration.sh
 bash backend/tests/migration_smoke.sh
 ```
 
-脚本使用临时数据目录（不污染 `pb_data/`）：空库 `migrate up` → 全部 `migrate down` → 再 `migrate up` 往返，随后启动 serve 抽查 19 个集合存在性、未认证访问拒绝、公开活动 viewRule、`registrations` 参与者×活动唯一索引、参与者/管理员/超管三类身份隔离与无硬删除。全部检查通过时退出码为 0。
+脚本使用临时数据目录（不污染 `pb_data/`）：空库 `migrate up` → 全部 `migrate down` → 再 `migrate up` 往返，随后启动 serve 抽查 20 个集合存在性、未认证访问拒绝、公开活动 viewRule、`registrations` 参与者×活动唯一索引、参与者/管理员/超管三类身份隔离与无硬删除。全部检查通过时退出码为 0。
 
 ## 不入库约定
 

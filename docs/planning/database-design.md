@@ -4,7 +4,7 @@
 
 ## 1. 文档目的
 
-- 给出 PRD §9.1 全部 19 个集合的 PocketBase collection 定义草案：字段名、类型、必填、唯一约束与索引。
+- 给出 PRD §9.1 全部 19 个集合及后续新增集合（§5.2.20 reports）的 PocketBase collection 定义草案：字段名、类型、必填、唯一约束与索引。
 - 固化标识规则（`participant_id` 全平台稳定、`registration_id` 参与者×活动唯一、`question_code` 稳定性、`group_tag` 预留）。
 - 定义多机构隔离在 PocketBase 层面的实现方式：`organization_id` 冗余字段 + API Rules 服务端强制过滤。
 - 汇总全部状态枚举与状态机（活动 7 态、报名 4 态及迁移矩阵、签到场次/记录、问卷 5 态、答卷 3 态、邀请码 4 态），并给出事务与并发约束。
@@ -336,6 +336,23 @@
 - **不可变**：仅开放 create（服务端）与按权限 view；update/delete 规则全部关闭，普通管理员不可修改（FR-AUD-002、FR-AUD-005）。
 - 可读权限：机构管理员只读检索本机构（`organization_id` 过滤），超级管理员全局（FR-AUD-005）。
 - 保留 ≥1 年（FR-AUD-003），到期策略后续治理决定。
+
+#### 5.2.20 reports — 活动数据报告（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| title | text | 是 | — | 报告标题 |
+| activity_id | relation(activities) | 否 | 索引 | 所属活动；可空为未来机构/平台级报告留口 |
+| file | file | 是 | maxSelect=1、maxSize=20MB、protected | 报告文件（pdf/md 等）；protected：文件 URL 须带 token，不走公开静态路径（同导出文件防护口径，PRD §11.2） |
+| status | select(draft, published) | 是 | 索引 | agent 上传一律 draft，人工审核后改 published |
+| export_job_id | text | 否 | — | 溯源：本报告基于哪次导出（`export_jobs.id`） |
+| notes | text | 否 | — | 生成元信息（分析 skill / prompt 版本等） |
+| created_by | text | 否 | — | 创建人 id，由 `reports.pb.js` 的 onRecordCreateRequest 强制填充（忽略客户端传入，同 export_jobs.created_by 约定） |
+
+- 背景：数据分析与报告生成由外部 agent 完成（经 `mcp/` MCP server 以超管服务账号接入）；取数仍走 `POST /api/cc/exports`，本集合只做产出物存储。
+- API Rules 全部 null：仅超级管理员经 API / admin UI 可读写；agent 通道上传强制 draft，发布保留人工。
+- 创建审计（`report.upload`）由 `reports.pb.js` 的 onRecordCreate 模型钩子与报告保存在**同一事务**写入（失败即整体回滚），机构归属经 `activity_id` 反查。
+- guards.pb.js 未为本集合加直连写守卫：rules 全 null 时非超管在 rule 层已被拒，守卫无额外收窄对象（守卫针对「规则放行但需收窄」的场景）。
 
 ### 5.3 标识与关联规则
 
