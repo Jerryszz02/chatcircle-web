@@ -235,8 +235,23 @@ def run(ctx):
                ov_s.get('has_approved_listener_registration')])
 
     # 关闭 T1 后：本人有出席记录的 closed 培训仍保留在列表中
+    # （TRN-40 前重开过签到且未关，此处可验证「关闭培训联动关闭 open 场次」的回归）
     s, r = call(base, 'POST', '/api/cc/trainings/%s/close' % T1, {}, AT)
     rep.check('TRN-46 关闭 T1', s == 200, r)
+    s, r = call(base, 'GET',
+                "/api/collections/training_checkin_sessions/records?filter=(training_id='%s')" % T1,
+                token=AT)
+    sess = r.get('items') or []
+    rep.check('TRN-49 关闭培训联动关闭仍 open 的签到场次（无残留 open，closed_at 已写入）',
+              s == 200 and len(sess) >= 2 and all(x.get('status') == 'closed' for x in sess)
+              and all(bool(x.get('closed_at')) for x in sess), sess)
+    s, r = call(base, 'GET',
+                f"/api/collections/audit_logs/records?filter=(action='training.close'%26%26target_id='{T1}')",
+                token=st)
+    items = r.get('items') or []
+    meta = (items[-1].get('metadata') if items else None) or {}
+    rep.check('TRN-50 关闭审计记录联动关闭场次数量（closed_open_sessions=1）',
+              s == 200 and len(items) >= 1 and meta.get('closed_open_sessions') == 1, items)
     s, r = call(base, 'GET', '/api/cc/me/trainings', token=PT_L1)
     by_id = {t.get('id'): t for t in (r.get('trainings') or [])}
     mine1 = by_id.get(T1) or {}

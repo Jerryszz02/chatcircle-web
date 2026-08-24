@@ -122,6 +122,7 @@ routerAdd('POST', '/api/cc/trainings/{id}/close', (e) => {
     try { return app.findRecordById(collection, id); } catch (err) { if (ccIsNoRows(err)) return null; throw err; }
   };
   const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
+  const ccNow = () => new Date().toISOString().replace('T', ' ').slice(0, 23) + 'Z';
   const requireAuth = (e, role) => {
     const auth = e.auth;
     if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
@@ -180,10 +181,22 @@ routerAdd('POST', '/api/cc/trainings/{id}/close', (e) => {
     }
     fresh.set('status', 'closed');
     txApp.save(fresh);
+    // 联合同步关闭仍 open 的签到场次：培训关闭后管理端不再提供关闭会话入口，
+    // 残留 open 会话会造成「培训已关闭但签到仍开放」的矛盾状态
+    const closedAt = ccNow();
+    const openSessions = txApp.findRecordsByFilter(
+      'training_checkin_sessions', "training_id = {:t} && status = 'open'", '', 500, 0, { t: fresh.id },
+    );
+    openSessions.forEach((s) => {
+      s.set('status', 'closed');
+      s.set('closed_at', closedAt);
+      txApp.save(s);
+    });
     writeAudit(txApp, {
       actorId: admin.id, actorRole: 'admin', organizationId: orgId,
       action: 'training.close', targetType: 'training', targetId: fresh.id,
-      result: 'success', metadata: { from: 'published', to: 'closed' },
+      result: 'success',
+      metadata: { from: 'published', to: 'closed', closed_open_sessions: openSessions.length },
     });
   });
 

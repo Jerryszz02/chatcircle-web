@@ -48,6 +48,24 @@ test.describe.serial('培训链路', () => {
       await adminPage.waitForURL(`**/admin/trainings/${fixture.trainingId}`);
     });
 
+    // ---------- 1.5 管理端经 UI 创建培训（回归：创建载荷须显式带 draft，守卫才会放行） ----------
+    await test.step('管理端创建培训', async () => {
+      await adminPage.goto(`${webUrl}/admin/trainings`);
+      await adminPage.getByRole('button', { name: '创建培训' }).click();
+      const dialog = adminPage.getByRole('dialog', { name: '创建培训' });
+      await dialog.getByLabel('培训标题').fill('E2E 临时培训');
+      await dialog.getByLabel('培训代码').fill(`TR_E2E_TMP_${Date.now()}`);
+      await dialog.getByLabel('开始时间').fill('2026-09-01T10:00');
+      await dialog.getByLabel('结束时间').fill('2026-09-01T12:00');
+      await dialog.getByRole('button', { name: '创建培训' }).click();
+      await expect(dialog).toBeHidden();
+      const row = adminPage.locator('.admin-table tbody tr', { hasText: 'E2E 临时培训' });
+      await expect(row).toHaveCount(1);
+      await expect(row).toContainText('草稿');
+      // 回到种子培训详情页，后续步骤在该页操作
+      await adminPage.goto(`${webUrl}/admin/trainings/${fixture.trainingId}`);
+    });
+
     // ---------- 2. 详情页开放签到（FR-CHK-001 培训镜像） ----------
     await test.step('管理员开放培训签到', async () => {
       await adminPage.getByRole('button', { name: '开放签到' }).click();

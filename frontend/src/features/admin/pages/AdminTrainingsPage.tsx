@@ -20,8 +20,8 @@ const STATUS_TONES: Record<TrainingStatus, StatusTone> = {
 /**
  * 培训列表（/admin/trainings）。
  * 本机构培训（机构隔离由服务端规则强制），含状态筛选与创建入口；
- * 创建走 trainings 集合 API（createRule 限定本机构），初始状态由服务端强制为 draft，
- * checkin_qr_token 由服务端生成（防伪造/防覆盖），前端不传这两个字段。
+ * 创建走 trainings 集合 API（createRule 限定本机构），初始状态显式传 draft
+ * （guards 强制创建即草稿，同 ActivityForm），checkin_qr_token 由服务端生成（防伪造/防覆盖），前端不传。
  */
 export function AdminTrainingsPage() {
   const [items, setItems] = useState<TrainingRecord[] | null>(null);
@@ -190,7 +190,7 @@ function TrainingCreateForm({
     if (!admin) return;
     setSubmitting(true);
     try {
-      // status 由服务端强制 draft、checkin_qr_token 由服务端生成，前端不传这两个字段
+      // status 显式传 draft（守卫要求创建即草稿，同 ActivityForm），checkin_qr_token 由服务端生成不传
       const saved = await adminCollections().trainings.create({
         organization_id: admin.organization_id,
         title: title.trim(),
@@ -199,6 +199,7 @@ function TrainingCreateForm({
         location: location.trim() || undefined,
         start_time: start,
         end_time: end,
+        status: 'draft',
       });
       onSaved(saved);
     } catch (err) {
