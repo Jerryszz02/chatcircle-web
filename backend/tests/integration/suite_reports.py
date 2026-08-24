@@ -16,6 +16,10 @@ from cc_client import call
 
 REPORT_MD = '# 报告校验场 数据报告\n\n本期服务 10 人次。\n'.encode('utf-8')
 
+# 与 cc_client 同因：urllib 在 macOS 拾取系统代理，本机代理转发 127.0.0.1 会 502 空响应，
+# 故 multipart 调用同样走禁用代理的 opener（仅打本机回环实例）
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 
 def _multipart_call(base, method, path, fields=None, file_field=None, file_name=None,
                     file_bytes=None, file_mime='application/octet-stream', token=None):
@@ -43,7 +47,7 @@ def _multipart_call(base, method, path, fields=None, file_field=None, file_name=
     if token:
         req.add_header('Authorization', token)
     try:
-        with urllib.request.urlopen(req, timeout=30) as res:
+        with _OPENER.open(req, timeout=30) as res:
             return res.status, json.loads(res.read() or b'{}')
     except urllib.error.HTTPError as e:
         payload = e.read()
