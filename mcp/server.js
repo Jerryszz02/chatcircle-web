@@ -6,7 +6,9 @@
 // - export_activity_data：经现有 POST /api/cc/exports 拉取单活动规范化导出（include_pii 恒 false，
 //   敏感字段过滤由服务端 is_sensitive 口径保证），ZIP 解压到本地目录后只返回文件路径与行数，
 //   不回数据正文（避免撑爆 agent 上下文）
-// - upload_report：把分析产出回传 reports 集合（status 恒 draft，人工审核后发布）并写审计
+// - upload_report：把分析产出回传 reports 集合（status 恒 draft，人工审核后发布）；
+//   上传文件必须位于 CC_REPORT_DIR（默认 = CC_DATA_DIR）内，防止被诱导上传任意本地文件；
+//   创建审计（report.upload）由后端 reports.pb.js 钩子在保存事务内写入，本进程不单独发审计
 //
 // 权限边界：本进程持有超管服务账号凭据（env 注入），是唯一的权限闸门——
 // 不暴露 include_pii 参数、不提供任何写业务数据的 tool、上传强制 draft。
@@ -26,6 +28,8 @@ const AGENT_EMAIL = process.env.CC_AGENT_EMAIL || '';
 const AGENT_PASSWORD = process.env.CC_AGENT_PASSWORD || '';
 const DATA_DIR =
   process.env.CC_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
+// 上传路径白名单根目录：upload_report 只接受该目录内的文件（默认 = DATA_DIR）
+const REPORT_DIR = path.resolve(process.env.CC_REPORT_DIR || DATA_DIR);
 
 if (!AGENT_EMAIL || !AGENT_PASSWORD) {
   console.error('[cc-mcp] 缺少 CC_AGENT_EMAIL / CC_AGENT_PASSWORD 环境变量');
@@ -34,7 +38,6 @@ if (!AGENT_EMAIL || !AGENT_PASSWORD) {
 
 // ---------- PocketBase 客户端（超管服务账号；401 自动重登一次）----------
 let authToken = null;
-let authRecordId = null;
 
 async function login() {
   const res = await fetch(`${PB_URL}/api/collections/_superusers/auth-with-password`, {
@@ -47,7 +50,6 @@ async function login() {
   }
   const data = await res.json();
   authToken = data.token;
-  authRecordId = (data.record && data.record.id) || null;
 }
 
 async function api(method, apiPath, { body, form, raw = false, _retried = false } = {}) {
@@ -87,10 +89,33 @@ async function findActivity(activityCode) {
   return item;
 }
 
+// 按逻辑记录数统计 CSV 行数（减表头）：引号感知的有限状态机，
+// 处理 RFC 4180 引号字段（"" 转义；引号内的 \r\n 不计为新行）——自由文本答案可含换行
 function csvRows(file) {
   const text = fs.readFileSync(file, 'utf8');
-  const lines = text.split(/\r\n|\r|\n/).filter((l) => l.length > 0);
-  return Math.max(lines.length - 1, 0); // 减表头
+  let inQuotes = false;
+  let records = 0;
+  let hasContent = false; // 当前记录是否有内容（避免把末尾空行当一条记录）
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') i++; // "" 转义
+        else inQuotes = false;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+      hasContent = true;
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++; // \r\n 视为一个换行
+      records++;
+      hasContent = false;
+    } else {
+      hasContent = true;
+    }
+  }
+  if (hasContent) records++; // 末尾无换行的最后一条记录
+  return Math.max(records - 1, 0); // 减表头
 }
 
 function jsonContent(obj) {
@@ -157,9 +182,10 @@ server.registerTool(
     const jobId = job.export_job && job.export_job.id;
     const zip = await api('GET', `/api/cc/exports/${jobId}/download`, { raw: true });
 
-    const stamp = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15).replace('T', '-');
-    const outDir = path.join(DATA_DIR, `${activity_code}-${stamp}`);
-    fs.mkdirSync(outDir, { recursive: true });
+    // 目录名含 export_job_id（全局唯一）：同活动重复导出不会撞名覆盖，且与返回值天然对应可溯源
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const outDir = path.join(DATA_DIR, `${activity_code}-${jobId}`);
+    fs.mkdirSync(outDir); // 已存在即抛错（防御；jobId 唯一，正常不会发生）
     const extracted = await unzipper.Open.buffer(zip);
     await extracted.extract({ path: outDir, concurrency: 5 });
 
@@ -184,10 +210,11 @@ server.registerTool(
     title: '上传活动报告',
     description:
       '把活动数据分析报告（pdf/md 等文件）回传到 Chat Circles 的 reports 集合，一律以 draft 入库，' +
-      '由人工在管理后台审核后发布。建议在 export_activity_data 之后调用，并传回 export_job_id 以便溯源。',
+      '由人工在管理后台审核后发布。文件必须位于允许的输出目录（CC_REPORT_DIR，默认 = CC_DATA_DIR）内。' +
+      '建议在 export_activity_data 之后调用，并传回 export_job_id 以便溯源。',
     inputSchema: {
       activity_code: z.string().describe('报告所属活动代码'),
-      file_path: z.string().describe('报告文件的本地路径（绝对路径或相对当前目录）'),
+      file_path: z.string().describe('报告文件的本地路径（必须位于允许的输出目录内）'),
       title: z.string().describe('报告标题'),
       export_job_id: z.string().optional().describe('溯源：本报告基于的导出任务 id'),
       notes: z.string().optional().describe('生成元信息（分析 skill / prompt 版本等）'),
@@ -195,7 +222,13 @@ server.registerTool(
   },
   async ({ activity_code, file_path, title, export_job_id, notes }) => {
     const act = await findActivity(activity_code);
+    // 上传路径白名单：只接受 CC_REPORT_DIR（默认 = CC_DATA_DIR）内的文件，
+    // 防止 agent 被提示词注入诱导上传任意本地文件（凭据/配置等）
     const abs = path.resolve(file_path);
+    const rel = path.relative(REPORT_DIR, abs);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new Error(`报告文件必须位于输出目录 ${REPORT_DIR} 内，收到：${abs}`);
+    }
     if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
       throw new Error(`报告文件不存在：${abs}`);
     }
@@ -209,21 +242,8 @@ server.registerTool(
     if (export_job_id) form.set('export_job_id', export_job_id);
     if (notes) form.set('notes', notes);
     form.set('file', new Blob([buf]), path.basename(abs));
+    // 创建审计（report.upload）由后端 reports.pb.js 钩子在保存事务内写入
     const rec = await api('POST', '/api/collections/reports/records', { form });
-
-    // 审计留痕（与 exports 的数据类审计口径一致）
-    await api('POST', '/api/collections/audit_logs/records', {
-      body: {
-        actor_id: authRecordId,
-        actor_role: 'super_admin',
-        organization_id: act.organization_id || '',
-        action: 'report.upload',
-        target_type: 'reports',
-        target_id: rec.id,
-        result: 'success',
-        metadata: { activity_code, title, file_name: path.basename(abs), size: buf.length },
-      },
-    });
 
     return jsonContent({
       report_id: rec.id,
