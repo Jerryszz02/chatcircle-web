@@ -152,8 +152,8 @@ svg {
 .page-back .cc-btn {
   display: inline-block;
   width: auto;
-  min-height: 36px;
-  padding: 4px 12px;
+  min-height: 44px;
+  padding: 10px 12px;
   font-size: var(--cc-fs-small);
 }
 
