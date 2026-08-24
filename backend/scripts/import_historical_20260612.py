@@ -12,7 +12,7 @@ superuser 豁免，见 submissions.pb.js / surveys.pb.js 守卫注释），不�
 
 导入内容：机构「凯德管理（上海）有限公司」+ 管理员 kaide_admin、16+1 个机构自定义
 报名字段、活动 CC20260612KD（closed）、54+ 个参与者账号（密码随机，写本地 CSV）、
-报名记录（倾听者/Chatter 为 approved，机构方占位为 cancelled，含报名表答案）、8 个问卷模板 + 8 个活动问卷（ended）、
+报名记录（到场倾听者与 Chatter 为 approved，未到场倾听者与机构方占位为 cancelled，含报名表答案）、8 个问卷模板 + 8 个活动问卷（ended）、
 全部 submissions/answers。幂等：全部按唯一键先查后建，可安全重跑。
 
 用法：
@@ -448,6 +448,16 @@ def main():
         return 1
     info('身份映射：%d listener + %d chatter + %d partner' % (len(listeners), len(chatter_ids), len(partner_names)))
 
+    # 实际到场倾听者 = 在四份倾听者问卷（1C/2A/2B/2D）中留下记录的昵称。
+    # 数据实证：四份问卷填写人为完全相同的 15 人；其余报名者从培训起无任何记录，
+    # 属"报名后未到场"，其报名建成 cancelled（见报名创建段）。
+    attended_nicks = set()
+    for spec in SURVEYS:
+        if spec['identity'][0] == 'nickname':
+            attended_nicks.update(spec['ident_map'].keys())
+    info('有问卷记录的到场倾听者：%d 人；未到场：%d 人'
+         % (len(attended_nicks), len(listeners) - len(attended_nicks)))
+
     # ---------------- 账号规划（用户名唯一） ----------------
     used = set()
     accounts = []  # {role, username, name, email, password(仅新建时写)}
@@ -502,7 +512,8 @@ def main():
     print('活动：%s（2026-06-12 14:00-16:30，closed，容量 40/40）' % ACTIVITY_CODE)
     print('账号：%d 个（listener %d / chatter %d / partner %d）'
           % (len(accounts), len(listeners), len(chatter_ids), len(partner_names)))
-    print('报名：%d 条（全部 approved）+ 倾听者报名答案' % len(accounts))
+    print('报名：%d 条（到场倾听者/Chatter 为 approved；未到场倾听者与机构方占位为 cancelled）+ 倾听者报名答案'
+          % len(accounts))
     for spec in SURVEYS:
         print('问卷 %s %-28s 答卷 %2d 份，预期答案 %3d 条'
               % (spec['suffix'], spec['survey_title'], len(spec['rows']), expected_answers(spec)))
@@ -650,10 +661,14 @@ def main():
                 submitted = to_cst(cell(r3, 2))
             # 机构方占位报名直接建成 cancelled：非活动参与者，不计入名额与
             # survey_completion_rate 分母（metrics.pb.js 按 approved 计数）；
-            # 其答卷的可见性与导出不依赖报名状态，故不受影响
+            # 其答卷的可见性与导出不依赖报名状态，故不受影响。
+            # 未到场倾听者同理建成 cancelled：approved 口径即真实到场口径。
             if a['role'] == 'partner':
                 reg_status = 'cancelled'
                 reg_reason = '机构方占位账号，非活动参与者（仅为挂接问卷3答卷；不计入名额与完成率口径）'
+            elif a['role'] == 'listener' and a['nickname'] not in attended_nicks:
+                reg_status = 'cancelled'
+                reg_reason = '报名后未到场（培训/活动四份倾听者问卷均无记录）'
             else:
                 reg_status = 'approved'
                 reg_reason = '历史数据导入：最终名单'
