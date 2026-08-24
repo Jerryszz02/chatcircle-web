@@ -106,6 +106,26 @@ def xlsx_rows(path):
 # 脚本与目标服务器之间一律直连。
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
+# 运行期上下文（base/token/org/activity id）：导入中途异常退出时尽力补写失败审计
+_RUN_CTX = {}
+
+
+def write_import_audit(result, reason, metadata=None):
+    """写 import.historical 审计；未认证或写失败时静默跳过（不掩盖原始异常）。"""
+    base = _RUN_CTX.get('base')
+    token = _RUN_CTX.get('token')
+    if not base or not token:
+        return
+    body = {'actor_id': _RUN_CTX.get('su_id', ''), 'actor_role': 'system',
+            'organization_id': _RUN_CTX.get('org_id', ''),
+            'action': 'import.historical', 'target_type': 'activity',
+            'target_id': _RUN_CTX.get('act_id', ''), 'result': result,
+            'reason': reason, 'metadata': metadata}
+    try:
+        call(base, 'POST', '/api/collections/audit_logs/records', body, token)
+    except Exception:
+        pass
+
 
 def call(base, method, path, body=None, token=None):
     req = urllib.request.Request(base + path, method=method)
@@ -519,7 +539,37 @@ def main():
               % (spec['suffix'], spec['survey_title'], len(spec['rows']), expected_answers(spec)))
     print('凭据输出：%s' % args.accounts_out)
     if args.dry_run:
-        print('--dry-run：不写库，退出。')
+        if not (args.su and args.sp):
+            print('--dry-run：未提供凭据，仅本地解析，不做服务端预检。')
+            return 0
+        # 有凭据时做只读预检（只 GET 不写）：提前暴露机构/管理员/活动/用户名冲突
+        print('--dry-run：仅做只读预检，不写库。')
+        base = args.base_url.rstrip('/')
+        s, auth = call(base, 'POST', '/api/collections/_superusers/auth-with-password',
+                       {'identity': args.su, 'password': args.sp})
+        if s != 200:
+            print('[FAIL] superuser 登录失败（%s）：%s' % (s, auth), file=sys.stderr)
+            return 1
+        ST = auth['token']
+        org = get_one(base, 'organizations', "name='%s'" % ORG_NAME, ST)
+        print('机构「%s」：%s' % (ORG_NAME, ('已存在（将复用 id=%s）' % org['id']) if org else '不存在（将新建）'))
+        admin = get_one(base, 'admin_accounts', "username='%s'" % ADMIN_USERNAME, ST)
+        if admin:
+            org_ok = org and admin.get('organization_id') == org['id']
+            print('管理员 %s：已存在，机构归属%s' % (ADMIN_USERNAME, '匹配（将复用）' if org_ok else '【不匹配，正式执行将中止】'))
+        else:
+            print('管理员 %s：不存在（将新建）' % ADMIN_USERNAME)
+        act = get_one(base, 'activities', "activity_code='%s'" % ACTIVITY_CODE, ST)
+        print('活动代码 %s：%s' % (ACTIVITY_CODE, ('已存在（将复用 id=%s）' % act['id']) if act else '不存在（将新建）'))
+        hit = sum(1 for a in accounts
+                  if get_one(base, 'participant_accounts', "username='%s'" % a['username'], ST))
+        print('参与者用户名：%d/%d 已存在（正式执行时按复用规则预检：本活动有报名或在凭据 CSV 中才复用）'
+              % (hit, len(accounts)))
+        for spec in SURVEYS:
+            tpl = get_one(base, 'survey_templates', "template_code='%s'" % spec['template_code'], ST)
+            sv = get_one(base, 'activity_surveys', "survey_code='%s_%s'" % (ACTIVITY_CODE, spec['suffix']), ST)
+            print('问卷 %s：模板%s / 活动问卷%s' % (spec['suffix'],
+                  '已存在' if tpl else '将新建', '已存在' if sv else '将新建'))
         return 0
     if not args.su or not args.sp:
         print('[FAIL] 缺少 superuser 凭据（--su/--sp 或 PB_SUPER_EMAIL/PB_SUPER_PASSWORD）', file=sys.stderr)
@@ -534,6 +584,7 @@ def main():
         return 1
     ST = auth['token']
     su_id = auth.get('record', {}).get('id', '')
+    _RUN_CTX.update({'base': base, 'token': ST, 'su_id': su_id})
     info('superuser 已登录：%s' % base)
 
     def write_cred(role_, username_, pw_, name_, email_):
@@ -558,6 +609,7 @@ def main():
                   'allow_sensitive_export': True, 'remark': '历史活动数据导入（2026-06-12 专场）'}, ST, '创建机构')
         org_id = r['id']
         info('机构已创建：%s' % org_id)
+    _RUN_CTX['org_id'] = org_id
 
     # ---------------- 机构管理员 ----------------
     row = get_one(base, 'admin_accounts', "username='%s'" % ADMIN_USERNAME, ST)
@@ -622,11 +674,21 @@ def main():
         }, ST, '创建活动')
         act_id = r['id']
         info('活动已创建：%s' % act_id)
+    _RUN_CTX['act_id'] = act_id
 
     # ---------------- 参与者账号 ----------------
     # 预检：用户名全局唯一，已存在账号须证明源自此前的导入运行才允许复用——
-    # 在本活动已有报名（上次导入所建），或全平台无任何报名（上次在建报名前中断）。
-    # 否则视为平台既有无关账号（撞名），直接中止待人工核对，不把历史数据挂到他人名下。
+    # 在本活动已有报名（上次导入所建），或在凭据 CSV 中（上次导入所建但尚未建报名
+    # 即中断；凭据逐账号即时落盘，正好覆盖该场景）。无报名记录也不在 CSV 中的账号
+    # 可能是平台用户自助注册后未报名（/api/cc/auth/participant 登录即建账号），
+    # 一律视为撞名中止待人工核对，不把历史数据挂到他人名下。
+    known_usernames = set()  # 此前运行写入凭据 CSV 的用户名 = 可复用的导入凭据
+    if os.path.exists(args.accounts_out):
+        with open(args.accounts_out, encoding='utf-8') as f:
+            for i, row_ in enumerate(csv.reader(f)):
+                if i == 0 or len(row_) < 2:
+                    continue
+                known_usernames.add(row_[1])
     pid_of = {}  # username -> participant id
     reused_participants = []
     foreign = []
@@ -641,16 +703,19 @@ def main():
             pid_of[a['username']] = pid
             reused_participants.append(a['username'])
             continue
+        if a['username'] in known_usernames:
+            pid_of[a['username']] = pid
+            reused_participants.append('%s（凭据CSV在册，按中断续跑复用）' % a['username'])
+            continue
         total = count_of(base, 'registrations', "participant_id='%s'" % pid, ST)
         if total == 0:
-            pid_of[a['username']] = pid
-            reused_participants.append('%s（无报名记录，按中断续跑复用）' % a['username'])
+            foreign.append('%s（无报名记录且不在凭据CSV，疑为平台自助注册用户）' % a['username'])
         else:
-            foreign.append(a['username'])
+            foreign.append('%s（在其它活动有 %d 条报名）' % (a['username'], total))
     if foreign:
-        print('[FAIL] 以下用户名已是平台既有参与者且与本活动无关，拒绝复用：%s\n'
+        print('[FAIL] 以下用户名已是平台既有参与者且与本活动无关，拒绝复用：\n  %s\n'
               '请人工核对后调整账号映射（如为撞名，请修改源数据映射关系）再执行。'
-              % ', '.join(foreign), file=sys.stderr)
+              % '\n  '.join(foreign), file=sys.stderr)
         return 1
     for a in accounts:
         if a['username'] in pid_of:
@@ -664,18 +729,37 @@ def main():
         new_participants += 1
     info('参与者账号就绪：%d 个（新建 %d）' % (len(pid_of), new_participants))
     if reused_participants:
-        info('复用已存在账号 %d 个（均有本活动报名或无报名记录，视为此前导入所建）：%s'
+        info('复用已存在账号 %d 个（均有本活动报名或在凭据CSV在册，视为此前导入所建）：%s'
              % (len(reused_participants), ', '.join(reused_participants)))
 
     # ---------------- 报名记录 + 答案 ----------------
     reg_id_of = {}  # username -> registration id
     new_regs = 0
+    fixed_regs = 0
     for a in accounts:
         uname = a['username']
+        # 状态判定（新建与既有报名通用）：机构方占位与未到场倾听者为 cancelled，
+        # 不计入名额与 survey_completion_rate 分母（metrics.pb.js 按 approved 计数）；
+        # 其答卷的可见性与导出不依赖报名状态，故不受影响。
+        if a['role'] == 'partner':
+            reg_status = 'cancelled'
+            reg_reason = '机构方占位账号，非活动参与者（仅为挂接问卷3答卷；不计入名额与完成率口径）'
+        elif a['role'] == 'listener' and a['nickname'] not in attended_nicks:
+            reg_status = 'cancelled'
+            reg_reason = '报名后未到场（培训/活动四份倾听者问卷均无记录）'
+        else:
+            reg_status = 'approved'
+            reg_reason = '历史数据导入：最终名单'
         row = get_one(base, 'registrations',
                       "activity_id='%s'&&participant_id='%s'" % (act_id, pid_of[uname]), ST)
         if row:
             reg_id_of[uname] = row['id']
+            # 既有报名状态对齐：早期版本导入的占位/未到场报名可能还是 approved，
+            # 重跑必须收敛到本次计算的终态，否则口径虚增一直残留
+            if row.get('status') != reg_status or row.get('status_reason') != reg_reason:
+                must(base, 'PATCH', '/api/collections/registrations/records/%s' % row['id'],
+                     {'status': reg_status, 'status_reason': reg_reason}, ST, '修正报名状态 %s' % uname)
+                fixed_regs += 1
         else:
             role = 'listener' if a['role'] == 'listener' else 'speaker'
             if a['role'] == 'listener':
@@ -686,19 +770,6 @@ def main():
             else:
                 r3 = next(r for r in SURVEYS[-1]['rows'] if cell(r, 0) == a['name'])
                 submitted = to_cst(cell(r3, 2))
-            # 机构方占位报名直接建成 cancelled：非活动参与者，不计入名额与
-            # survey_completion_rate 分母（metrics.pb.js 按 approved 计数）；
-            # 其答卷的可见性与导出不依赖报名状态，故不受影响。
-            # 未到场倾听者同理建成 cancelled：approved 口径即真实到场口径。
-            if a['role'] == 'partner':
-                reg_status = 'cancelled'
-                reg_reason = '机构方占位账号，非活动参与者（仅为挂接问卷3答卷；不计入名额与完成率口径）'
-            elif a['role'] == 'listener' and a['nickname'] not in attended_nicks:
-                reg_status = 'cancelled'
-                reg_reason = '报名后未到场（培训/活动四份倾听者问卷均无记录）'
-            else:
-                reg_status = 'approved'
-                reg_reason = '历史数据导入：最终名单'
             r = must(base, 'POST', '/api/collections/registrations/records',
                      {'activity_id': act_id, 'participant_id': pid_of[uname], 'activity_role': role,
                       'status': reg_status, 'submitted_at': submitted,
@@ -726,7 +797,7 @@ def main():
                 must(base, 'POST', '/api/collections/registration_answers/records',
                      {'registration_id': reg_id_of[uname], 'field_def_id': field_ids[f['code']],
                       'value_json': value}, ST, '报名答案 %s/%s' % (uname, f['code']))
-    info('报名就绪：共 %d 条（新建 %d）' % (len(reg_id_of), new_regs))
+    info('报名就绪：共 %d 条（新建 %d，状态修正 %d）' % (len(reg_id_of), new_regs, fixed_regs))
 
     # ---------------- 问卷模板 + 活动问卷 ----------------
     survey_ids = {}  # suffix -> activity_survey id
@@ -839,6 +910,15 @@ def main():
     print('报名记录：预期 %d，实际 %d %s'
           % (len(accounts), total_reg, 'OK' if total_reg == len(accounts) else 'MISMATCH'))
     all_ok = total_reg == len(accounts)
+    # 状态口径核对：approved 应 = 到场倾听者 + Chatter，cancelled 应 = 未到场 + 机构方占位
+    expect_approved = len(attended_nicks) + len(chatter_ids)
+    expect_cancelled = len(accounts) - expect_approved
+    actual_approved = count_of(base, 'registrations', "activity_id='%s'&&status='approved'" % act_id, ST)
+    ok = actual_approved == expect_approved and (total_reg - actual_approved) == expect_cancelled
+    all_ok = all_ok and ok
+    print('报名状态：approved 预期/实际 %d/%d，cancelled 预期/实际 %d/%d %s'
+          % (expect_approved, actual_approved, expect_cancelled, total_reg - actual_approved,
+             'OK' if ok else 'MISMATCH'))
     # 报名答案逐条核对（中断重跑场景下答卷/答案数可能比父级计数更能发现问题）
     expect_reg_ans = 0
     for src in listeners.values():
@@ -868,14 +948,11 @@ def main():
               % (spec['suffix'], expect, actual, expect_ans, actual_ans, 'OK' if ok else 'MISMATCH'))
 
     # ---------------- 审计（对账之后，按实际结果记录） ----------------
-    must(base, 'POST', '/api/collections/audit_logs/records',
-         {'actor_id': su_id, 'actor_role': 'system', 'organization_id': org_id,
-          'action': 'import.historical', 'target_type': 'activity', 'target_id': act_id,
-          'result': 'success' if all_ok else 'failure',
-          'reason': '2026-06-12 凯德专场历史数据导入' + ('' if all_ok else '（对账存在 MISMATCH）'),
-          'metadata': {'activity_code': ACTIVITY_CODE, 'accounts': len(accounts),
-                       'registrations': len(reg_id_of), 'surveys': len(survey_ids),
-                       'submissions_created': new_subs, 'answers_created': new_answers}}, ST, '写审计')
+    write_import_audit('success' if all_ok else 'failure',
+                       '2026-06-12 凯德专场历史数据导入' + ('' if all_ok else '（对账存在 MISMATCH）'),
+                       {'activity_code': ACTIVITY_CODE, 'accounts': len(accounts),
+                        'registrations': len(reg_id_of), 'surveys': len(survey_ids),
+                        'submissions_created': new_subs, 'answers_created': new_answers})
 
     # ---------------- 凭据输出 ----------------
     if os.path.exists(args.accounts_out):
@@ -886,4 +963,9 @@ def main():
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception as err:
+        # 写入阶段中途失败（如某个答案 POST 报错）：尽力补写失败审计再抛出
+        write_import_audit('failure', '导入中途失败：%s' % str(err)[:200])
+        raise
