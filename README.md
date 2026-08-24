@@ -12,6 +12,7 @@ Empact 多机构活动管理 / 报名审核 / 签到 / 问卷 / 聆听者培训�
 ```
 ├── frontend/            # React SPA（src/features/{participant,admin,superadmin} + src/shared/）
 ├── backend/             # PocketBase：pb_migrations/、pb_hooks/、tests/（集成套件）、scripts/（种子），见 backend/README.md
+├── mcp/                 # agent 数据取送 MCP server（取数走导出 API、报告回传 reports 集合），见 mcp/README.md
 ├── deploy/              # 备份脚本等部署辅助
 ├── docs/                # PRD 与 planning/ 规划文档（技术设计、数据库设计、测试计划等）
 ├── .github/workflows/   # CI

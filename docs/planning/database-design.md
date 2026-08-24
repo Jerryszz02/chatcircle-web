@@ -4,7 +4,7 @@
 
 ## 1. 文档目的
 
-- 给出 PRD §9.1 全部 19 个集合的 PocketBase collection 定义草案：字段名、类型、必填、唯一约束与索引。2026-08 实现期新增「聆听者培训体系」3 集合（trainings / training_checkin_sessions / training_attendances，§5.2.20~5.2.22，PRD 外扩展），合计 22 个业务集合。
+- 给出 PRD §9.1 全部 19 个集合的 PocketBase collection 定义草案：字段名、类型、必填、唯一约束与索引。2026-08 实现期新增「聆听者培训体系」3 集合（trainings / training_checkin_sessions / training_attendances，§5.2.20~5.2.22，PRD 外扩展）与 reports 活动数据报告集合（§5.2.23），合计 23 个业务集合。
 - 固化标识规则（`participant_id` 全平台稳定、`registration_id` 参与者×活动唯一、`question_code` 稳定性、`group_tag` 预留）。
 - 定义多机构隔离在 PocketBase 层面的实现方式：`organization_id` 冗余字段 + API Rules 服务端强制过滤。
 - 汇总全部状态枚举与状态机（活动 7 态、报名 4 态及迁移矩阵、签到场次/记录、问卷 5 态、答卷 3 态、邀请码 4 态、培训 3 态及培训签到场次/记录），并给出事务与并发约束。
@@ -341,7 +341,7 @@
 
 #### 5.2.20 trainings — 聆听者培训主数据（base，2026-08 PRD 外扩展）
 
-> 培训体系为 PRD v0.3 之外的实现期扩展（迁移 `1785889260_cc_role_scope_trainings.js`）：培训与活动解绑；培训机构级创建，而签到资格与「培训通过」标记为账号级、全平台通用。
+> 培训体系为 PRD v0.3 之外的实现期扩展（迁移 `1785889320_cc_role_scope_trainings.js`）：培训与活动解绑；培训机构级创建，而签到资格与「培训通过」标记为账号级、全平台通用。
 
 | 字段 | 类型 | 必填 | 约束/索引 | 说明 |
 |---|---|---|---|---|
@@ -392,6 +392,23 @@
 - **「培训通过」账号级口径 = 存在任一 valid 出席记录**（全平台通用）；当前仅作记录与展示，不作为报名门槛（2026-08 决策）。
 - 签到前置：登录 + 存在 approved 的聆听者报名（全平台任一活动，资格账号级通用，否则 403 `listener_not_approved`）+ 培训 published + 签到开放中。
 - API Rules：管理员按机构隔离只读，参与者只读本人记录；**直连写全锁**（只走 hooks 端点），deleteRule 关闭。
+
+#### 5.2.23 reports — 活动数据报告（base）
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| title | text | 是 | — | 报告标题 |
+| activity_id | relation(activities) | 否 | 索引 | 所属活动；可空为未来机构/平台级报告留口 |
+| file | file | 是 | maxSelect=1、maxSize=20MB、protected | 报告文件（pdf/md 等）；protected：文件 URL 须带 token，不走公开静态路径（同导出文件防护口径，PRD §11.2） |
+| status | select(draft, published) | 是 | 索引 | agent 上传一律 draft，人工审核后改 published |
+| export_job_id | text | 否 | — | 溯源：本报告基于哪次导出（`export_jobs.id`） |
+| notes | text | 否 | — | 生成元信息（分析 skill / prompt 版本等） |
+| created_by | text | 否 | — | 创建人 id，由 `reports.pb.js` 的 onRecordCreateRequest 强制填充（忽略客户端传入，同 export_jobs.created_by 约定） |
+
+- 背景：数据分析与报告生成由外部 agent 完成（经 `mcp/` MCP server 以超管服务账号接入）；取数仍走 `POST /api/cc/exports`，本集合只做产出物存储。
+- API Rules 全部 null：仅超级管理员经 API / admin UI 可读写；agent 通道上传强制 draft，发布保留人工。
+- 创建审计（`report.upload`）由 `reports.pb.js` 的 onRecordCreate 模型钩子与报告保存在**同一事务**写入（失败即整体回滚），机构归属经 `activity_id` 反查。
+- guards.pb.js 未为本集合加直连写守卫：rules 全 null 时非超管在 rule 层已被拒，守卫无额外收窄对象（守卫针对「规则放行但需收窄」的场景）。
 
 ### 5.3 标识与关联规则
 

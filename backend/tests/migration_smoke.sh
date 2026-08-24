@@ -5,7 +5,7 @@
 #   1. 空库 migrate up 成功；
 #   2. migrate down 全部回滚 → 再次 migrate up，往返成功；
 #   3. serve 启动后经 API 抽查：
-#      - 22 个业务集合全部存在（字段/规则随集合定义）；
+#      - 23 个业务集合全部存在（字段/规则随集合定义）；
 #      - 未认证访问业务集合被拒或为空（无公开广场，FR-ACT-002）；
 #      - 活动公开详情经 /api/cc/public/activities 白名单端点可达，原生 viewRule 仅本机构
 #        管理员（匿名/参与者 404，FR-ACT-003 收敛后形态）；
@@ -99,9 +99,9 @@ info "步骤 2/4：migrate down ${MIG_COUNT}（全部回滚）→ 再 migrate up
 echo y | run_migrate "migrate down 全部回滚成功" "$WORK/down.log" down "$MIG_COUNT"
 
 if command -v sqlite3 >/dev/null 2>&1; then
-  # 回滚后 22 个业务集合应全部不存在（PocketBase 系统集合与本版本默认 users 集合不受影响）
-  LEFT="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM _collections WHERE name IN ('organizations','admin_invites','admin_accounts','participant_accounts','activities','activity_approvals','registration_field_defs','registrations','registration_answers','checkin_sessions','checkins','survey_templates','survey_template_versions','activity_surveys','survey_questions','submissions','answers','export_jobs','audit_logs','trainings','training_checkin_sessions','training_attendances');")"
-  check_eq "down 后 22 个业务集合全部不存在" "$LEFT" "0"
+  # 回滚后 23 个业务集合应全部不存在（PocketBase 系统集合与本版本默认 users 集合不受影响）
+  LEFT="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM _collections WHERE name IN ('organizations','admin_invites','admin_accounts','participant_accounts','activities','activity_approvals','registration_field_defs','registrations','registration_answers','checkin_sessions','checkins','survey_templates','survey_template_versions','activity_surveys','survey_questions','submissions','answers','export_jobs','audit_logs','trainings','training_checkin_sessions','training_attendances','reports');")"
+  check_eq "down 后 23 个业务集合全部不存在" "$LEFT" "0"
 else
   info "未安装 sqlite3，跳过 down 后集合计数检查"
 fi
@@ -131,8 +131,8 @@ if [ -n "$STOKEN" ]; then ok "超管认证成功"; else bad "超管认证失败"
 
 info "步骤 4/4：API 抽查（集合存在性 / 未认证拒绝 / 规则与唯一索引）"
 
-# 4.1 22 个业务集合全部存在
-EXPECTED="organizations admin_invites admin_accounts participant_accounts activities activity_approvals registration_field_defs registrations registration_answers checkin_sessions checkins survey_templates survey_template_versions activity_surveys survey_questions submissions answers export_jobs audit_logs trainings training_checkin_sessions training_attendances"
+# 4.1 23 个业务集合全部存在
+EXPECTED="organizations admin_invites admin_accounts participant_accounts activities activity_approvals registration_field_defs registrations registration_answers checkin_sessions checkins survey_templates survey_template_versions activity_surveys survey_questions submissions answers export_jobs audit_logs trainings training_checkin_sessions training_attendances reports"
 NAMES="$(curl -fsS "$BASE/api/collections?perPage=100" -H "Authorization: $STOKEN" | json_val "' '.join(sorted(c['name'] for c in d['items']))")"
 for name in $EXPECTED; do
   case " $NAMES " in

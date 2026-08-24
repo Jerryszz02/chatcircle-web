@@ -108,7 +108,7 @@ routerAdd('POST', '/api/cc/activities/{id}/register', (e) => {
 
   // 报名字段答案校验（FR-REG-001；具体字段 PRD 未写死，D-1/D-3 能力层）：
   // 适用字段 = 平台标准字段（organization_id 为空）+ 本机构自定义字段，均须 active
-  // 且 role_scope ∈ {both, 所报角色}（分角色报名问卷，迁移 1785889260；角色不适用字段
+  // 且 role_scope ∈ {both, 所报角色}（分角色报名问卷，迁移 1785889320；角色不适用字段
   // 提交答案报 field_not_applicable，必填检查也只针对适用字段）；
   // 活动级 activities.form_config_json = { fields: [{ field_def_id, enabled, required }] }
   // （数组版，与 admin 端 features/admin/lib/rules.ts 契约为准）可覆盖启用/必填，缺省按 required_default。
@@ -144,7 +144,7 @@ routerAdd('POST', '/api/cc/activities/{id}/register', (e) => {
     };
     enabledById[def.id] = item;
     // 分角色报名问卷（role_scope）：仅 both 或与所报角色一致的字段参与校验；
-    // 存量字段缺省按 both 归一（迁移 1785889260 已回填，此处防御性归一）
+    // 存量字段缺省按 both 归一（迁移 1785889320 已回填，此处防御性归一）
     const roleScope = def.get('role_scope') || 'both';
     if (roleScope !== 'both' && roleScope !== role) continue;
     defById[def.id] = item;

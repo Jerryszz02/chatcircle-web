@@ -46,6 +46,7 @@ API，**只断言 API 行为与数据终态，不测内部函数**。输出逐�
 | `suite_nodelete.py` | 无硬删除 AC-18：22 个业务集合 delete 对管理员/参与者全拒、审计无创建/修改途径 | 27 |
 | `suite_templates.py` | 超管模板管理 FR-SUR-001/011、PRD §11.3：新建模板+首版（事务回补循环引用）、发布新版本（version 递增、current_version_id 移动）、schema 校验与规范化、停用拒发、template.create/publish 审计、访问控制 | 20 |
 | `suite_hardening.py` | 安全加固回归（2026-08）：直连写守卫矩阵（registrations/answers/sessions/activities/field_defs 非超管 403、超管放行）、账号停用不可自助复活、内置认证限流（5 连败→429）、CSV 公式注入中和与 export.download 审计、答案类型校验 400、QR 面（原生 view 404/公开端点不泄露 token/错误 token 404）、活动状态机补强（ACTIVITY_UNAVAILABLE/NOT_OPEN） | 27 |
+| `suite_reports.py` | reports 报告集合（agent 产出物入库）：超管 multipart 创建带文件报告与字段回读、protected 文件无 token 访问被拒、机构管理员/参与者/匿名 create 与 list/view 全拒（rules 全 null）、report.upload 创建审计同事务写入 | 15 |
 
 ⚠️ **内置认证 per-IP 限流预算**：authguard.pb.js 对全部 `*/auth-with-password` 按来源 IP
 限 20 次/10 分钟（含成功尝试，集成测试同积于 127.0.0.1）。一轮全量运行共产生 21 次

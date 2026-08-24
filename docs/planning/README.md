@@ -41,7 +41,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 |---|---|
 | 生成请求 | 正式开发前的文档准备阶段：基于已确认的需求基线与技术决策，为后续实现工程师生成项目规划文档，写清前提、术语、输入输出、约束、步骤与验收方式 |
 | 生成时间 | 2026-08-05 |
-| 最近同步 | 2026-08-24（状态同步模式）：分角色报名问卷（`role_scope`）+ 聆听者培训体系随代码同 PR 回写文档；证据：迁移 `1785889260_cc_role_scope_trainings.js`、`pb_hooks/trainings.pb.js`、前端路由与页面、后端集成测试 399 断言全绿（本次重跑验证） |
+| 最近同步 | 2026-08-24（状态同步模式）：分角色报名问卷（`role_scope`）+ 聆听者培训体系随代码同 PR 回写文档；证据：迁移 `1785889320_cc_role_scope_trainings.js`、`pb_hooks/trainings.pb.js`、前端路由与页面、后端集成测试 416 断言全绿（本次重跑验证） |
 | 已检查的项目根目录 | 项目根目录仅含 `docs/`（三份 PRD docx）与 `.DS_Store`；尚无代码、构建配置或 GitHub 仓库（私有仓库 `chatcircle-web` 尚未创建） |
 | 关键证据 | `docs/` 下三份 PRD：`Chat_Circles_活动与问卷平台_PRD_v0.1.docx`、`_v0.2.docx`、`_v0.3.docx`；以 **v0.3（评审修订版，2026-08-05）为需求基线**。2026-08-05 增补：`docs/ChatCircle_Web_UI_Design_Spec_v1.0.docx`（UI 设计规范，仅其纯视觉部分纳入 [ui-design.md](ui-design.md)，业务口径仍以本目录规划文档为准）；`frontend/src/shared/styles/global.css` 与 `shared/ui/` 组件库现状 |
 | 已确认技术决策 | 响应式 Web（React 18 + Vite + TypeScript，手机优先）+ PocketBase（后端/认证/SQLite）+ Docker 部署；完整 V1 范围（M0~M5） |
