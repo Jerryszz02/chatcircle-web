@@ -116,3 +116,14 @@ def run(ctx):
         s, r = call(base, 'GET', '/api/collections/reports/records/%s' % rec, token=tok)
         rep.check('REP-%02d %s view reports 被拒（403/404）' % (8 + i * 3, label),
                   s in (403, 404), 'status=%s' % s)
+
+    # ---------- 5. 创建审计（report.upload）由服务端钩子同事务写入 ----------
+    s, r = call(base, 'GET',
+                f"/api/collections/audit_logs/records?filter=(action='report.upload'%26%26target_id='{rec}')",
+                token=st)
+    items = r.get('items') or []
+    rep.check('REP-15 创建报告自动写审计（report.upload，actor=创建者，机构经活动反查）',
+              s == 200 and len(items) == 1
+              and items[0].get('actor_id') == ctx['sid']
+              and items[0].get('actor_role') == 'super_admin'
+              and items[0].get('organization_id') == org, r)

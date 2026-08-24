@@ -347,10 +347,12 @@
 | status | select(draft, published) | 是 | 索引 | agent 上传一律 draft，人工审核后改 published |
 | export_job_id | text | 否 | — | 溯源：本报告基于哪次导出（`export_jobs.id`） |
 | notes | text | 否 | — | 生成元信息（分析 skill / prompt 版本等） |
+| created_by | text | 否 | — | 创建人 id，由 `reports.pb.js` 的 onRecordCreateRequest 强制填充（忽略客户端传入，同 export_jobs.created_by 约定） |
 
 - 背景：数据分析与报告生成由外部 agent 完成（经 `mcp/` MCP server 以超管服务账号接入）；取数仍走 `POST /api/cc/exports`，本集合只做产出物存储。
 - API Rules 全部 null：仅超级管理员经 API / admin UI 可读写；agent 通道上传强制 draft，发布保留人工。
-- 上传动作写审计（`report.upload`）。
+- 创建审计（`report.upload`）由 `reports.pb.js` 的 onRecordCreate 模型钩子与报告保存在**同一事务**写入（失败即整体回滚），机构归属经 `activity_id` 反查。
+- guards.pb.js 未为本集合加直连写守卫：rules 全 null 时非超管在 rule 层已被拒，守卫无额外收窄对象（守卫针对「规则放行但需收窄」的场景）。
 
 ### 5.3 标识与关联规则
 
