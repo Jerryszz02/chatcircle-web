@@ -7,7 +7,7 @@ import { RegistrationForm } from './RegistrationForm';
 /**
  * 报名表单组件测试（FR-REG-001/002/004、FR-ACT-007 前端侧）。
  * 覆盖：标准+自定义字段渲染、敏感标记提示、必填校验、角色名额满禁用、
- * 提交载荷（题型值类型与字段 id）。
+ * 提交载荷（题型值类型与字段 id）、按角色渲染（role_scope）与切换角色清值。
  */
 
 const FIELDS: PublicRegistrationField[] = [
@@ -19,6 +19,7 @@ const FIELDS: PublicRegistrationField[] = [
     source_type: 'standard',
     is_sensitive: true,
     required: true,
+    role_scope: 'both',
   },
   {
     id: 'fd_age',
@@ -28,6 +29,7 @@ const FIELDS: PublicRegistrationField[] = [
     source_type: 'standard',
     is_sensitive: false,
     required: false,
+    role_scope: 'both',
   },
   {
     id: 'fd_gender',
@@ -37,6 +39,7 @@ const FIELDS: PublicRegistrationField[] = [
     source_type: 'custom',
     is_sensitive: false,
     required: true,
+    role_scope: 'both',
     options_json: [
       { value: 'f', label: '女' },
       { value: 'm', label: '男' },
@@ -50,7 +53,42 @@ const FIELDS: PublicRegistrationField[] = [
     source_type: 'custom',
     is_sensitive: false,
     required: false,
+    role_scope: 'both',
     options_json: ['学业', '情感'],
+  },
+];
+
+/** 含角色专属字段的表单（fd_exp 仅聆听者必填，fd_topic_speaker 仅倾诉者选填）。 */
+const ROLE_FIELDS: PublicRegistrationField[] = [
+  {
+    id: 'fd_name',
+    field_code: 'real_name',
+    field_type: 'text',
+    label: '姓名',
+    source_type: 'standard',
+    is_sensitive: false,
+    required: true,
+    role_scope: 'both',
+  },
+  {
+    id: 'fd_exp',
+    field_code: 'listen_experience',
+    field_type: 'text',
+    label: '聆听经验',
+    source_type: 'custom',
+    is_sensitive: false,
+    required: true,
+    role_scope: 'listener',
+  },
+  {
+    id: 'fd_topic_speaker',
+    field_code: 'speaker_topic',
+    field_type: 'text',
+    label: '想倾诉的话题',
+    source_type: 'custom',
+    is_sensitive: false,
+    required: false,
+    role_scope: 'speaker',
   },
 ];
 
@@ -140,5 +178,70 @@ describe('RegistrationForm 报名表单', () => {
     fireEvent.click(screen.getByRole('button', { name: '提交报名' }));
 
     expect(await screen.findByText('无法连接服务器，请检查网络后重试')).toBeInTheDocument();
+  });
+});
+
+describe('RegistrationForm 分角色渲染（role_scope）', () => {
+  it('未选角色时只显示 both 字段，角色专属字段不出现', () => {
+    renderForm({ fields: ROLE_FIELDS });
+    expect(screen.getByRole('textbox', { name: /姓名/ })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /聆听经验/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /想倾诉的话题/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/专属问题/)).not.toBeInTheDocument();
+  });
+
+  it('选定聆听者后显示专属字段与分组小标题', () => {
+    renderForm({ fields: ROLE_FIELDS });
+    fireEvent.click(screen.getByRole('radio', { name: /聆听者/ }));
+    expect(screen.getByText('聆听者专属问题')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /聆听经验/ })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /想倾诉的话题/ })).not.toBeInTheDocument();
+  });
+
+  it('角色专属必填校验：聆听者缺专属必填字段时阻止提交', async () => {
+    const submitRegistration = renderForm({ fields: ROLE_FIELDS });
+    fireEvent.click(screen.getByRole('radio', { name: /聆听者/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: /姓名/ }), { target: { value: '张三' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交报名' }));
+    expect(await screen.findByText('请填写「聆听经验」')).toBeInTheDocument();
+    expect(submitRegistration).not.toHaveBeenCalled();
+  });
+
+  it('倾诉者提交不受聆听者专属必填影响，载荷只含适用字段', async () => {
+    const submitRegistration = renderForm({ fields: ROLE_FIELDS });
+    fireEvent.click(screen.getByRole('radio', { name: /倾诉者/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: /姓名/ }), { target: { value: '张三' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交报名' }));
+    await waitFor(() => expect(submitRegistration).toHaveBeenCalledTimes(1));
+    expect(submitRegistration).toHaveBeenCalledWith({
+      activity_role: 'speaker',
+      answers: [{ field_def_id: 'fd_name', value: '张三' }],
+    });
+  });
+
+  it('切换角色后不再适用字段的已填值被清除且不随提交带出', async () => {
+    const submitRegistration = renderForm({ fields: ROLE_FIELDS });
+    fireEvent.click(screen.getByRole('radio', { name: /聆听者/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: /姓名/ }), { target: { value: '张三' } });
+    fireEvent.change(screen.getByRole('textbox', { name: /聆听经验/ }), {
+      target: { value: '有三个月经验' },
+    });
+
+    // 切换到倾诉者：聆听经验字段隐藏，倾诉者专属字段出现
+    fireEvent.click(screen.getByRole('radio', { name: /倾诉者/ }));
+    expect(screen.queryByRole('textbox', { name: /聆听经验/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /想倾诉的话题/ })).toBeInTheDocument();
+
+    // 提交：载荷不含 fd_exp 残留值
+    fireEvent.click(screen.getByRole('button', { name: '提交报名' }));
+    await waitFor(() => expect(submitRegistration).toHaveBeenCalledTimes(1));
+    expect(submitRegistration).toHaveBeenCalledWith({
+      activity_role: 'speaker',
+      answers: [{ field_def_id: 'fd_name', value: '张三' }],
+    });
+
+    // 切回聆听者：已填值已被清除（而非隐藏保留）
+    fireEvent.click(screen.getByRole('radio', { name: /聆听者/ }));
+    expect(screen.getByRole('textbox', { name: /聆听经验/ })).toHaveValue('');
   });
 });

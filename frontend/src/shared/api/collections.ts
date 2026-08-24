@@ -21,10 +21,13 @@ import type {
   SurveyQuestionRecord,
   SurveyTemplateRecord,
   SurveyTemplateVersionRecord,
+  TrainingAttendanceRecord,
+  TrainingCheckinSessionRecord,
+  TrainingRecord,
 } from './types';
 
 /**
- * 19 个集合的类型化 pb.collection() 封装（database-design §5.2）。
+ * 各集合的类型化 pb.collection() 封装（database-design §5.2，含培训体系三个集合）。
  *
  * 用法：
  *   import { collectionsForRole } from '@/shared/api';
@@ -57,6 +60,9 @@ export const COLLECTION_NAMES = {
   answers: 'answers',
   exportJobs: 'export_jobs',
   auditLogs: 'audit_logs',
+  trainings: 'trainings',
+  trainingCheckinSessions: 'training_checkin_sessions',
+  trainingAttendances: 'training_attendances',
 } as const;
 
 /** 某个 client 下全部集合的类型化访问入口。 */
@@ -80,6 +86,9 @@ export interface TypedCollections {
   answers: RecordService<AnswerRecord>;
   exportJobs: RecordService<ExportJobRecord>;
   auditLogs: RecordService<AuditLogRecord>;
+  trainings: RecordService<TrainingRecord>;
+  trainingCheckinSessions: RecordService<TrainingCheckinSessionRecord>;
+  trainingAttendances: RecordService<TrainingAttendanceRecord>;
 }
 
 /** 按 client 构建类型化集合访问入口（每次调用新建轻量 RecordService，无状态）。 */
@@ -114,6 +123,13 @@ export function collections(client: PocketBase): TypedCollections {
     answers: client.collection<AnswerRecord>(COLLECTION_NAMES.answers),
     exportJobs: client.collection<ExportJobRecord>(COLLECTION_NAMES.exportJobs),
     auditLogs: client.collection<AuditLogRecord>(COLLECTION_NAMES.auditLogs),
+    trainings: client.collection<TrainingRecord>(COLLECTION_NAMES.trainings),
+    trainingCheckinSessions: client.collection<TrainingCheckinSessionRecord>(
+      COLLECTION_NAMES.trainingCheckinSessions,
+    ),
+    trainingAttendances: client.collection<TrainingAttendanceRecord>(
+      COLLECTION_NAMES.trainingAttendances,
+    ),
   };
 }
 

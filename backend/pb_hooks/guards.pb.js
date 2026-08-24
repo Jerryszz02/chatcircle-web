@@ -13,8 +13,10 @@
 //
 // 守卫清单：
 // - activities：创建强制 status='draft'；更新禁改 status / organization_id / checkin_qr_token
+// - trainings：创建强制 status='draft'；更新禁改 status / organization_id / checkin_qr_token
 // - registrations / registration_answers：禁直连 create/update（走报名与审核端点）
 // - checkin_sessions：禁直连 create/update（走签到开放/关闭端点）
+// - training_checkin_sessions / training_attendances：禁直连 create/update（走培训签到端点）
 // - registration_field_defs：更新禁改 organization_id / field_code
 // - participant_accounts：更新禁改 status
 // - admin_accounts：更新禁改 status / organization_id
@@ -101,6 +103,68 @@ onRecordUpdateRequest((e) => {
   }
   e.next();
 }, 'checkin_sessions');
+
+// ---------------------------------------------------------------------------
+// trainings：创建强制 draft 起步；状态机流转、机构归属与签到 token 禁经直连修改
+// ---------------------------------------------------------------------------
+onRecordCreateRequest((e) => {
+  const isSuper = !!e.auth && e.auth.collection().name === '_superusers';
+  if (!isSuper && e.record.get('status') !== 'draft') {
+    throw new ForbiddenError('培训创建时 status 必须为 draft（状态流转须通过 /api/cc/trainings/{id}/publish|close 端点）');
+  }
+  e.next();
+}, 'trainings');
+
+onRecordUpdateRequest((e) => {
+  const isSuper = !!e.auth && e.auth.collection().name === '_superusers';
+  if (!isSuper) {
+    const original = e.record.original();
+    if (original.get('status') !== e.record.get('status')) {
+      throw new ForbiddenError('培训状态变更须通过 /api/cc/trainings/{id}/publish|close 状态端点');
+    }
+    if (original.get('organization_id') !== e.record.get('organization_id')) {
+      throw new ForbiddenError('培训所属机构（organization_id）不可变更');
+    }
+    if (original.get('checkin_qr_token') !== e.record.get('checkin_qr_token')) {
+      throw new ForbiddenError('培训签到二维码 token（checkin_qr_token）不可变更');
+    }
+  }
+  e.next();
+}, 'trainings');
+
+// ---------------------------------------------------------------------------
+// training_checkin_sessions / training_attendances：禁直连写（开放/关闭与
+// 签到/补签/撤销须走端点保证单 open 约束、幂等查重与审计）
+// ---------------------------------------------------------------------------
+onRecordCreateRequest((e) => {
+  const isSuper = !!e.auth && e.auth.collection().name === '_superusers';
+  if (!isSuper) {
+    throw new ForbiddenError('培训签到开放状态写操作须通过 /api/cc/trainings/{id}/checkin/open|close 端点');
+  }
+  e.next();
+}, 'training_checkin_sessions');
+onRecordUpdateRequest((e) => {
+  const isSuper = !!e.auth && e.auth.collection().name === '_superusers';
+  if (!isSuper) {
+    throw new ForbiddenError('培训签到开放状态写操作须通过 /api/cc/trainings/{id}/checkin/open|close 端点');
+  }
+  e.next();
+}, 'training_checkin_sessions');
+
+onRecordCreateRequest((e) => {
+  const isSuper = !!e.auth && e.auth.collection().name === '_superusers';
+  if (!isSuper) {
+    throw new ForbiddenError('培训签到写操作须通过 /api/cc/training-checkin/self、/api/cc/training-checkins/manual|{id}/revoke 端点');
+  }
+  e.next();
+}, 'training_attendances');
+onRecordUpdateRequest((e) => {
+  const isSuper = !!e.auth && e.auth.collection().name === '_superusers';
+  if (!isSuper) {
+    throw new ForbiddenError('培训签到写操作须通过 /api/cc/training-checkin/self、/api/cc/training-checkins/manual|{id}/revoke 端点');
+  }
+  e.next();
+}, 'training_attendances');
 
 // ---------------------------------------------------------------------------
 // registration_field_defs：机构归属与稳定机器代码禁改

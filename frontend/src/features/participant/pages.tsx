@@ -12,3 +12,5 @@ export { LoginPage } from './pages/LoginPage';
 export { MePage } from './pages/MePage';
 export { CheckinPage } from './pages/CheckinPage';
 export { SurveyPage } from './pages/SurveyPage';
+export { TrainingsPage } from './pages/TrainingsPage';
+export { TrainingCheckinPage } from './pages/TrainingCheckinPage';

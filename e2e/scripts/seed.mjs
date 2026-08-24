@@ -16,6 +16,16 @@ export const FIXTURE = {
   participantPassword: 'e2e_user_pass_1',
   activityTitle: 'E2E 八月倾诉茶话会',
   surveyTitle: 'E2E 活动后问卷',
+  // 培训链路 fixture（training-flow.spec.ts）：
+  // 资格报名挂在独立第二活动上，避免污染主链路活动的审核列表断言（toHaveCount(1)）。
+  qualActivityTitle: 'E2E 培训资格活动',
+  trainingTitle: 'E2E 聆听者培训八月场',
+  listenerUsername: 'e2e_listener1', // 已有 approved 聆听者报名（培训签到资格，账号级）
+  listenerPassword: 'e2e_lis_pass_1',
+  outsiderUsername: 'e2e_user2', // 仅有 approved 倾诉者报名，无聆听者资格（负向用例）
+  outsiderPassword: 'e2e_user_pass_2',
+  listenerNickname: '小听',
+  outsiderNickname: '小外',
   answers: {
     nickname: '阿一',
     age: '26',
@@ -159,6 +169,70 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     throw new Error(`活动发布失败：${JSON.stringify(pub).slice(0, 300)}`);
   }
 
+  // ---------- 培训链路 fixture（training-flow.spec.ts） ----------
+  // 第二活动：承载培训资格报名（与主链路活动隔离，主活动「已通过」列表断言不受影响）
+  const qualActivity = await call('POST', `${pbUrl}/api/collections/activities/records`, {
+    organization_id: org.id,
+    activity_code: 'CC_E2E_02',
+    title: FIXTURE.qualActivityTitle,
+    description: 'E2E 培训资格报名承载活动（fixture 伪造数据）',
+    location: '线上',
+    start_time: pbTime(new Date(now + 3600_000)),
+    end_time: pbTime(new Date(now + 3 * 3600_000)),
+    status: 'draft',
+    capacity_total: 10, capacity_speaker: 5, capacity_listener: 5,
+    registration_open: true,
+    registration_start_at: pbTime(new Date(now - 3600_000)),
+    registration_end_at: pbTime(new Date(now + 6 * 3600_000)),
+    group_tag: '',
+    form_config_json: {
+      fields: [
+        { field_def_id: fieldDefs.nickname, enabled: true, required: true },
+      ],
+    },
+  }, AT);
+  const qualPub = await call('POST', `${pbUrl}/api/cc/activities/${qualActivity.id}/publish`, {}, AT);
+  if (qualPub.activity?.status !== 'published') {
+    throw new Error(`资格活动发布失败：${JSON.stringify(qualPub).slice(0, 300)}`);
+  }
+
+  // 参与者自动注册（POST /api/cc/auth/participant：用户名不存在即建号并登录，FR-AUTH-001）
+  // → 报名第二活动 → 管理员审核通过。聆听者获得培训签到资格（账号级，全平台通用）；
+  // 倾诉者仅 approved 倾诉者报名，用于负向用例（listener_not_approved）。
+  const registerAndApprove = async (username, password, role, nickname) => {
+    const auth = await call('POST', `${pbUrl}/api/cc/auth/participant`, { username, password });
+    const reg = await call('POST', `${pbUrl}/api/cc/activities/${qualActivity.id}/register`, {
+      activity_role: role,
+      answers: [{ field_def_id: fieldDefs.nickname, value: nickname }],
+    }, auth.token);
+    await call('POST', `${pbUrl}/api/cc/registrations/${reg.registration.id}/transition`, {
+      to: 'approved',
+    }, AT);
+    return auth.record.id;
+  };
+  await registerAndApprove(FIXTURE.listenerUsername, FIXTURE.listenerPassword, 'listener', FIXTURE.listenerNickname);
+  await registerAndApprove(FIXTURE.outsiderUsername, FIXTURE.outsiderPassword, 'speaker', FIXTURE.outsiderNickname);
+
+  // 培训：集合 API 创建（status 服务端强制 draft；checkin_qr_token 由 hooks 生成并随响应带回）
+  // → 发布为 published。开放签到留给 spec 经管理端 UI 操作（与主链路活动签到同模式）。
+  const training = await call('POST', `${pbUrl}/api/collections/trainings/records`, {
+    organization_id: org.id,
+    title: FIXTURE.trainingTitle,
+    training_code: 'TR_E2E_01',
+    description: 'E2E 培训链路测试（fixture 伪造数据）',
+    location: '线上',
+    start_time: pbTime(new Date(now + 3600_000)),
+    end_time: pbTime(new Date(now + 3 * 3600_000)),
+    status: 'draft',
+  }, AT);
+  if (training.status !== 'draft' || !training.checkin_qr_token) {
+    throw new Error(`培训创建响应异常（须强制 draft 且带回服务端生成 token）：${JSON.stringify(training).slice(0, 300)}`);
+  }
+  const tPub = await call('POST', `${pbUrl}/api/cc/trainings/${training.id}/publish`, {}, AT);
+  if (tPub.training?.status !== 'published') {
+    throw new Error(`培训发布失败：${JSON.stringify(tPub).slice(0, 300)}`);
+  }
+
   return {
     orgId: org.id,
     activityId: activity.id,
@@ -169,6 +243,13 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     adminPassword: FIXTURE.adminPassword,
     participantUsername: FIXTURE.participantUsername,
     participantPassword: FIXTURE.participantPassword,
+    trainingId: training.id,
+    trainingTitle: FIXTURE.trainingTitle,
+    trainingCheckinToken: training.checkin_qr_token,
+    listenerUsername: FIXTURE.listenerUsername,
+    listenerPassword: FIXTURE.listenerPassword,
+    outsiderUsername: FIXTURE.outsiderUsername,
+    outsiderPassword: FIXTURE.outsiderPassword,
     answers: FIXTURE.answers,
   };
 }

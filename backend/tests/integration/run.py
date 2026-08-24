@@ -107,6 +107,7 @@ def main():
     import suite_capacity
     import suite_transitions
     import suite_checkins
+    import suite_trainings
     import suite_surveys
     import suite_exports
     import suite_auth
@@ -117,8 +118,8 @@ def main():
     import suite_reports
 
     for mod in (suite_flow, suite_acl, suite_capacity, suite_transitions, suite_checkins,
-                suite_surveys, suite_exports, suite_auth, suite_backup, suite_nodelete,
-                suite_templates, suite_hardening, suite_reports):
+                suite_trainings, suite_surveys, suite_exports, suite_auth, suite_backup,
+                suite_nodelete, suite_templates, suite_hardening, suite_reports):
         mod.run(ctx)
 
     ok = rep.summary()

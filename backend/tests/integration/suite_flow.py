@@ -256,3 +256,81 @@ def run(ctx):
               s == 401 and 'message' in ue and biz_code(ue) is not None, ue)
     s, ue2 = call(base, 'POST', '/api/cc/checkin/self', {'token': QR_CK})
     rep.check('G2 签到未认证 401', s == 401 and 'message' in ue2, ue2)
+
+    # ---------- H. 分角色报名问卷（registration_field_defs.role_scope） ----------
+    # 机构自定义字段承载角色标记（平台标准字段保持 both，避免污染其他套件共享 fixture）
+    s, fspk = call(base, 'POST', '/api/collections/registration_field_defs/records',
+                   {'organization_id': org_a, 'field_code': 'speaker_topic', 'field_type': 'text',
+                    'label': '想聊的话题', 'source_type': 'custom', 'is_sensitive': False,
+                    'options_json': None, 'required_default': True, 'status': 'active',
+                    'role_scope': 'speaker'}, AT)
+    SPK_F = fspk.get('id')
+    s, flis = call(base, 'POST', '/api/collections/registration_field_defs/records',
+                   {'organization_id': org_a, 'field_code': 'listener_exp', 'field_type': 'text',
+                    'label': '倾听经历', 'source_type': 'custom', 'is_sensitive': False,
+                    'options_json': None, 'required_default': True, 'status': 'active',
+                    'role_scope': 'listener'}, AT)
+    LIS_F = flis.get('id')
+    rep.check('H1 角色专属自定义字段创建成功（speaker/listener）', bool(SPK_F) and bool(LIS_F),
+              [fspk, flis])
+    act2 = fx.create_activity(base, AT, org_a, 'CC_IT_FLOW_02', '分角色报名表场',
+                              fields=[(fields['nickname'], True, True),
+                                      (SPK_F, True, True),
+                                      (LIS_F, True, True)])
+
+    s, det2 = call(base, 'GET', '/api/cc/public/activities/%s' % act2)
+    rf2 = {f.get('field_code'): f for f in (det2.get('registration_fields') or [])}
+    rep.check('H2 公开详情 registration_fields 下发 role_scope（both/speaker/listener）',
+              s == 200 and rf2.get('nickname', {}).get('role_scope') == 'both'
+              and rf2.get('speaker_topic', {}).get('role_scope') == 'speaker'
+              and rf2.get('listener_exp', {}).get('role_scope') == 'listener',
+              det2 if s != 200 else rf2)
+
+    _, prl = call(base, 'POST', '/api/cc/auth/participant',
+                  {'username': 'flow_role_lis', 'password': fx.PASSWORD})
+    PRL_T = prl.get('token')
+    _, prs = call(base, 'POST', '/api/cc/auth/participant',
+                  {'username': 'flow_role_spk', 'password': fx.PASSWORD})
+    PRS_T = prs.get('token')
+
+    s, r = call(base, 'POST', '/api/cc/activities/%s/register' % act2,
+                {'activity_role': 'listener',
+                 'answers': [{'field_def_id': fields['nickname'], 'value': '角色聆'},
+                             {'field_def_id': SPK_F, 'value': '不适用字段答案'}]}, PRL_T)
+    rep.check('H3 listener 提交 speaker 专属字段答案 → 400 field_not_applicable',
+              s == 400 and biz_code(r) == 'field_not_applicable', r)
+    s, r = call(base, 'POST', '/api/cc/activities/%s/register' % act2,
+                {'activity_role': 'listener',
+                 'answers': [{'field_def_id': fields['nickname'], 'value': '角色聆'}]}, PRL_T)
+    rep.check('H4 listener 缺 listener 专属必填 → 400 REQUIRED_FIELD_MISSING',
+              s == 400 and biz_code(r) == 'REQUIRED_FIELD_MISSING', r)
+    s, r = call(base, 'POST', '/api/cc/activities/%s/register' % act2,
+                {'activity_role': 'listener',
+                 'answers': [{'field_def_id': LIS_F, 'value': '三年倾听'}]}, PRL_T)
+    rep.check('H5 both 必填字段对 listener 生效（缺 nickname → 400）',
+              s == 400 and biz_code(r) == 'REQUIRED_FIELD_MISSING', r)
+    s, r = call(base, 'POST', '/api/cc/activities/%s/register' % act2,
+                {'activity_role': 'listener',
+                 'answers': [{'field_def_id': fields['nickname'], 'value': '角色聆'},
+                             {'field_def_id': LIS_F, 'value': '三年倾听'}]}, PRL_T)
+    rep.check('H6 listener 仅适用字段提交成功（speaker 专属不参与校验）', s == 200, r)
+
+    s, r = call(base, 'POST', '/api/cc/activities/%s/register' % act2,
+                {'activity_role': 'speaker',
+                 'answers': [{'field_def_id': fields['nickname'], 'value': '角色倾'},
+                             {'field_def_id': LIS_F, 'value': '不适用字段答案'}]}, PRS_T)
+    rep.check('H7 speaker 提交 listener 专属字段答案 → 400 field_not_applicable',
+              s == 400 and biz_code(r) == 'field_not_applicable', r)
+    s, r = call(base, 'POST', '/api/cc/activities/%s/register' % act2,
+                {'activity_role': 'speaker',
+                 'answers': [{'field_def_id': fields['nickname'], 'value': '角色倾'},
+                             {'field_def_id': SPK_F, 'value': '亲子沟通'}]}, PRS_T)
+    rep.check('H8 speaker 无需 listener 专属必填即可提交（both 字段正常校验）', s == 200, r)
+
+    s, ov1 = call(base, 'GET', '/api/cc/me/overview', token=P1T)
+    s2, ov2 = call(base, 'GET', '/api/cc/me/overview', token=P2T)
+    rep.check('H9 me/overview：has_approved_listener_registration 倾诉者=false / 已过审聆听者=true',
+              s == 200 and ov1.get('has_approved_listener_registration') is False
+              and s2 == 200 and ov2.get('has_approved_listener_registration') is True,
+              [ov1.get('has_approved_listener_registration'),
+               ov2.get('has_approved_listener_registration')])
