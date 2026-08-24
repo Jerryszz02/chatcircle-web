@@ -4,10 +4,10 @@
 
 ## 1. 文档目的
 
-- 给出 PRD §9.1 全部 19 个集合的 PocketBase collection 定义草案：字段名、类型、必填、唯一约束与索引。
+- 给出 PRD §9.1 全部 19 个集合的 PocketBase collection 定义草案：字段名、类型、必填、唯一约束与索引。2026-08 实现期新增「聆听者培训体系」3 集合（trainings / training_checkin_sessions / training_attendances，§5.2.20~5.2.22，PRD 外扩展），合计 22 个业务集合。
 - 固化标识规则（`participant_id` 全平台稳定、`registration_id` 参与者×活动唯一、`question_code` 稳定性、`group_tag` 预留）。
 - 定义多机构隔离在 PocketBase 层面的实现方式：`organization_id` 冗余字段 + API Rules 服务端强制过滤。
-- 汇总全部状态枚举与状态机（活动 7 态、报名 4 态及迁移矩阵、签到场次/记录、问卷 5 态、答卷 3 态、邀请码 4 态），并给出事务与并发约束。
+- 汇总全部状态枚举与状态机（活动 7 态、报名 4 态及迁移矩阵、签到场次/记录、问卷 5 态、答卷 3 态、邀请码 4 态、培训 3 态及培训签到场次/记录），并给出事务与并发约束。
 - 明确迁移策略（`pb_migrations` 版本化、模板版本不可变、无硬删除）与保留策略（审计 ≥1 年、备份 30 天）。
 
 ## 2. 适用范围
@@ -157,9 +157,11 @@
 | is_sensitive | bool | 是 | — | **敏感标记；普通导出按此排除/掩码，不依赖字段名判断**（FR-EXP-002） |
 | options_json | json | 否 | — | 选项机器值与显示文本 |
 | required_default | bool | 是 | — | 默认必填建议；活动级覆盖见 `activities.form_config_json` |
+| role_scope | select(both, speaker, listener) | 否 | — | 适用角色（分角色报名问卷，2026-08 扩展）：both=两角色通用。select 无 schema 级默认值，存量行已回填 both；hooks 读取侧对空值按 both 归一兜底 |
 | status | select(active, disabled) | 是 | — | 停用代替删除 |
 
 - 标准字段（`organization_id IS NULL`）仅 `_superusers` 可写；机构只能选启用/必填，不能改代码与类型（PRD §8.1）。
+- 报名校验按 `activity_role` 过滤适用字段（`role_scope ∈ {both, 该角色}`）：必填与格式校验仅针对适用字段；对不适用字段提交答案报 `field_not_applicable`（registrations.pb.js）。机构自定义字段的 `role_scope` 机构可编辑；平台标准字段的 `role_scope` 由超管维护（同标准字段既有维护方式）。
 - 具体标准字段清单 PRD 未写死 → 「待确认」D-1。
 
 #### 5.2.8 registrations — 报名、角色与审核状态（base）
@@ -337,6 +339,60 @@
 - 可读权限：机构管理员只读检索本机构（`organization_id` 过滤），超级管理员全局（FR-AUD-005）。
 - 保留 ≥1 年（FR-AUD-003），到期策略后续治理决定。
 
+#### 5.2.20 trainings — 聆听者培训主数据（base，2026-08 PRD 外扩展）
+
+> 培训体系为 PRD v0.3 之外的实现期扩展（迁移 `1785889260_cc_role_scope_trainings.js`）：培训与活动解绑；培训机构级创建，而签到资格与「培训通过」标记为账号级、全平台通用。
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| organization_id | relation(organizations) | 是 | 复合索引 (organization_id, status) | 机构隔离主键 |
+| title | text | 是 | — | 培训标题 |
+| training_code | text | 是 | **唯一** | 可读稳定代码，约定同 `activities.activity_code` |
+| description | text | 否 | — | 培训说明 |
+| location | text | 否 | — | 地点 |
+| start_time / end_time | date | 否 | — | 培训起止时间 |
+| status | select(draft, published, closed) | 是 | 索引 | 培训 3 态，见 §5.5；状态流转只走 hooks 端点 |
+| checkin_qr_token | text | 否 | **唯一** | 固定签到二维码 token；**服务端 onRecordCreate 生成 24 位随机 token**（同 activities 加固做法），客户端传入一律忽略 |
+
+- API Rules 镜像 activities：机构管理员按本机构读写（`@request.auth.organization_id = organization_id`），超管全量；**参与者/匿名不可直读**——培训信息仅经白名单端点 `GET /api/cc/me/trainings` 按资格下发；deleteRule 关闭（无硬删除）。
+- 直连守卫（guards.pb.js）：创建强制 `status='draft'`；禁直连改 `status` / `organization_id` / `checkin_qr_token`。
+- 发布/关闭与签到开放/关闭均写审计（`training.publish` / `training.close` / `training.checkin_open` / `training.checkin_close`）。
+
+#### 5.2.21 training_checkin_sessions — 培训签到开放窗口（base）
+
+语义镜像 checkin_sessions（§5.2.10）：
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| training_id | relation(trainings) | 是 | 复合索引 (training_id, status) | 所属培训 |
+| status | select(open, closed) | 是 | — | 「未开放」不建行；每次开放新建一行，关闭时置 closed |
+| opened_at | date | 是 | — | 开放时间 |
+| closed_at | date | 否 | — | 关闭时间 |
+| opened_by | text | 是 | — | 操作管理员 id |
+
+- **同一培训同一时间至多一条 open 记录**（hooks 事务保证）。
+- API Rules：管理员经 `training_id.organization_id` 按机构隔离读写；**直连写由 guards.pb.js 全锁**（开放/关闭只走 `/api/cc/trainings/{id}/checkin/open|close` 端点）；deleteRule 关闭。
+
+#### 5.2.22 training_attendances — 培训签到记录（base）
+
+语义镜像 checkins（§5.2.11）：
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| training_id | relation(trainings) | 是 | 复合索引 (training_id, participant_id, status) | 所属培训 |
+| participant_id | relation(participant_accounts) | 是 | 索引 | 签到人 |
+| source | select(self_scan, manual) | 是 | — | 自助扫码 / 管理员补签 |
+| status | select(valid, revoked) | 是 | 索引 | 「已撤销」保留原记录；「未签到」不建行 |
+| checked_in_at | date | 是 | — | 签到时间 |
+| operator_id | text | 否 | — | 补签/撤销操作管理员 id；自助签到为空 |
+| reason | text | 否 | — | 补签/撤销必填原因（hooks 校验） |
+| revoked_at | date | 否 | — | 撤销时间 |
+
+- **每人每培训至多一条 valid**：SQLite 无法表达部分唯一索引，由 hooks 事务查重保证；不建 (training_id, participant_id) 全量唯一索引（否则撤销后无法重签）。
+- **「培训通过」账号级口径 = 存在任一 valid 出席记录**（全平台通用）；当前仅作记录与展示，不作为报名门槛（2026-08 决策）。
+- 签到前置：登录 + 存在 approved 的聆听者报名（全平台任一活动，资格账号级通用，否则 403 `listener_not_approved`）+ 培训 published + 签到开放中。
+- API Rules：管理员按机构隔离只读，参与者只读本人记录；**直连写全锁**（只走 hooks 端点），deleteRule 关闭。
+
 ### 5.3 标识与关联规则
 
 | 标识 | 载体 | 作用域与稳定性 | 导出规则 |
@@ -347,10 +403,10 @@
 | `registration_id` | `registrations.id` | **参与者×活动唯一**（复合唯一索引保证）；关联报名答案、角色、审核、签到、答卷 | 进入 registrations.csv / registration_answers.csv |
 | `submission_id` | `submissions.id` | 一次答卷 | 进入 submissions.csv 与 answers.csv |
 | `question_code` | `survey_questions.question_code` / `answers.question_code` | **标准题跨模板、跨活动稳定一致**；自定义题活动内唯一（`CUS_` 前缀） | 进入 answers.csv 与 data_dictionary.csv |
-| `activity_code` / `survey_code` / `template_code` | 各自 text 字段 | 可读稳定代码，遵循附录 B 格式 | 人读追溯用 |
+| `activity_code` / `survey_code` / `template_code` / `training_code` | 各自 text 字段 | 可读稳定代码，遵循附录 B 格式 | 人读追溯用 |
 | `group_tag` | `activities.group_tag` | **预留字段（可空），V1 不使用**；供后续分组/系列/项目层级扩展，禁止 V1 占用语义 | 导出保留该列（可为空） |
 
-外键关系主线：`organizations 1—n activities 1—n (registrations, checkin_sessions, checkins, activity_surveys)`；`activity_surveys 1—n (survey_questions, submissions)`；`submissions 1—n answers`；`registrations 1—n registration_answers`。`checkins.registration_id` 与 `submissions.registration_id` 使签到/答卷可回链审核口径。
+外键关系主线：`organizations 1—n activities 1—n (registrations, checkin_sessions, checkins, activity_surveys)`；`activity_surveys 1—n (survey_questions, submissions)`；`submissions 1—n answers`；`registrations 1—n registration_answers`。`checkins.registration_id` 与 `submissions.registration_id` 使签到/答卷可回链审核口径。培训体系（2026-08 扩展）：`organizations 1—n trainings 1—n (training_checkin_sessions, training_attendances)`，与活动签到平行、互不引用。
 
 ### 5.4 多机构隔离在 PocketBase 层面的实现
 
@@ -377,6 +433,9 @@
 | 报名 | `registrations.status` | `pending`=待审核；`approved`=已通过；`rejected`=已拒绝；`cancelled`=已取消（无候补态，PRD §4.4） |
 | 签到场次 | `checkin_sessions.status` | `open`=已开放；`closed`=已关闭（「未开放」= 无 open 记录） |
 | 签到记录 | `checkins.status` | `valid`=已签到；`revoked`=已撤销（「未签到」= 无记录） |
+| 培训 | `trainings.status` | `draft`=草稿；`published`=已发布；`closed`=已关闭（2026-08 扩展） |
+| 培训签到场次 | `training_checkin_sessions.status` | `open`=已开放；`closed`=已关闭（「未开放」= 无 open 记录） |
+| 培训签到记录 | `training_attendances.status` | `valid`=已签到（培训通过）；`revoked`=已撤销（「未签到」= 无记录） |
 | 活动问卷 | `activity_surveys.status` | `draft`=草稿；`not_open`=未开放；`open`=开放中；`ended`=已结束；`archived`=已归档 |
 | 答卷 | `submissions.status` | `draft`=草稿；`submitted`=已提交；`voided`=已作废（无退回重填） |
 | 机构/账号 | `*.status` | `active` / `disabled` |
@@ -395,6 +454,7 @@
 
 - 活动：`draft → (pending_review →) published → closed → archived`；`published → taken_down`（仅超级管理员）；`pending_review → rejected → pending_review`（修改重提）。已驳回/已下架不进入公开入口。
 - 签到场次：管理员手动 `open ⇄ closed` 可重复；有效签到仍每活动每人一条。
+- 培训：`draft → published → closed`，状态流转只走 hooks 端点（直连创建强制 draft、禁直连改 status）；培训签到场次 `open ⇄ closed` 可重复；有效出席每培训每人一条。
 - 问卷：`draft → not_open ⇄ open → ended → archived`；开放/结束手动控制，不被签到状态或时间点强制。
 - 答卷：`draft → submitted`（锁定，参与者不可再改）；`submitted → voided`（仅管理员，原因 + 审计）；作废记录常规统计与导出排除。
 - 所有状态变更记录操作者、时间、前后状态与原因，写入 `audit_logs`（FR-REG-008、FR-AUD-002）。
@@ -406,6 +466,7 @@
 | 审核通过 / 角色修改 / 状态回退 | 总名额与角色名额硬限制，并发审核不得超额（AC-08） | PocketBase hooks 内单事务：锁定活动行 → 统计当前 `approved` 数（按角色）→ 比对名额 → 更新状态 → 写审计；任一失败整体回滚 |
 | 名额调低 | 新名额不得低于当前已通过人数（FR-ACT-006） | 更新 `activities.capacity_*` 前同事务校验 |
 | 自助签到 / 补签 | 每活动每人仅一条 `valid` 记录；重试/重复扫码幂等（AC-09、AC-20） | 事务内查重 → 插入；重复请求返回已存在的记录而非报错新建 |
+| 培训自助签到 / 补签（2026-08 扩展） | 每培训每人仅一条 `valid` 记录；重复扫码/补签幂等；资格 = 存在 approved 聆听者报名 | 事务内资格校验 + 查重 → 插入；重复请求返回已有记录；SQLite 快照冲突最多重试 2 次后返回 409 |
 | 报名/问卷提交 | 网络重试、重复点击不产生重复正式记录（AC-20） | 复合唯一索引兜底 + 服务端「已存在则返回现状」语义 |
 | 邀请码注册 | 同一邀请码只能成功注册一次（AC-02） | 事务内校验并置 `used` |
 | 答卷提交 | 草稿→已提交为原子切换，答案行随同事务写入 | 单事务更新 `submissions` + 写 `answers` |

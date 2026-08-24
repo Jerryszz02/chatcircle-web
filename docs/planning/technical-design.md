@@ -34,6 +34,7 @@
 - 不设计动态签到二维码（固定二维码 + 开放状态控制，动态码留作后续版本）。
 - 不引入 PRD 技术基线之外的持久化与基础设施组件（不换 PostgreSQL、不加 Redis/MQ/独立对象存储服务；备份的异地目标见「待确认」）。
 - 不设计问卷答卷"退回重填"（v0.3 已移除；管理端仅可作废）。
+- 培训体系（2026-08 PRD 外扩展）本次不做：培训作为聆听者报名门槛（仅记录与展示，后续可加活动级开关）；培训报名/名额体系；审核报名时向管理员展示跨机构「已培训」标记（资格数据跨机构对管理员不可见，需要时另开端点）。
 
 ## 实现指引
 
@@ -95,6 +96,7 @@ chatcircle-web/
 │   │   ├── auth.pb.js              # 参与者自动注册/登录、登录限流、邀请码注册
 │   │   ├── registrations.pb.js     # 报名状态迁移 + 名额事务硬校验
 │   │   ├── checkins.pb.js          # 签到开放/关闭、自助签到、补签/撤销
+│   │   ├── trainings.pb.js         # 培训生命周期、培训签到开放/关闭、自助签到、补签/撤销（2026-08 培训体系）
 │   │   ├── surveys.pb.js           # 问卷资格校验、草稿/提交/作废
 │   │   ├── exports.pb.js           # 导出任务、范围校验、文件下载鉴权
 │   │   ├── metrics.pb.js           # 看板聚合查询
@@ -138,7 +140,9 @@ chatcircle-web/
 | `/a/:activityId/register` | 报名链路（内嵌自动注册/登录） | 报名开放中；登录后提交 |
 | `/login` | 平台通用登录页 | 不提供注册（FR-AUTH-008）；支持 `redirect` 参数，从活动链接跳转登录后回到原目标 |
 | `/me` | "我的"中心 | 参与者会话 |
-| `/checkin/:activityId` | 固定签到二维码的落地页 | 登录 + 报名已通过 + 签到开放中 |
+| `/checkin/:token` | 固定签到二维码的落地页 | 登录 + 报名已通过 + 签到开放中 |
+| `/trainings` | 聆听者培训页：流程说明 + 资质标记 + 培训列表 + 我的签到状态 | 参与者会话；培训信息仅 eligible（存在 approved 聆听者报名）下发 |
+| `/training-checkin/:token` | 培训签到二维码的落地页 | 登录 + approved 聆听者报名 + 培训已发布 + 签到开放中 |
 | `/survey/:qrToken` | 问卷填写 / 草稿 / 已提交答案 | 登录 + 报名已通过 + 角色匹配 + 问卷开放中（FR-SUR-006） |
 
 机构管理端（`/admin` 前缀，需 `admin_accounts` 会话）：
@@ -148,6 +152,7 @@ chatcircle-web/
 | `/admin/login` | 管理员登录 |
 | `/admin/register` | 邀请码注册（邀请码 + 用户名 + 密码） |
 | `/admin/activities`、`/admin/activities/:activityId` | 活动列表与详情（含报名审核、签到控制台、问卷管理子页） |
+| `/admin/trainings`、`/admin/trainings/:trainingId` | 培训列表/创建与详情（发布/关闭、签到管理：二维码、开放/关闭、名单、补签/撤销） |
 | `/admin/dashboard` | 本机构看板 |
 | `/admin/exports` | 导出（本机构全部或单活动） |
 | `/admin/audit` | 本机构审计日志只读检索 |
@@ -167,7 +172,7 @@ chatcircle-web/
 - 三种会话（`participant_accounts` / `admin_accounts` / PocketBase `_superusers`）互不通用；路由守卫按认证记录类型分流，参与者会话不具备任何管理后台权限（PRD §3.2）。首页「管理入口」仅提供机构/超级管理端登录页链接作统一导航，不构成权限入口。
 - 路由守卫只是 UX 引导；真正的隔离在 collection API rules 与 hooks（见 §5.5）。
 - 活动与问卷页（`/activities`）以 `GET /api/cc/public/activities` 公开展示已发布/已关闭活动（对 FR-ACT-002「活动仅链接/二维码可达、无公开广场」的实现期偏离，初随首页落地，后拆为独立页）；**问卷仍不出现在任何公开列表**，仅二维码/链接可达（该页问卷区只展示登录者本人可填的问卷）。
-- 签到二维码内容固定指向 `/checkin/:activityId`，有效性由签到开放状态控制而非二维码本身（FR-CHK-001/002）；每份问卷独立 `qr_token`（PRD §9.1 `activity_surveys.qr_token`）。
+- 签到二维码内容固定指向 `/checkin/<checkin_qr_token>`，有效性由签到开放状态控制而非二维码本身（FR-CHK-001/002）；培训签到二维码指向 `/training-checkin/<checkin_qr_token>`（token 均由服务端生成）；每份问卷独立 `qr_token`（PRD §9.1 `activity_surveys.qr_token`）。
 
 ### 5.4 认证模型
 
@@ -222,6 +227,11 @@ chatcircle-web/
 | 名额修改下限 | FR-ACT-006 | activities 更新 hook | `capacity_*` 不得低于当前已通过人数 |
 | 签到唯一性 | FR-CHK-003/004、AC-09/AC-20 | checkins 唯一索引 + hook | `(activity_id, participant_id)` 唯一索引，每活动每人一行，状态 ∈ 未签到/已签到/已撤销；自助签到前校验报名已通过且场次开放；**重复扫码幂等返回已有记录**，不报错不新建 |
 | 补签 / 撤销签到 | FR-CHK-005、AC-10 | checkins hook | 仅管理端；必须填 `reason`；写审计；只改状态不删行 |
+| 分角色报名问卷校验 | 2026-08 扩展（PRD 外） | registrations 报名提交端点 | 按 `activity_role` 计算适用字段（`role_scope ∈ {both, 该角色}`）；必填与格式校验仅针对适用字段；对不适用字段提交答案返回 400 `field_not_applicable`；公开详情端点下发字段含 `role_scope` |
+| 培训状态机 | 2026-08 扩展（PRD 外） | `POST /api/cc/trainings/{id}/publish|close` + guards | draft → published → closed；幂等同态返回（already=true）；直连创建强制 draft、禁直连改 status/organization_id/checkin_qr_token；写审计（training.publish/close） |
+| 培训签到资格与唯一性 | 2026-08 扩展（PRD 外） | `POST /api/cc/training-checkin/self`、`POST /api/cc/training-checkins/manual` | 资格 = 存在 approved 聆听者报名（账号级、全平台通用，否则 `listener_not_approved`）；须培训 published 且签到开放中（未开放 `checkin_not_open` / 已结束 `checkin_closed`）；每培训每人仅一条 valid，事务内查重，重复扫码/补签幂等返回已有记录 |
+| 培训补签 / 撤销与候选人 | 2026-08 扩展（PRD 外） | `/api/cc/training-checkins/manual`、`GET /api/cc/trainings/{id}/checkin/manual-candidates`、`POST /api/cc/training-checkins/{id}/revoke` | 仅管理端；补签/撤销 `reason` 必填 + 写审计；撤销只改状态不删行，撤销后可重签；候选人 = 全平台 approved 聆听者按参与者去重 |
+| 培训信息可见性 | 2026-08 扩展（PRD 外） | `GET /api/cc/me/trainings`、`GET /api/cc/me/overview` | 未 eligible（无 approved 聆听者报名）时培训列表恒空；eligible 返回全平台 published 培训 + 本人有出席记录的 closed 培训（含 my_attendance）；不下发 `checkin_qr_token`；overview 响应含 `has_approved_listener_registration`（供「我的」中心培训入口显隐） |
 | 问卷提交幂等与锁定 | FR-SUR-006/008、AC-12/AC-20 | submissions 唯一约束 + hook | `(activity_survey_id, participant_id)` 唯一；草稿可编辑、正式提交即锁定；重复提交返回原记录；资格四条件（登录、报名已通过、角色匹配、开放中）服务端逐项校验；未签到不强制（PRD §5.6） |
 | 答卷作废 | FR-SUR-010 | submissions hook | 状态→已作废，原记录保留 + 审计；常规统计与导出口径排除作废记录 |
 | 导出范围服务端校验 | FR-EXP-003/004、AC-16/17 | exports hook 端点 | 服务端按身份计算允许范围：管理员=本机构全部或指定单活动；超级管理员=全平台/机构/单活动；敏感导出校验机构 `allow_sensitive_export` 开关 + 二次确认标记 + 审计；生成 `export_jobs` 记录（导出人、范围、时间、是否含个人信息、文件校验信息，§10.3） |
