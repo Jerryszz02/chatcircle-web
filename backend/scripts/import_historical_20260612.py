@@ -101,6 +101,12 @@ def xlsx_rows(path):
 # ---------------------------------------------------------------------------
 # HTTP（与 seed_demo.py 同形态）
 # ---------------------------------------------------------------------------
+# 显式禁用代理：macOS 下 urllib 默认读取系统代理（getproxies 走 _scproxy），
+# 本机代理可能拦截/拒绝 127.0.0.1 与服务器 IP 的请求（表现为 502/连接失败），
+# 脚本与目标服务器之间一律直连。
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def call(base, method, path, body=None, token=None):
     req = urllib.request.Request(base + path, method=method)
     req.add_header('Content-Type', 'application/json')
@@ -108,7 +114,7 @@ def call(base, method, path, body=None, token=None):
         req.add_header('Authorization', token)
     data = json.dumps(body).encode() if body is not None else None
     try:
-        with urllib.request.urlopen(req, data, timeout=60) as res:
+        with _OPENER.open(req, data, timeout=60) as res:
             return res.status, json.loads(res.read() or b'{}')
     except urllib.error.HTTPError as e:
         try:
