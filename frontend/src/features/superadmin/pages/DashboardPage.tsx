@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { collectionsForRole } from '../../../shared/api/collections';
 import { normalizeApiError } from '../../../shared/api/http';
 import type { ActivityStatus, OrganizationRecord } from '../../../shared/api/types';
+import { localDayToPbUtcRange } from '../../../shared/lib/datetime';
 import { MetricRenderer, type MetricData } from '../../../shared/metrics/MetricRenderer';
 import {
   listMetricDefinitions,
@@ -15,7 +16,11 @@ import { BackupAlarmBanner } from '../components/BackupAlarmBanner';
 import { useBackupStatus } from '../hooks';
 import { ACTIVITY_ROLE_LABELS, ACTIVITY_STATUS_LABELS } from '../lib/labels';
 
-const STATUS_OPTIONS = Object.entries(ACTIVITY_STATUS_LABELS) as [ActivityStatus, string][];
+// 看板口径只统计 已发布/已关闭/已归档（metrics.pb.js activity_sessions 白名单，
+// technical-design §5.6）；草稿/待平台审核/已驳回恒为 0，不提供筛选项
+const STATUS_OPTIONS = (Object.entries(ACTIVITY_STATUS_LABELS) as [ActivityStatus, string][]).filter(
+  ([value]) => !['draft', 'pending_review', 'rejected'].includes(value),
+);
 
 /**
  * 全局看板（/super/dashboard，FR-DASH-001~005、technical-design §5.6）。
@@ -59,9 +64,13 @@ export function SuperDashboardPage() {
 
   const query = useCallback(async () => {
     setLoading(true);
+    // 本地日期 → 该自然日对应的 UTC 边界（PB 按 UTC 存储比较，直接发本地日期会偏移一个时区）；
+    // 与机构端看板共用同一时区口径（datetime 形式，左闭右开）
+    const fromRange = from ? localDayToPbUtcRange(from) : null;
+    const toRange = to ? localDayToPbUtcRange(to) : null;
     const filters: MetricFilters = {
-      from: from || undefined,
-      to: to || undefined,
+      from: fromRange?.gte,
+      to: toRange?.lt,
       organization_id: orgId || undefined,
       activity_status: activityStatus || undefined,
       activity_role: activityRole || undefined,

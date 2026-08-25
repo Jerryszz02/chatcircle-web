@@ -312,9 +312,10 @@ routerAdd('POST', '/api/cc/exports', (e) => {
   } else {
     activities = queryAll('activities', '', {}, 'created');
   }
-  // 时间范围筛选（作用于活动开始时间）
+  // 时间范围筛选（重叠口径：活动 [start_time, end_time] 与 [from, to] 有交集即计入，
+  // 与看板 metrics 口径一致，FR-DASH-002）
   if (dateRange.from) {
-    activities = activities.filter((a) => iso(a.get('start_time')) >= dateRange.from);
+    activities = activities.filter((a) => (iso(a.get('end_time')) || iso(a.get('start_time'))) >= dateRange.from);
   }
   if (dateRange.to) {
     activities = activities.filter((a) => iso(a.get('start_time')) <= dateRange.to + 'T23:59:59.999Z');

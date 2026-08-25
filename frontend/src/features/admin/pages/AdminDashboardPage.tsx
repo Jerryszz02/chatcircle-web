@@ -69,14 +69,15 @@ export function AdminDashboardPage() {
     }
     setMetricsLoading(false);
 
-    // 活动明细下钻（口径：已发布/已关闭/已归档计入活动场次，FR-DASH-002 与导出一致）
+    // 活动明细下钻（与指标卡同为重叠口径：活动 [start_time, end_time] 与筛选区间有交集即计入；
+    // 状态口径已发布/已关闭/已归档计入活动场次，FR-DASH-002 与导出一致）
     try {
       const conditions: string[] = [
         activityStatus
           ? `status = "${activityStatus}"`
           : 'status = "published" || status = "closed" || status = "archived"',
       ];
-      if (fromRange) conditions.push(`start_time >= "${fromRange.gte}"`);
+      if (fromRange) conditions.push(`end_time >= "${fromRange.gte}"`);
       if (toRange) conditions.push(`start_time < "${toRange.lt}"`);
       const list = await adminCollections().activities.getFullList({
         filter: conditions.map((c) => `(${c})`).join(' && '),
