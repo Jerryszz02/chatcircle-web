@@ -85,8 +85,19 @@ record_audit() {
         "$PB_URL/api/collections/audit_logs/records" >/dev/null
 }
 
+# 删除服务端 pb_data/backups 副本（pb_data 卷不积累每日归档，备份卷才是归档归属；
+# PocketBase 会为每个备份生成同名 .attrs 元数据边车文件，一并清理）。
+# 成功/失败路径都要调用：备份在「服务端已建副本、尚未下载」阶段失败时（如取文件
+# token 失败）也会残留副本，反复失败会在 pb_data 卷累积，故统一收进 fail()。
+# 早期失败（健康等待/登录失败等）副本尚不存在，rm -f 为空操作。
+cleanup_server_copy() {
+    rm -f "$PBDATA/backups/$NAME" "$PBDATA/backups/$NAME.attrs" \
+        || echo "[backup] warn: 未能删除服务端副本 $PBDATA/backups/$NAME" >&2
+}
+
 fail() {
     echo "[backup] FAILED: $1" >&2
+    cleanup_server_copy
     write_marker failure "" 0 "$1"
     record_audit failure "" 0 "$1" || echo "[backup] warn: 备份失败审计写入失败" >&2
     exit 1
@@ -153,17 +164,8 @@ FILE_TOKEN=$(wget -qO- \
     "$PB_URL/api/files/token" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 [ -n "$FILE_TOKEN" ] || fail "获取文件下载 token 失败"
 
-# 删除服务端 pb_data/backups 副本（pb_data 卷不积累每日归档，备份卷才是归档归属；
-# PocketBase 会为每个备份生成同名 .attrs 元数据边车文件，一并清理）。
-# 成功/失败路径都要调用，避免失败时服务端副本残留
-cleanup_server_copy() {
-    rm -f "$PBDATA/backups/$NAME" "$PBDATA/backups/$NAME.attrs" \
-        || echo "[backup] warn: 未能删除服务端副本 $PBDATA/backups/$NAME" >&2
-}
-
 if ! wget -qO "$DEST/$NAME" \
     "$PB_URL/api/backups/$NAME?token=$FILE_TOKEN"; then
-    cleanup_server_copy
     rm -f "$DEST/$NAME"  # 清掉可能的半截下载文件，避免被误当有效归档
     fail "下载备份文件失败"
 fi
