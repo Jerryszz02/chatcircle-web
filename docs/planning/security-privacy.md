@@ -167,7 +167,7 @@ V1 只有两级数据分级，判断依据是字段上的 `is_sensitive` 标记�
 | 项目 | V1 规则 | 依据 |
 | --- | --- | --- |
 | 登录限流 | 连续登录失败达到阈值后触发临时限制，防暴力尝试 | FR-AUTH-007、AC-21 |
-| 邮件类端点限流（2026-08 改版） | request-verification / request-otp / request-password-reset 三类发信/验证码请求：per-email 3 次/小时 + per-IP 20 次/小时滑动窗口，超限返回 429 `TOO_MANY_ATTEMPTS`（mailguard.pb.js，复用 authguard 限流模式） | 2026-08 后端改版计划（PRD 外） |
+| 邮件类端点限流（2026-08 改版） | request-verification / request-otp / request-password-reset 三类发信/验证码请求：per-email 3 次/小时 + per-IP 20 次/小时滑动窗口；**超限静默 204 + 审计 `auth.mail.throttled`，不返回 429**（钩子仅在邮箱存在时触发，429 会形成「已注册邮箱」枚举 oracle；mailguard.pb.js） | 2026-08 后端改版计划（PRD 外） |
 | 参与者会话 | 默认保持 30 天；未主动退出且令牌有效可继续使用；主动退出立即失效 | FR-AUTH-006、§12.4 |
 | 管理后台会话 | **不因「连续无操作」自动退出**；仍需具备令牌过期和主动退出机制 | §12.4 |
 | 密码错误处理 | 用户名已存在时验证密码，错误密码不得创建重复账号 | FR-AUTH-001、AC-06 |

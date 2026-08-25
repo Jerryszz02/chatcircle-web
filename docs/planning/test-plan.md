@@ -101,7 +101,7 @@
 | 登录限流 | 同一账号连续失败登录达阈值 | 触发临时限制；限流响应不泄露账号是否存在；阈值与时长待确认 | AC-21 |
 | 邀请码 | 一次性使用、过期、撤销、并发两次注册 | 仅首次成功；使用后立即失效；过期/撤销不可用 | AC-02 |
 | 自动注册/登录 | 新用户名报名、已存在用户名正确/错误密码 | 新名自动建号并登录；错误密码不建重复账号；用户名大小写不敏感唯一 | AC-06 |
-| 管理员邮箱认证（`suite_admin_email.py`，2026-08 改版） | 带邮箱注册、验证门控、找回拦截、OTP 登录、邮件类端点限流 | 带 email 注册成功、`verified=false`、email 落库小写；缺 email → 400 INVALID_EMAIL；重复 email → 400 EMAIL_TAKEN；非法格式 → 400；未验证账号找回 → 204 静默拦截且审计有 `auth.password_reset.suppressed`（测试环境无 SMTP，不断言投递）；置 verified 后找回不被拦截；同 email 第 4 次 request-verification → 429 TOO_MANY_ATTEMPTS；邮箱作 identity 的 auth-with-password 登录成功 | AC-24 |
+| 管理员邮箱认证（`suite_admin_email.py`，2026-08 改版） | 带邮箱注册、验证门控、找回拦截、OTP 登录、邮件类端点限流 | 带 email 注册成功、`verified=false`、email 落库小写；缺 email → 400 INVALID_EMAIL；重复 email → 400 EMAIL_TAKEN；非法格式 → 400；未验证账号找回 → 204 静默拦截且审计有 `auth.password_reset.suppressed`（测试环境无 SMTP，不断言投递）；置 verified 后找回不被拦截；同 email 第 4 次 request-verification → 静默 204 且审计 `auth.mail.throttled`；邮箱作 identity 的 auth-with-password 登录成功 | AC-24 |
 | 公开活动列表 | 未登录调用 `GET /api/cc/public/activities`（活动广场页 `/activities`） | 仅 published/closed 下发且按开始时间倒序；报名 `open`/`reason` 与剩余名额口径同公开详情端点一致（suite_flow D3b） | AC-05 |
 | 答卷生命周期 | 草稿编辑、正式提交后修改、作废 | 草稿可改；提交后锁定；作废保留记录且被统计与导出排除 | AC-12 |
 | 模板版本不可变 | 模板发布新版本后，既有活动问卷与历史答卷 | 旧问卷 schema 不变；旧答卷可正常查看与导出 | AC-13 |
@@ -189,7 +189,7 @@
 | AC-21 | 登录限流 | **集** | — | 连续失败达阈值触发临时限制 |
 | AC-22 | 参与者中心 | **E2E** | 组 | 登录页无注册；我的中心三类信息正确 |
 | AC-23 | 备份告警 | **集**（模拟备份失败） | **线**（真实任务验证） | 超级后台可见告警且审计有记录 |
-| AC-24 | 管理员邮箱认证（2026-08 改版） | **集** | — | 注册必填邮箱并归一化；未验证找回静默 204 拦截；邮件类端点限流 429；邮箱+密码/OTP 登录成功 |
+| AC-24 | 管理员邮箱认证（2026-08 改版） | **集** | — | 注册必填邮箱并归一化；未验证找回静默 204 拦截；邮件类端点限流静默 204 + 审计；邮箱+密码/OTP 登录成功 |
 | AC-25 | 内容推文 posts（2026-08 改版） | **集** | — | 仅超管写；匿名与普通用户仅见 visible；正文/外链至少其一、外链仅 http/https；`published_at` 只写一次 |
 | AC-26 | 公开 Outcome（2026-08 改版） | **集** | 人（首页展示核对） | 三项口径与 fixture 精确一致；非发布态活动/无效签到/停用机构不计 |
 

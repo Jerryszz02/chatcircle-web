@@ -10,8 +10,8 @@
 - 找回门控：未验证邮箱 request-password-reset → 204 静默拦截且审计有
   auth.password_reset.suppressed；超管置 verified=true 后再请求 → 204 且无新增
   suppressed 审计（测试环境无 SMTP，不断言真实投递）；
-- 邮件类端点限流（mailguard.pb.js）：同 email 第 4 次 request-verification → 429
-  TOO_MANY_ATTEMPTS（per-email 3 次/小时）；
+- 邮件类端点限流（mailguard.pb.js）：同 email 第 4 次 request-verification → 静默 204
+  且审计 auth.mail.throttled（静默口径：429 只对已注册邮箱触发会形成枚举 oracle）；
 - OTP 端点可用：request-otp → 200 且返回 otpId（无 SMTP 环境 PB 仍受理；验证码投递
   与 auth-with-otp 全链路属上线验收，不在 L3 覆盖——验证码 bcrypt 落库不可取回）；
 - 直连改邮箱被 guards.pb.js 禁止（403）；换邮箱走 PB 内置 requestEmailChange 流程。
@@ -34,6 +34,13 @@ def run(ctx):
     def suppressed_count():
         s2, r2 = call(base, 'GET',
                       "/api/collections/audit_logs/records?filter=(action='auth.password_reset.suppressed')",
+                      token=st)
+        assert s2 == 200, '读审计失败：%s' % r2
+        return r2.get('totalItems')
+
+    def throttled_count():
+        s2, r2 = call(base, 'GET',
+                      "/api/collections/audit_logs/records?filter=(action='auth.mail.throttled')",
                       token=st)
         assert s2 == 200, '读审计失败：%s' % r2
         return r2.get('totalItems')
@@ -94,7 +101,7 @@ def run(ctx):
     rep.check('AEM-11 已验证找回不产生新的 suppressed 审计',
               suppressed_count() == before + 1, suppressed_count())
 
-    # ---------- 4. 邮件类端点限流（per-email 3 次/小时）----------
+    # ---------- 4. 邮件类端点限流（per-email 3 次/小时，静默 204 防枚举）----------
     codes = []
     for _ in range(3):
         s, r = call(base, 'POST', '/api/collections/admin_accounts/request-verification',
@@ -102,10 +109,12 @@ def run(ctx):
         codes.append(s)
     rep.check('AEM-12 前 3 次 request-verification 受理（204，无 SMTP 不断言投递）',
               codes == [204] * 3, codes)
+    t_before = throttled_count()
     s, r = call(base, 'POST', '/api/collections/admin_accounts/request-verification',
                 {'email': 'aemadmin1@it.cc.local'})
-    rep.check('AEM-13 第 4 次 request-verification → 429 TOO_MANY_ATTEMPTS',
-              s == 429 and biz_code(r) == 'TOO_MANY_ATTEMPTS', r)
+    rep.check('AEM-13 第 4 次 → 仍 204（静默拦截，防「429 即已注册」枚举 oracle）'
+              '且审计 auth.mail.throttled +1',
+              s == 204 and throttled_count() == t_before + 1, r)
 
     # ---------- 5. OTP 端点可用（全链路属上线验收）----------
     s, r = call(base, 'POST', '/api/collections/admin_accounts/request-otp',
@@ -115,7 +124,8 @@ def run(ctx):
 
     # ---------- 6. 直连改邮箱被 guards 禁止（换邮箱走 requestEmailChange）----------
     _, AT = fx.create_admin_via_impersonate(base, st, org, 'aem_admin_3')
-    s, me = call(base, 'GET', '/api/collections/admin_accounts/records?perPage=1', token=AT)
+    s, me = call(base, 'GET',
+                 "/api/collections/admin_accounts/records?filter=(username='aem_admin_3')", token=AT)
     my_id = (me.get('items') or [{}])[0].get('id')
     s, r = call(base, 'PATCH', '/api/collections/admin_accounts/records/%s' % my_id,
                 {'email': 'aem_admin_3_new@it.cc.local'}, AT)

@@ -213,7 +213,7 @@ chatcircle-web/
 | `POST /api/collections/admin_accounts/request-otp` / `auth-with-otp` | 邮箱验证码登录；OTP 认证成功即已证明邮箱所有权，账号同步置 `verified=true`（若 PB 原生不自动置位，由 hooks 在认证成功钩子里补齐） |
 | `POST /api/collections/admin_accounts/request-password-reset` / `confirm-password-reset` | **仅 `verified=true` 的邮箱放行**；未验证账号请求时静默拦截——返回 204 但不发邮件、不放行，写审计 `auth.password_reset.suppressed`，避免账号枚举 |
 
-- 统一限流约定：request-verification / request-otp / request-password-reset 三类发信/验证码请求按 **per-email 3 次/小时 + per-IP 20 次/小时** 滑动窗口限流（复用 authguard 的限流模式），超限返回 429 `TOO_MANY_ATTEMPTS`。
+- 统一限流约定：request-verification / request-otp / request-password-reset 三类发信/验证码请求按 **per-email 3 次/小时 + per-IP 20 次/小时** 滑动窗口限流（复用 authguard 的限流模式）。**超限一律静默 204 并写审计 `auth.mail.throttled`，不返回 429**——这些钩子仅在邮箱存在时触发，若超限响应 429，探测者可用「是否 429」区分已注册邮箱与不存在邮箱，形成账号枚举 oracle（响应须与正常/不存在完全一致）。
 - 换邮箱走 PB 内置 `requestEmailChange` 流程；直连 update 修改 `email` 由 guards.pb.js 禁止。
 - 发信通道：PocketBase 无托管邮件服务，SMTP 在 PB Settings 手工配置（用户方提供发信邮箱），凭据不入库、不进文档，见「待确认」#18。
 
