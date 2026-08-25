@@ -43,7 +43,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 |---|---|
 | 生成请求 | 正式开发前的文档准备阶段：基于已确认的需求基线与技术决策，为后续实现工程师生成项目规划文档，写清前提、术语、输入输出、约束、步骤与验收方式 |
 | 生成时间 | 2026-08-05 |
-| 最近同步 | 2026-08-24（状态同步模式）：分角色报名问卷（`role_scope`）+ 聆听者培训体系随代码同 PR 回写文档；证据：迁移 `1785889320_cc_role_scope_trainings.js`、`pb_hooks/trainings.pb.js`、前端路由与页面、后端集成测试 416 断言全绿（本次重跑验证） |
+| 最近同步 | 2026-08-25（执行前准备模式）：2026-08 后端改版（管理员邮箱认证 / 内容推文 posts / 公开 Outcome）先更新设计文档、后改代码；本次仅回写五份设计文档为「将要实现」的契约，代码尚未实现；证据：`ChatCircle_后端改版计划.docx`（六条，需求方提供，未入库）、实施计划（步骤 1）；新增待确认 technical-design #18/#19、database-design D-9 |
 | 已检查的项目根目录 | 项目根目录仅含 `docs/`（三份 PRD docx）与 `.DS_Store`；尚无代码、构建配置或 GitHub 仓库（私有仓库 `chatcircle-web` 尚未创建） |
 | 关键证据 | `docs/` 下三份 PRD：`Chat_Circles_活动与问卷平台_PRD_v0.1.docx`、`_v0.2.docx`、`_v0.3.docx`；以 **v0.3（评审修订版，2026-08-05）为需求基线**。2026-08-05 增补：`docs/ChatCircle_Web_UI_Design_Spec_v1.0.docx`（UI 设计规范，仅其纯视觉部分纳入 [ui-design.md](ui-design.md)，业务口径仍以本目录规划文档为准）；`frontend/src/shared/styles/global.css` 与 `shared/ui/` 组件库现状 |
 | 已确认技术决策 | 响应式 Web（React 18 + Vite + TypeScript，手机优先）+ PocketBase（后端/认证/SQLite）+ Docker 部署；完整 V1 范围（M0~M5） |
@@ -55,7 +55,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | [technical-design.md](technical-design.md) | 技术架构与实现指引：技术栈、前后端结构、PocketBase 接入方式、关键实现决策、部署与备份要点、决策记录 |
 | [database-design.md](database-design.md) | 数据模型落地：PocketBase 集合设计、字段与关系、机构隔离规则、状态机与事务约束 |
 | [security-privacy.md](security-privacy.md) | 安全、隐私与审计要求：认证与会话策略、权限边界、审计事件清单、敏感数据处理与隐私表述 |
-| [test-plan.md](test-plan.md) | 测试与 CI 策略：测试分层、AC-01~23 验收映射、越权自动化测试与 CI 流水线 |
+| [test-plan.md](test-plan.md) | 测试与 CI 策略：测试分层、AC-01~26 验收映射（AC-24~26 为 2026-08 后端改版续编）、越权自动化测试与 CI 流水线 |
 | [ui-design.md](ui-design.md) | 前端视觉与交互规范：色彩/字体/间距/动效 token、组件规则、响应式与无障碍基线、文案语气、图表样式；仅含纯前端 UI，业务口径以 PRD 与本目录其他文档为准 |
 
 ## 有意跳过的目录文档
@@ -82,6 +82,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | 报名 ≠ 参加 | 申请、审核通过、签到是三个独立状态；实际参与人数以有效签到记录为准 | PRD §2.3、§7.1 |
 | 分角色报名问卷 | 报名字段带 `role_scope`（both/speaker/listener）；报名校验与表单展示按所选角色过滤适用字段，对不适用字段提交答案报 `field_not_applicable` | 2026-08 扩展（PRD 外），database-design §5.2.7 |
 | 聆听者培训 | 培训与活动解绑、机构级创建；签到资格 = 账号存在 approved 聆听者报名（全平台通用）；任一 valid 出席即账号级「培训通过」标记 | 2026-08 扩展（PRD 外），database-design §5.2.20~5.2.22 |
+| 内容推文 posts | 独立内容模块（与 activities 无关）：标题/摘要/封面图/Markdown 正文/外链，带置顶与显隐开关；仅超管可编辑（机构管理员无入口），公开端仅见 visible；首页成效数据走公开端点 `GET /api/cc/public/outcome` 自动聚合，不挂手填数据 | 2026-08 后端改版（PRD 外），database-design §5.2.24 |
 | 无硬删除 | 业务记录只能归档、禁用、作废或变更状态，产品界面不提供任何永久删除 | PRD §2.3、FR-AUD-001 |
 | 敏感标记驱动导出过滤 | 报名字段与问卷题目带 `is_sensitive` 标记；普通导出按标记排除/掩码，不依赖字段名判断 | PRD §10.2、FR-EXP-002 |
 | 机构逻辑隔离 | 所有机构业务数据带 `organization_id`，服务端强制注入权限条件，不能只依赖前端隐藏 | PRD §9.2、§12.2 |
@@ -148,3 +149,4 @@ docker compose up
 | License | Empact 对许可条款的决定 | 见上文 License 节 |
 | GitHub 私有仓库 `chatcircle-web` | 仓库尚未创建 | M0 工作 |
 | UI 设计稿与规划文档的业务冲突项 | 设计稿中的 Skill 入口、活动列表/推荐、通知中心等不作为实现依据；如需采纳须先回 PRD 评审 | 见 [ui-design.md](ui-design.md)「非目标」 |
+| SMTP 凭据下发与验证/找回邮件模板配置（2026-08 改版） | PB Settings 手工配置的责任人、凭据下发方式、模板文案与前端落地路由对应关系 | 见 [technical-design.md](technical-design.md)「待确认」#18/#19、security-privacy.md §14 |

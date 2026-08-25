@@ -27,7 +27,7 @@
 以下事项在 V1 技术设计中明确不做（依据 PRD §2.2、§16，以及本文档的合并范围约定）：
 
 - 不设计参与者账号找回与密码重置；凭据丢失的官方口径是"用新用户名重新注册"，由此产生的同一自然人多账号不合并（PRD §5.7）。
-- 不设计候补名单、倾诉者/聆听者配对、短信/邮件/微信/推送等任何通知通道。
+- 不设计候补名单、倾诉者/聆听者配对、短信/微信/推送等任何通知通道；**邮件通道仅豁免一个用途**——管理员账号的验证与找回（2026-08 后端改版：验证邮件、OTP 验证码、密码重置邮件，由 PocketBase 内置端点承载，SMTP 手工配置、凭据不入库），不向参与者或机构管理员提供任何业务通知邮件。
 - 不设计统计分析（均值、效应量、p 值、NPS 等）、LLM 编码、自动报告、PDF/PPT 生成；仅以稳定 `question_code`、规范化导出和可扩展看板机制预留后续能力。
 - 不设计机构独立部署、独立数据库、独立域名或子域名；仅在架构上不自堵"host → organization 映射"的后续扩展（PRD §12.2）。
 - 不设计任何业务数据的永久删除路径（无硬删除，PRD FR-AUD-001）。
@@ -144,6 +144,7 @@ chatcircle-web/
 | `/trainings` | 聆听者培训页：流程说明 + 资质标记 + 培训列表 + 我的签到状态 | 参与者会话；培训信息仅 eligible（存在 approved 聆听者报名）下发 |
 | `/training-checkin/:token` | 培训签到二维码的落地页 | 登录 + approved 聆听者报名 + 培训已发布 + 签到开放中 |
 | `/survey/:qrToken` | 问卷填写 / 草稿 / 已提交答案 | 登录 + 报名已通过 + 角色匹配 + 问卷开放中（FR-SUR-006） |
+| `/posts`、`/posts/:postId` | 内容推文公开列表与详情（2026-08 后端改版；前端页面后续实现） | 无；未登录可看，仅 `status=visible` 推文（数据直走 posts 集合 API，rule 天然过滤 hidden） |
 
 机构管理端（`/admin` 前缀，需 `admin_accounts` 会话）：
 
@@ -166,6 +167,7 @@ chatcircle-web/
 | `/super/approvals`、`/super/activities` | 活动发布审批、全部活动监管/下架 |
 | `/super/dashboard`、`/super/exports`、`/super/audit` | 全局看板、全局导出、全局审计 |
 | `/super/system` | 备份状态与失败告警 |
+| `/super/posts` | 内容推文管理：列表/新建/编辑/置顶/显隐（仅超管入口，机构管理员无入口；2026-08 后端改版，前端页面后续实现） |
 
 分区原则：
 
@@ -194,12 +196,26 @@ chatcircle-web/
 - 登录限流：在该端点内按 username + 来源 IP 计数，达到阈值后临时拒绝（FR-AUTH-007）；具体阈值与锁定时长 PRD 未给数值，见「待确认」。
 - 密码只存不可逆哈希；数据库、日志、审计、导出均不得出现明文（FR-AUTH-004）。
 
-**管理员邀请码注册**（FR-ORG-002/003，邀请码状态机见 PRD §4.2，验收 AC-02）：
+**管理员邀请码注册**（FR-ORG-002/003，邀请码状态机见 PRD §4.2，验收 AC-02；邮箱认证为 2026-08 后端改版扩展，验收 AC-24）：
 
 - `admin_invites` 只存 `token_hash`（邀请码明文的哈希），不存明文；`status ∈ {未使用, 已使用, 已撤销, 已过期}`；`expires_at` 默认生成后 7 天，生成时可调整。
-- 自定义端点 `POST /api/cc/auth/admin-register`（输入邀请码明文 + 用户名 + 密码）在**单个事务内**：校验邀请码存在、未使用、未撤销、未过期 → 创建 `admin_accounts` 并绑定 `organization_id` → 将邀请码标记为已使用 → 写审计。并发使用同一邀请码只能成功一次。
+- 自定义端点 `POST /api/cc/auth/admin-register`（输入邀请码明文 + 用户名 + **邮箱** + 密码）在**单个事务内**：校验邀请码存在、未使用、未撤销、未过期 → 校验邮箱格式（trim + 小写归一化，非法返回 `400 INVALID_EMAIL`）并查重（重复返回 `400 EMAIL_TAKEN`，schema 唯一约束兜底） → 创建 `admin_accounts`（写入 email、`verified=false`、`emailVisibility=false`）并绑定 `organization_id` → 将邀请码标记为已使用 → 写审计（metadata 不含邮箱明文）。并发使用同一邀请码只能成功一次。响应形态不变（返回 `{record}`）。
+- **发送验证邮件不在注册事务内做**（外部副作用，避免"已回滚但邮件已发"）：由前端在注册成功后调用 PB 内置 `request-verification` 触发，见下方「管理员邮箱认证」。
 - 管理员用户名是否套用参与者同一套规则，PRD 未明确，见「待确认」。
 - 机构被停用后其管理员不能进入业务后台，历史数据保留（FR-ORG-001）：hooks 与 API rules 校验 `admin_accounts.status` 与所属机构 `status`。
+
+**管理员邮箱认证**（2026-08 后端改版，PRD 外扩展，验收 AC-24）：`admin_accounts` 的 `passwordAuth.identityFields = ['username', 'email']`，并启用 PB 原生 OTP。登录方式三种：用户名+密码、邮箱+密码、邮箱验证码。以下均为 **PocketBase 内置端点**，hooks 不重写认证逻辑，只做限流与找回门控（实现于 `mailguard.pb.js`）：
+
+| 端点 | 使用契约 |
+| --- | --- |
+| `POST /api/collections/admin_accounts/auth-with-password` | identity 支持用户名或邮箱（identityFields 配置） |
+| `POST /api/collections/admin_accounts/request-verification` / `confirm-verification` | 注册后邮箱验证：前端注册成功后调 request-verification 发信，用户点链接/输码经 confirm-verification 完成验证 |
+| `POST /api/collections/admin_accounts/request-otp` / `auth-with-otp` | 邮箱验证码登录；OTP 认证成功即已证明邮箱所有权，账号同步置 `verified=true`（若 PB 原生不自动置位，由 hooks 在认证成功钩子里补齐） |
+| `POST /api/collections/admin_accounts/request-password-reset` / `confirm-password-reset` | **仅 `verified=true` 的邮箱放行**；未验证账号请求时静默拦截——返回 204 但不发邮件、不放行，写审计 `auth.password_reset.suppressed`，避免账号枚举 |
+
+- 统一限流约定：request-verification / request-otp / request-password-reset 三类发信/验证码请求按 **per-email 3 次/小时 + per-IP 20 次/小时** 滑动窗口限流（复用 authguard 的限流模式），超限返回 429 `TOO_MANY_ATTEMPTS`。
+- 换邮箱走 PB 内置 `requestEmailChange` 流程；直连 update 修改 `email` 由 guards.pb.js 禁止。
+- 发信通道：PocketBase 无托管邮件服务，SMTP 在 PB Settings 手工配置（用户方提供发信邮箱），凭据不入库、不进文档，见「待确认」#18。
 
 **超级管理员**（FR-AUTH-009）：
 
@@ -240,6 +256,8 @@ chatcircle-web/
 | 审计日志 | FR-AUD-001~005、§11.3 | `audit_logs` collection + hooks 内统一 `writeAudit()` | API rules 禁止普通管理员创建/修改/删除；机构管理员只读本机构，超级管理员全局；写入范围至少含：敏感导出、补签/撤销签到、答卷作废、活动审批/下架、机构配置变更、报名状态回退、邀请码生成/撤销/使用、备份与恢复；与业务写操作同事务 |
 | 活动发布状态机 | §4.3、FR-ACT-004、AC-04 | activities hook | 草稿→（机构开启审核时：待平台审核→）已发布/已驳回→已关闭/已下架/已归档；批准/驳回/下架仅 superuser；写 `activity_approvals` + 审计；下架后公开入口不可访问、历史保留 |
 | 公开活动可见性与报名口径 | §4.3、FR-ACT-003 | activities hook：`GET /api/cc/public/activities`（活动广场页列表）与 `GET /api/cc/public/activities/:id`（详情） | 仅 `published`/`closed` 公开可见（草稿/待审核/已驳回/已下架/已归档一律不下发，详情按 404 处理）；列表按开始时间倒序；报名开放状态（`open` + 未开放 `reason`：closed/not_started/ended/full）与剩余名额（`capacity_total` − 当前已通过数）口径在列表与详情两端点保持一致 |
+| 内容推文 posts 可见性与校验 | 2026-08 后端改版（PRD 外扩展）、AC-25 | posts 集合 API rules + posts.pb.js | 与 activities 完全无关的独立集合：listRule/viewRule 为 `status = 'visible'` 或超管（匿名与普通用户仅见可见项）；create/update 仅 `_superusers`（机构管理员无入口）；deleteRule 关闭（无硬删除，隐藏即删除）；hooks 校验正文（`body_md`）与外链（`external_url`）至少填一个、外链仅允许 http/https；`status` 首次变为 visible 且 `published_at` 为空时写入当前时间，之后不因隐藏/再可见而改；创建/更新写审计（`post.create` / `post.update`） |
+| 公开 Outcome 指标 | 2026-08 后端改版（PRD 外扩展）、AC-26 | metrics.pb.js：`GET /api/cc/public/outcome` | 公开只读、无需登录、无参数、无手工维护：返回 `{ activity_sessions, service_visits, partner_organizations }` 三个累计值，口径复用 §5.6 指标注册表（`partner_organizations` 为新增口径） |
 | 报名/签到/问卷接口幂等 | §13、AC-20 | 上述各端点 | 依赖唯一约束 + 状态判断：网络重试或重复点击返回既有正式记录，不产生重复 |
 | 无硬删除 | FR-AUD-001、AC-18 | API rules | 全部业务集合关闭 delete 权限；只能归档、停用、作废或状态变更 |
 | 参与者凭据保护 | §3.2 | hooks + 管理端 UI | 机构管理员（含任何角色）无修改参与者用户名/密码的入口；hooks 不开放此类端点 |
@@ -270,6 +288,9 @@ V1 指标注册表初始项（口径原文来自 PRD §7.1）：
 | `unique_participants` | 有效签到中的 `participant_id` 去重；同一自然人多账号不合并 | countDistinct |
 | `survey_submissions` | 有效已提交答卷数；作废不计 | count |
 | `survey_completion_rate` | 有效提交人数 ÷ 符合填写资格人数；资格=当前报名已通过（剔除已取消）且角色符合问卷适用范围；开放时间不影响最终分母 | ratio |
+| `partner_organizations` | 状态=active 的机构数（合作伙伴口径；2026-08 后端改版新增） | count |
+
+公开 Outcome 端点（2026-08 后端改版，PRD 外扩展，验收 AC-26）：`GET /api/cc/public/outcome` 面向首页公开成效区块，无需登录、无参数、无手工维护，返回 `{ activity_sessions, service_visits, partner_organizations }` 三个累计值，口径直接复用上表注册表。注意：`activity_sessions` 此处含 archived，与公开活动列表/详情 viewRule 的可见范围（仅 published/closed）是两回事——Outcome 是累计宣传口径，不随活动下架/归档而扣减。服务端三次 count 查询，不加缓存。
 
 ### 5.7 环境划分与配置管理
 
@@ -359,3 +380,5 @@ PRD 要求（§12.3、§12.4）到落地方式的映射：
 | 15 | 导出时间戳与界面显示的时区 | PRD §10.3 要求 ISO 8601 并明确时区，未指定具体时区 | 导出格式与 `data_dictionary` 说明 |
 | 16 | GitHub 仓库 `chatcircle-web` 的创建与 CI/CD 流水线 | 已确认决策仅"GitHub 私有仓库（尚未创建）"；PRD 未提及 CI/CD | M0 起步动作；越权自动化测试（AC-03）的运行位置依赖此决策 |
 | 17 | 是否引入从 schema 生成前端共享类型的工具 | 无证据 | `src/shared/` 类型与 `pb_migrations` 的同步方式；未确认前手工同步 |
+| 18 | SMTP 发信邮箱凭据的下发与配置责任（2026-08 后端改版） | 已确认走 PB Settings 手工配置、凭据不入库，用户方已有可用发信邮箱；但由谁在生产控制台配置、凭据如何安全下发未定 | 阻塞 AC-24 邮件真实投递的上线验收；不阻塞能力层开发（测试环境不配 SMTP，端点可用但仅记录不发信） |
+| 19 | 验证/找回邮件模板与前端路由的对应配置（2026-08 后端改版） | PB 邮件模板中的链接须指向前端落地页路由（确认验证/重置密码页），而前端页面本次不交付；模板文案、APP_URL 与前端路由的对应关系未定 | 阻塞邮件链路端到端可用；模板随 SMTP 一并在 PB Settings 配置，前端页面落地后回填本文 |
