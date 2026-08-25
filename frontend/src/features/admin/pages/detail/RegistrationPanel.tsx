@@ -75,20 +75,32 @@ export function RegistrationPanel({
   const [formErrors, setFormErrors] = useState<{ reason?: string; activity_role?: string }>({});
   const [submitting, setSubmitting] = useState(false);
   const [answersFor, setAnswersFor] = useState<RegistrationRecord | null>(null);
-  // 列表请求序号：审核提交后旧页签的 load 与新页签的 load 并发，慢的旧响应不得覆盖新结果。
+  // 列表请求守卫：审核提交后旧页签的 load 与新页签的 load 可能并发。
+  // 序号挡「先发出、晚到达」的慢响应；但提交途中关闭弹窗（Escape/遮罩/×）再切页签时，
+  // submitTransition 续运会调用旧页签的 load 闭包且更晚发出，序号反而认它为最新，
+  // 故再核对请求口径（活动 + 状态）与当前选择一致才允许落地。
   const loadSeq = useRef(0);
+  const currentQuery = useRef({ activityId: activity.id, statusTab });
+  useEffect(() => {
+    currentQuery.current = { activityId: activity.id, statusTab };
+  }, [activity.id, statusTab]);
 
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
+    const query = { activityId: activity.id, statusTab };
+    const isCurrent = () =>
+      seq === loadSeq.current &&
+      query.activityId === currentQuery.current.activityId &&
+      query.statusTab === currentQuery.current.statusTab;
     setError('');
     try {
       const list = await adminCollections().registrations.getFullList({
         filter: `activity_id = "${activity.id}" && status = "${statusTab}"`,
         sort: '-submitted_at',
       });
-      if (seq === loadSeq.current) setItems(list);
+      if (isCurrent()) setItems(list);
     } catch (err) {
-      if (seq !== loadSeq.current) return;
+      if (!isCurrent()) return;
       setError(normalizeApiError(err).message);
       setItems([]);
     }
