@@ -40,23 +40,17 @@ describe('HomePage 首页', () => {
     expect(mock.calls.some((c) => c.url.includes('/api/cc/public/activities'))).toBe(false);
   });
 
-  it('展示项目介绍区块与导航：介绍区块为页内锚点，活动/问卷指向独立页', () => {
+  it('展示项目介绍区块与导航：介绍区块为页内锚点', () => {
     stubApi({});
     renderHome();
-    // 吸顶导航：介绍区块锚点 + 活动/问卷独立页链接
+    // 吸顶导航：介绍区块锚点
     expect(screen.getByRole('link', { name: '挑战' })).toHaveAttribute('href', '#challenge');
     expect(screen.getByRole('link', { name: '计划' })).toHaveAttribute('href', '#programme');
     expect(screen.getByRole('link', { name: '影响' })).toHaveAttribute('href', '#impact');
     expect(screen.getByRole('link', { name: '成效评估' })).toHaveAttribute('href', '#measurement');
     expect(screen.getByRole('link', { name: '合作伙伴' })).toHaveAttribute('href', '#partners');
-    expect(screen.getByRole('link', { name: '活动' })).toHaveAttribute(
-      'href',
-      '/activities#activities',
-    );
-    expect(screen.getByRole('link', { name: '问卷' })).toHaveAttribute(
-      'href',
-      '/activities#surveys',
-    );
+    expect(screen.queryByRole('link', { name: '活动' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '问卷' })).not.toBeInTheDocument();
     // 介绍区块标题（内容移植自计划书）
     expect(
       screen.getByRole('heading', { name: '正处于过渡期的青年，比任何时候都更感压力与孤独' }),

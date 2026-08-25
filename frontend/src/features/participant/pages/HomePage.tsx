@@ -27,15 +27,13 @@ export function HomePage() {
         </Link>
       </section>
 
-      {/* 页内锚点导航：项目介绍区块 + 活动/问卷独立页（吸顶，样式见 participant.css .ccp-nav） */}
+      {/* 页内锚点导航：项目介绍区块（吸顶，样式见 participant.css .ccp-nav） */}
       <nav className="ccp-nav" aria-label="页面导航">
         <a href="#challenge">挑战</a>
         <a href="#programme">计划</a>
         <a href="#impact">影响</a>
         <a href="#measurement">成效评估</a>
         <a href="#partners">合作伙伴</a>
-        <Link to="/activities#activities">活动</Link>
-        <Link to="/activities#surveys">问卷</Link>
       </nav>
 
       <ProjectIntro />
