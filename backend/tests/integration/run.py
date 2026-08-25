@@ -111,6 +111,9 @@ def main():
     import suite_surveys
     import suite_exports
     import suite_auth
+    import suite_admin_email
+    import suite_posts
+    import suite_outcome
     import suite_backup
     import suite_nodelete
     import suite_templates
@@ -118,7 +121,8 @@ def main():
     import suite_reports
 
     for mod in (suite_flow, suite_acl, suite_capacity, suite_transitions, suite_checkins,
-                suite_trainings, suite_surveys, suite_exports, suite_auth, suite_backup,
+                suite_trainings, suite_surveys, suite_exports, suite_auth, suite_admin_email,
+                suite_posts, suite_outcome, suite_backup,
                 suite_nodelete, suite_templates, suite_hardening, suite_reports):
         mod.run(ctx)
 

@@ -34,7 +34,7 @@ API，**只断言 API 行为与数据终态，不测内部函数**。输出逐�
 | 套件 | 覆盖 | 断言数 |
 | --- | --- | --- |
 | `suite_flow.py` | 主链路全链路（自 /tmp/cc_e2e.py 联调沉淀）：邀请码→建活动→报名→审核→签到（token 二维码）→问卷→看板（含时间筛选重叠口径回归）→导出→备份端点下线形态→未认证形态；分角色报名问卷 role_scope（角色专属字段校验/field_not_applicable/下发）、me/overview 聆听者资格标记 | 58 |
-| `suite_acl.py` | **越权矩阵 AC-03**（test-plan §4）：机构A管理员→机构B 活动/报名/答案/签到/场次/问卷/题目/答卷/答案/导出/审计/机构/账号/培训/培训签到/培训场次的列表+详情，全部自定义端点，导出 scope 与看板参数伪造，横向：管理员→超管端点、参与者→管理端点与他人记录、未认证（含原生 view 收敛 404） | 87 |
+| `suite_acl.py` | **越权矩阵 AC-03**（test-plan §4）：机构A管理员→机构B 活动/报名/答案/签到/场次/问卷/题目/答卷/答案/导出/审计/机构/账号/培训/培训签到/培训场次的列表+详情，全部自定义端点，导出 scope 与看板参数伪造，横向：管理员→超管端点、参与者→管理端点与他人记录、未认证（含原生 view 收敛 404）、posts 推文越权写与 hidden 可见性（2026-08 改版） | 93 |
 | `suite_capacity.py` | 名额事务硬校验与并发审核 AC-08：角色/总名额满拒过、新报名口径、偶数总名额与对半派生、名额修改下限、审核改角色撞满、双管理员并发审核不超额 | 17 |
 | `suite_transitions.py` | 状态迁移矩阵 AC-07：5 种合法迁移 + 7 种非法组合枚举、原因必填、审计留痕（操作者/前后状态/原因）、回退重校验名额、同态幂等 | 19 |
 | `suite_checkins.py` | 签到 AC-09/10/20：前置校验分支、重复扫码幂等、并发双扫一人一签、补签/撤销原因必填+审计、撤销保留记录、口径同步、补签候选人名单 | 25 |
@@ -42,19 +42,22 @@ API，**只断言 API 行为与数据终态，不测内部函数**。输出逐�
 | `suite_surveys.py` | 问卷四条件资格 AC-11 与答卷生命周期 AC-12/20：资格分因、草稿预填、提交幂等且内容不被覆盖、提交锁定、作废审计/统计排除/记录保留/不可重填 | 21 |
 | `suite_exports.py` | 导出 AC-16/17：13 个 CSV 清单、BOM、manifest 行数一致、is_sensitive 过滤（非字段名）、作废排除、无用户名、二次确认、机构开关、超管豁免、审计 | 22 |
 | `suite_auth.py` | 登录限流 AC-21 与账号规则 AC-06/02：用户名规则、大小写不敏感唯一、错密码不建重号、5 次失败触发 429 且限流期正确密码亦拒、邀请码一次性/撤销/过期/并发 | 19 |
+| `suite_admin_email.py` | 管理员邮箱认证 AC-24（2026-08 改版）：注册必填邮箱（格式/查重/小写归一/verified=false）、邮箱+密码登录、找回门控（未验证静默 204 + suppressed 审计、已验证放行）、request-verification 限流 429、request-otp 可用（OTP 全链路属上线验收）、guards 禁直连改邮箱 | 15 |
+| `suite_posts.py` | 内容推文 posts AC-25（2026-08 改版）：仅超管写（管理员/参与者/匿名 create/update/delete 全拒）、正文或外链至少其一与外链协议校验、published_at 只写一次、status 缺省 hidden、可见性矩阵、置顶排序、post.create/update 审计、公开读字段收敛 | 20 |
+| `suite_outcome.py` | 公开 Outcome AC-26（2026-08 改版）：匿名 200 与响应形态；全平台累计口径的增量断言（机构 +1/停用回落、草稿不计、发布/关闭/归档计入、下架回落、有效签到 +1） | 10 |
 | `suite_backup.py` | 备份告警 AC-23：backup/run 410 下线形态与不写审计、backup-status 无记录 alert=true、backup.* 审计聚合驱动告警/解除（超管直插模拟上报）、接口访问控制 | 10 |
-| `suite_nodelete.py` | 无硬删除 AC-18：22 个业务集合 delete 对管理员/参与者全拒、审计无创建/修改途径 | 27 |
+| `suite_nodelete.py` | 无硬删除 AC-18：23 个业务集合 delete 对管理员/参与者全拒、审计无创建/修改途径 | 28 |
 | `suite_templates.py` | 超管模板管理 FR-SUR-001/011、PRD §11.3：新建模板+首版（事务回补循环引用）、发布新版本（version 递增、current_version_id 移动）、schema 校验与规范化、停用拒发、template.create/publish 审计、访问控制 | 20 |
 | `suite_hardening.py` | 安全加固回归（2026-08）：直连写守卫矩阵（registrations/answers/sessions/activities/field_defs 非超管 403、超管放行）、账号停用不可自助复活、内置认证限流（5 连败→429）、CSV 公式注入中和与 export.download 审计、答案类型校验 400、QR 面（原生 view 404/公开端点不泄露 token/错误 token 404）、活动状态机补强（ACTIVITY_UNAVAILABLE/NOT_OPEN） | 27 |
 | `suite_reports.py` | reports 报告集合（agent 产出物入库）：超管 multipart 创建带文件报告与字段回读、protected 文件无 token 访问被拒、机构管理员/参与者/匿名 create 与 list/view 全拒（rules 全 null）、report.upload 创建审计同事务写入 | 15 |
 
 ⚠️ **内置认证 per-IP 限流预算**：authguard.pb.js 对全部 `*/auth-with-password` 按来源 IP
-限 20 次/10 分钟（含成功尝试，集成测试同积于 127.0.0.1）。一轮全量运行共产生 21 次
-内置认证尝试：15 次登录（super_login 1 + 各套件管理员登录 13 + suite_hardening fixture 1）
-+ suite_hardening 限流用例 6 次——第 21 次恰为限流断言预期的 429（per-IP 与 per-身份
-双重命中），**预算余量为 0**：新增套件不得再增加内置 auth-with-password 调用——
-需要管理员登录态时用 `cc_fixture.create_admin_via_impersonate`（超管直建 + impersonate，
-suite_trainings 即此模式），参与者一律走自定义端点 `/api/cc/auth/participant`；
+限 25 次/10 分钟（含成功尝试，集成测试同积于 127.0.0.1；2026-08 改版由 20 上调）。
+一轮全量运行共产生 22 次内置认证尝试：16 次登录（super_login 1 + 各套件管理员登录 13
++ suite_hardening fixture 1 + suite_admin_email 邮箱登录 1）+ suite_hardening 限流用例
+6 次，**预算余量为 3**：新增套件的内置 auth-with-password 调用须控制在此预算内——
+需要管理员登录态时优先用 `cc_fixture.create_admin_via_impersonate`（超管直建 +
+impersonate，suite_trainings 即此模式），参与者一律走自定义端点 `/api/cc/auth/participant`；
 且 suite_hardening 必须排最后执行，详见其头注释。
 
 注：模板与版本集合的循环引用已可由 `POST /api/cc/super/templates` 事务端点创建
