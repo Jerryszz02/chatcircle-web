@@ -300,3 +300,30 @@ def run(ctx):
     rep.check('ACL-85 参与者读培训补签候选人 → 401/403', s in (401, 403), r)
     s, r = call(base, 'POST', '/api/cc/training-checkin/self', {'token': 'x'})
     rep.check('ACL-86 未认证培训自助签到 → 401', s == 401, r)
+
+    # ---------- 9. 内容推文 posts（2026-08 改版：仅超管写，公开仅见 visible，无机构维度） ----------
+    s, r = call(base, 'POST', '/api/collections/posts/records',
+                {'title': 'ACL可见推文', 'body_md': 'x', 'status': 'visible'}, st)
+    assert s == 200, '超管建可见推文失败：%s' % r
+    post_visible = r['id']
+    s, r = call(base, 'POST', '/api/collections/posts/records',
+                {'title': 'ACL隐藏推文', 'body_md': 'x', 'status': 'hidden'}, st)
+    assert s == 200, '超管建隐藏推文失败：%s' % r
+    post_hidden = r['id']
+    s, r = call(base, 'POST', '/api/collections/posts/records',
+                {'title': '越权推文', 'body_md': 'x'}, AT_A)
+    rep.check('ACL-87 机构管理员建推文 → 400/403/404', s in (400, 403, 404), r)
+    s, r = call(base, 'PATCH', '/api/collections/posts/records/%s' % post_visible,
+                {'title': '篡改'}, AT_A)
+    rep.check('ACL-88 机构管理员改推文 → 400/403/404', s in (400, 403, 404), r)
+    s, r = call(base, 'DELETE', '/api/collections/posts/records/%s' % post_visible, token=AT_A)
+    rep.check('ACL-89 机构管理员删推文 → 400/403/404', s in (400, 403, 404), r)
+    s, r = call(base, 'POST', '/api/collections/posts/records',
+                {'title': '越权推文', 'body_md': 'x'}, PT_A)
+    rep.check('ACL-90 参与者建推文 → 400/403/404', s in (400, 403, 404), r)
+    s, r = call(base, 'GET', '/api/collections/posts/records?perPage=100')
+    ids = _ids(r)
+    rep.check('ACL-91 未认证 list 推文仅见 visible（hidden 不下发）',
+              s == 200 and post_visible in ids and post_hidden not in ids, r)
+    s, r = call(base, 'GET', '/api/collections/posts/records/%s' % post_hidden)
+    rep.check('ACL-92 未认证看隐藏推文 → 404', s == 404, r)
