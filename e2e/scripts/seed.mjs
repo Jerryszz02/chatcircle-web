@@ -12,6 +12,7 @@ export const FIXTURE = {
   orgName: 'E2E 测试机构',
   adminUsername: 'e2e_admin',
   adminPassword: 'e2e_admin_pass_123',
+  adminEmail: 'e2e_admin@e2e.cc.local', // 2026-08 改版：管理员注册必填邮箱（AC-24）
   participantUsername: 'e2e_user1',
   participantPassword: 'e2e_user_pass_1',
   activityTitle: 'E2E 八月倾诉茶话会',
@@ -126,7 +127,8 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
   const inv = await call('POST', `${pbUrl}/api/cc/super/invites`, { organization_id: org.id }, ST);
   const inviteToken = inv.invite.token;
   await call('POST', `${pbUrl}/api/cc/auth/admin-register`, {
-    invite_code: inviteToken, username: FIXTURE.adminUsername, password: FIXTURE.adminPassword,
+    invite_code: inviteToken, username: FIXTURE.adminUsername,
+    email: FIXTURE.adminEmail, password: FIXTURE.adminPassword,
   });
   const adminAuth = await call('POST', `${pbUrl}/api/collections/admin_accounts/auth-with-password`, {
     identity: FIXTURE.adminUsername, password: FIXTURE.adminPassword,
