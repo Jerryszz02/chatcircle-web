@@ -41,6 +41,10 @@ migrate((app) => {
       { type: 'select', name: 'status', required: true, maxSelect: 1, values: ['hidden', 'visible'] },
       // 首次置 visible 时由 hooks 写入当前时间，之后不因隐藏/再可见而改
       { type: 'date', name: 'published_at', required: false },
+      // 归因字段：服务端钩子强制填充（客户端传入无效），供审计 actor（同 reports.created_by 约定）；
+      // hidden=true：仅超管可见，不对公开/普通用户下发（推文为公开读集合，防归因 id 外露）
+      { type: 'text', name: 'created_by', required: false, hidden: true },
+      { type: 'text', name: 'updated_by', required: false, hidden: true },
       // 系统时间字段：PocketBase 0.28 不再自动附加 created/updated，需显式声明（database-design §5.1）
       { type: 'autodate', name: 'created', onCreate: true, onUpdate: false },
       { type: 'autodate', name: 'updated', onCreate: true, onUpdate: true },

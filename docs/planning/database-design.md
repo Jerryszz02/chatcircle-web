@@ -428,6 +428,7 @@
 | is_pinned | bool | 否 | 复合索引 (is_pinned, published_at) | 置顶开关（bool 一律 required=false，同现有迁移约定） |
 | status | select(hidden, visible) | 是 | 索引；默认 hidden | 可见性开关；隐藏即删除（无硬删除） |
 | published_at | date | 否 | 复合索引 (is_pinned, published_at) | 首次置 visible 时由 hook 写入当前时间，之后不因隐藏/再可见而改 |
+| created_by / updated_by | text | 否 | hidden=true（仅超管可见） | 归因字段：服务端钩子强制填充（客户端传入无效），供审计 actor（同 reports.created_by 约定）；创建/更新审计与推文保存在同一事务写入（同 reports.pb.js 模式） |
 
 - **约束：正文（`body_md`）与外链（`external_url`）至少填一个**，全空由 posts.pb.js 校验拒绝（400）。
 - API Rules：listRule / viewRule = `status = 'visible' || @request.auth.collectionName = '_superusers'`（匿名/参与者/机构管理员仅见 visible；超管全见）；createRule / updateRule 仅 `_superusers`；deleteRule 关闭（隐藏即删除，见 §5.7）。
