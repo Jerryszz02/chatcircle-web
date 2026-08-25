@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ActivityRecord,
   ActivityRole,
@@ -75,16 +75,20 @@ export function RegistrationPanel({
   const [formErrors, setFormErrors] = useState<{ reason?: string; activity_role?: string }>({});
   const [submitting, setSubmitting] = useState(false);
   const [answersFor, setAnswersFor] = useState<RegistrationRecord | null>(null);
+  // 列表请求序号：审核提交后旧页签的 load 与新页签的 load 并发，慢的旧响应不得覆盖新结果。
+  const loadSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setError('');
     try {
       const list = await adminCollections().registrations.getFullList({
         filter: `activity_id = "${activity.id}" && status = "${statusTab}"`,
         sort: '-submitted_at',
       });
-      setItems(list);
+      if (seq === loadSeq.current) setItems(list);
     } catch (err) {
+      if (seq !== loadSeq.current) return;
       setError(normalizeApiError(err).message);
       setItems([]);
     }
