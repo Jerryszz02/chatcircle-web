@@ -240,8 +240,3 @@ export async function fetchBackupStatus(): Promise<BackupStatus> {
   const raw = await apiGet<unknown>(superClient(), '/api/cc/super/backup-status');
   return normalizeBackupStatus(raw);
 }
-
-/** 手动触发一次备份（结果写审计；失败时 backup-status 告警）。 */
-export function runBackup(): Promise<unknown> {
-  return apiPost(superClient(), '/api/cc/super/backup/run', {});
-}
