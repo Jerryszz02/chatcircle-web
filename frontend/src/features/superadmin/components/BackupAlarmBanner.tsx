@@ -7,8 +7,8 @@ import { formatDateTime } from '../lib/format';
  */
 export function BackupAlarmBanner({ status }: { status: BackupStatus }) {
   if (!status.alarm) return null;
-  // 区分「尚无备份记录」与「最近一次备份失败」：二者告警等级与处置动作不同，
-  // 混用同一条「失败」文案会误导值班方向（2026-08 备份审计链路未接通期间常亮的就是前者）
+  // 区分「尚无备份记录」与「备份失败/中断」：前者多为备份链路未接通或首次部署，
+  // 处置动作不同，不能统一显示「备份失败」误导值班方向
   if (!status.lastBackup) {
     return (
       <div className="sa-banner sa-banner-danger" role="alert">
@@ -18,10 +18,14 @@ export function BackupAlarmBanner({ status }: { status: BackupStatus }) {
   }
   const at = status.lastBackup.at;
   const message = status.lastBackup.message;
+  const title = status.stale
+    ? '最近一次成功备份已超过 36 小时，自动备份疑似中断'
+    : '最近一次备份失败';
   return (
     <div className="sa-banner sa-banner-danger" role="alert">
-      最近一次备份失败{at ? `（${formatDateTime(at)}）` : ''}
-      {message ? `：${message}` : '。'}请立即检查备份任务与存储空间；每次备份结果已写入审计日志。
+      {title}
+      {at ? `（${formatDateTime(at)}）` : ''}
+      {message ? `：${message}` : '。'}请立即检查备份任务与存储空间。
     </div>
   );
 }
