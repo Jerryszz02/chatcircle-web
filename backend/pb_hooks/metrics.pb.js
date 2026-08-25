@@ -342,15 +342,16 @@ routerAdd('GET', '/api/cc/metrics/{metricKey}', (e) => {
 //   activity_sessions     已发布/已关闭/已归档活动数（含 archived，见文件头口径说明）
 //   service_visits        有效签到记录数（服务人次；checkins.status='valid'）
 //   partner_organizations 状态 active 的机构数
-// 服务端三次 count 查询，不加缓存（首页量级下足够）。
+// 三次 COUNT 聚合（$app.countRecords 走 COUNT(*)，不取记录体；累计指标不能用
+// 定长 findRecordsByFilter——超上限会静默封顶），不加缓存（首页量级下足够）。
 // ---------------------------------------------------------------------------
 routerAdd('GET', '/api/cc/public/outcome', (e) => {
   try {
-  const ccCount = (app, collection, filter, params) => app.findRecordsByFilter(collection, filter, '', 5000, 0, params || {}).length;
   return e.json(200, {
-    activity_sessions: ccCount($app, 'activities', "status = 'published' || status = 'closed' || status = 'archived'"),
-    service_visits: ccCount($app, 'checkins', "status = 'valid'"),
-    partner_organizations: ccCount($app, 'organizations', "status = 'active'"),
+    activity_sessions: $app.countRecords('activities',
+      $dbx.in('status', 'published', 'closed', 'archived')),
+    service_visits: $app.countRecords('checkins', $dbx.exp("status = {:s}", { s: 'valid' })),
+    partner_organizations: $app.countRecords('organizations', $dbx.exp("status = {:s}", { s: 'active' })),
   });
   } catch (err) {
     // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
