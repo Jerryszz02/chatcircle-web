@@ -19,7 +19,7 @@
 // - training_checkin_sessions / training_attendances：禁直连 create/update（走培训签到端点）
 // - registration_field_defs：更新禁改 organization_id / field_code
 // - participant_accounts：更新禁改 status
-// - admin_accounts：更新禁改 status / organization_id
+// - admin_accounts：更新禁改 status / organization_id / email（换邮箱走 PB 内置 requestEmailChange 流程）
 //
 // 说明：onRecord*Request 仅在 HTTP 直连请求时触发，hooks 内部 app.save 不触发本守卫；
 // PB 内置 auth-with-password / auth-refresh 不产生 update 请求（0.28.4 实测），无需特殊放行。
@@ -204,6 +204,10 @@ onRecordUpdateRequest((e) => {
     }
     if (original.get('organization_id') !== e.record.get('organization_id')) {
       throw new ForbiddenError('管理员所属机构（organization_id）不可变更');
+    }
+    // 换邮箱须走 PB 内置 requestEmailChange 流程（含新邮箱确认），禁直连改（2026-08 改版）
+    if (original.get('email') !== e.record.get('email')) {
+      throw new ForbiddenError('邮箱（email）不可经直连 API 修改，请使用邮箱变更流程');
     }
   }
   e.next();

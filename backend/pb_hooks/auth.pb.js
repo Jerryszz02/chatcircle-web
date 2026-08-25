@@ -8,9 +8,12 @@
 //     同 IP 跨用户名失败累计限流（防密码喷洒，30 次 / 10 分钟）；
 //     同 IP 新建账号限流（防批量注册，10 个 / 小时，本机直连豁免）；
 //     密码格式校验前置到账号 lookup 之前（消除账号枚举 oracle）。
-// - POST /api/cc/auth/admin-register {invite_code, username, password}
-//     事务内消费一次性邀请码创建管理员（FR-ORG-002/003、AC-02）：
-//     校验未使用/未撤销/未过期 → 创建 admin_accounts 绑机构 → 置 used → 写审计。
+// - POST /api/cc/auth/admin-register {invite_code, username, email, password}
+//     事务内消费一次性邀请码创建管理员（FR-ORG-002/003、AC-02；邮箱为 2026-08 改版新增，AC-24）：
+//     校验未使用/未撤销/未过期 → 邮箱格式校验与查重 → 创建 admin_accounts 绑机构
+//     （verified=false、emailVisibility=false）→ 置 used → 写审计（metadata 不含邮箱明文）。
+//     发送验证邮件不在本端点做（外部副作用不入事务）：由前端在注册成功后调用
+//     PB 内置 POST /api/collections/admin_accounts/request-verification 触发（mailguard.pb.js 限流）。
 // 邀请码哈希算法：SHA-256 hex（生成端 POST /api/cc/super/invites 必须使用同一算法）。
 // ⚠️ 本文件为「handler 自包含」模式（PocketBase 0.28.4 实测约束）：
 // JSVM 各 hooks 文件顶层声明在请求处理时不可见（无跨文件全局共享、无 ES module），
@@ -150,8 +153,9 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/cc/auth/admin-register — 一次性邀请码注册管理员（FR-ORG-002/003、AC-02）
-// 单事务：校验邀请码 → 创建 admin_accounts → 邀请码置 used → 写审计。
+// POST /api/cc/auth/admin-register — 一次性邀请码注册管理员（FR-ORG-002/003、AC-02；
+// 邮箱必填为 2026-08 改版新增，AC-24）
+// 单事务：校验邀请码 → 邮箱格式校验与查重 → 创建 admin_accounts → 邀请码置 used → 写审计。
 // 并发使用同一邀请码只能成功一次（事务串行化 + 状态重读）。
 // ---------------------------------------------------------------------------
 routerAdd('POST', '/api/cc/auth/admin-register', (e) => {
@@ -185,6 +189,8 @@ routerAdd('POST', '/api/cc/auth/admin-register', (e) => {
     return record;
   };
   const CC_USERNAME_RE = /^[a-z0-9_]{4,20}$/;
+  // 邮箱格式校验（简版；投递可达性由验证邮件闭环，AC-24）
+  const CC_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const CC_PASSWORD_MIN = 8;
   const CC_PASSWORD_MAX = 71;
 
@@ -198,6 +204,11 @@ routerAdd('POST', '/api/cc/auth/admin-register', (e) => {
   const username = String(body.username == null ? '' : body.username).trim().toLowerCase();
   if (!CC_USERNAME_RE.test(username)) {
     ccError(400, 'INVALID_USERNAME', '用户名须为 4–20 位字母、数字或下划线');
+  }
+  // 邮箱必填（2026-08 改版）：trim + 小写归一化（大小写不敏感唯一，PB email 唯一约束兜底）
+  const email = String(body.email == null ? '' : body.email).trim().toLowerCase();
+  if (email === '' || email.length > 254 || !CC_EMAIL_RE.test(email)) {
+    ccError(400, 'INVALID_EMAIL', '邮箱格式不正确');
   }
   const password = body.password;
   if (typeof password !== 'string' || password.length < CC_PASSWORD_MIN || password.length > CC_PASSWORD_MAX) {
@@ -237,9 +248,16 @@ routerAdd('POST', '/api/cc/auth/admin-register', (e) => {
     if (ccOne(txApp, 'admin_accounts', 'username = {:u}', { u: username })) {
       ccError(400, 'USERNAME_TAKEN', '用户名已被使用');
     }
+    // 邮箱占用预检（存储统一小写；唯一约束由 PB auth 集合 email 字段兜底）
+    if (ccOne(txApp, 'admin_accounts', 'email = {:m}', { m: email })) {
+      ccError(400, 'EMAIL_TAKEN', '邮箱已被使用');
+    }
     const collection = txApp.findCollectionByNameOrId('admin_accounts');
     admin = new Record(collection);
     admin.set('username', username);
+    admin.set('email', email);
+    admin.set('emailVisibility', false);
+    admin.set('verified', false); // 注册后须经 PB 内置验证邮件完成验证（AC-24）
     admin.set('password', password);
     admin.set('organization_id', orgId);
     admin.set('status', 'active');
@@ -248,7 +266,8 @@ routerAdd('POST', '/api/cc/auth/admin-register', (e) => {
       txApp.save(admin);
     } catch (err) {
       if (ccUniqueErr(err)) {
-        ccError(400, 'USERNAME_TAKEN', '用户名已被使用');
+        // 唯一冲突兜底：用户名或邮箱命中其一
+        ccError(400, 'USERNAME_TAKEN', '用户名或邮箱已被使用');
       }
       throw err;
     }

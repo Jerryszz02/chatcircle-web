@@ -20,7 +20,8 @@
 //   退化为全平台共享桶。
 //
 // 规则（窗口与 auth.pb.js 参与者端点对齐）：
-// - per-IP 频率限制：10 分钟滑窗内 20 次认证尝试（含成功），超限 429 TOO_MANY_ATTEMPTS；
+// - per-IP 频率限制：10 分钟滑窗内 25 次认证尝试（含成功），超限 429 TOO_MANY_ATTEMPTS
+//   （2026-08 改版由 20 上调：管理员邮箱+密码登录复用本端点，集成测试预算随之上调）；
 // - per-身份+IP 失败限流：10 分钟滑窗内 5 次失败，超限 429 TOO_MANY_ATTEMPTS
 //   （同 AC-21「连续失败」语义），认证成功清除该身份的失败计数。
 // 状态存 $app.store()（Go 侧共享 KV），键前缀 cc_rl|；
@@ -43,8 +44,8 @@ onRecordAuthWithPasswordRequest((e) => {
     $app.store().set(k, kept);
   };
   const resetRateLimit = (key) => { $app.store().remove(ccRlKey(key)); };
-  // 限流常量：per-IP 10 分钟 20 次尝试（防暴破兜底）；per-身份+IP 10 分钟 5 次失败（对齐 AC-21）
-  const CC_AUTHPW_IP_MAX = 20;
+  // 限流常量：per-IP 10 分钟 25 次尝试（防暴破兜底）；per-身份+IP 10 分钟 5 次失败（对齐 AC-21）
+  const CC_AUTHPW_IP_MAX = 25;
   const CC_AUTHPW_FAIL_MAX = 5;
   const CC_AUTHPW_WINDOW_SEC = 600;
   const ccTooMany = () => e.json(429, { code: 429, message: '尝试次数过多，请稍后再试', data: { code: 'TOO_MANY_ATTEMPTS' } });
