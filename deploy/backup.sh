@@ -42,6 +42,10 @@ MARKER="$DEST/last_backup.json"
 STARTED=$(date +%s)
 # 结果标记是否已写：fail() 写过后 trap 兜底不再覆盖
 MARKER_WRITTEN=0
+# 本次调用是否已在服务端建好备份副本（POST /api/backups 成功后置 1）：
+# 并发/同秒重跑会产生同名备份，失败清理必须只删本次调用自己创建的副本，
+# 否则会删掉另一调用刚建好的 ZIP，导致其下载失败、两边都没有备份
+SERVER_COPY_CREATED=0
 # 超管登录请求体临时文件路径（--post-file 用），trap 兜底清理
 AUTH_BODY=""
 # 超管 token（审计写入用）；登录成功前为空，fail() 据此判断是否可写审计
@@ -85,8 +89,21 @@ record_audit() {
         "$PB_URL/api/collections/audit_logs/records" >/dev/null
 }
 
+# 删除服务端 pb_data/backups 副本（pb_data 卷不积累每日归档，备份卷才是归档归属；
+# PocketBase 会为每个备份生成同名 .attrs 元数据边车文件，一并清理）。
+# 成功/失败路径都要调用：备份在「服务端已建副本、尚未下载」阶段失败时（如取文件
+# token 失败）也会残留副本，反复失败会在 pb_data 卷累积，故统一收进 fail()。
+# 仅当本次调用实际创建了服务端副本（SERVER_COPY_CREATED=1）才删除：
+# 同名并发场景下不清理他人副本（见 SERVER_COPY_CREATED 注释）。
+cleanup_server_copy() {
+    [ "$SERVER_COPY_CREATED" -eq 1 ] || return 0
+    rm -f "$PBDATA/backups/$NAME" "$PBDATA/backups/$NAME.attrs" \
+        || echo "[backup] warn: 未能删除服务端副本 $PBDATA/backups/$NAME" >&2
+}
+
 fail() {
     echo "[backup] FAILED: $1" >&2
+    cleanup_server_copy
     write_marker failure "" 0 "$1"
     record_audit failure "" 0 "$1" || echo "[backup] warn: 备份失败审计写入失败" >&2
     exit 1
@@ -143,6 +160,7 @@ wget -qO- \
     --header "Authorization: $TOKEN" \
     --header 'Content-Type: application/json' \
     "$PB_URL/api/backups" >/dev/null || fail "POST /api/backups 失败"
+SERVER_COPY_CREATED=1
 
 # 4. 下载到 backups 卷（与 pb_data 卷分离，异地同步目标待确认，见 §5.8）。
 #    注意（0.28.4 实测）：备份下载走受保护文件模式，超管 token 直接 GET 返回 403，
@@ -153,17 +171,8 @@ FILE_TOKEN=$(wget -qO- \
     "$PB_URL/api/files/token" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 [ -n "$FILE_TOKEN" ] || fail "获取文件下载 token 失败"
 
-# 删除服务端 pb_data/backups 副本（pb_data 卷不积累每日归档，备份卷才是归档归属；
-# PocketBase 会为每个备份生成同名 .attrs 元数据边车文件，一并清理）。
-# 成功/失败路径都要调用，避免失败时服务端副本残留
-cleanup_server_copy() {
-    rm -f "$PBDATA/backups/$NAME" "$PBDATA/backups/$NAME.attrs" \
-        || echo "[backup] warn: 未能删除服务端副本 $PBDATA/backups/$NAME" >&2
-}
-
 if ! wget -qO "$DEST/$NAME" \
     "$PB_URL/api/backups/$NAME?token=$FILE_TOKEN"; then
-    cleanup_server_copy
     rm -f "$DEST/$NAME"  # 清掉可能的半截下载文件，避免被误当有效归档
     fail "下载备份文件失败"
 fi
