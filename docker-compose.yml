@@ -28,7 +28,8 @@ services:
   # 每日一致性备份（technical-design §5.8）：crond 每日执行 deploy/backup.sh，
   # 调 PocketBase 备份 API 生成 SQLite 一致快照（含 data.db + 上传文件），下载到
   # backups 卷滚动保留 ${BACKUP_RETENTION_DAYS} 天，结果写 backups 卷内 last_backup.json
-  # 标记文件（与 super.pb.js backup/run 的分工见 deploy/README.md「备份分工」）。
+  # 标记文件并写 audit_logs（backup.success/failed，驱动超管后台 backup-status 告警，
+  # AC-23）。
   # TODO(待确认)：异地同步目标存储与凭据下发方式（§5.8，secrets 只在部署时注入）。
   backup:
     image: alpine:3.20

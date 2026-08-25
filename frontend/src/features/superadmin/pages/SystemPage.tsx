@@ -8,7 +8,7 @@ import type {
 import { Button, Card, Input, Loading, Modal } from '../../../shared/ui';
 import { SuperLayout } from '../SuperLayout';
 import { useSuperToast } from '../hooks';
-import { createSurveyTemplate, publishTemplateVersion, runBackup } from '../api';
+import { createSurveyTemplate, publishTemplateVersion } from '../api';
 import { BackupAlarmBanner } from '../components/BackupAlarmBanner';
 import { TemplateSchemaEditor } from '../components/TemplateSchemaEditor';
 import { useBackupStatus } from '../hooks';
@@ -22,7 +22,8 @@ import {
 
 /**
  * 系统与模板（/super/system）。
- * - 备份状态卡片：最近备份时间/结果；失败显著告警横幅（AC-23）；手动触发备份（写审计）；
+ * - 备份状态卡片：最近备份时间/结果；失败显著告警横幅（AC-23）。备份由 deploy/backup.sh
+ *   每日自动执行（手动备份端点已下线，410 Gone，2026-08 安全加固），本页只读展示；
  * - 标准问卷模板管理：模板与版本列表、新建模板、新版本发布（FR-SUR-001/011）、锁定题目标识。
  *   模板具体题目内容 PRD 未写死（technical-design 待确认 #5），本页按能力层实现：
  *   版本 schema 由可视化编辑器（TemplateSchemaEditor）产出，已发布版本不可变
@@ -32,9 +33,6 @@ export function SuperSystemPage() {
   const { toast } = useSuperToast();
   const cc = useMemo(() => collectionsForRole('super'), []);
   const backup = useBackupStatus();
-
-  const [backupRunning, setBackupRunning] = useState(false);
-  const [confirmBackupOpen, setConfirmBackupOpen] = useState(false);
 
   // 模板数据
   const [templates, setTemplates] = useState<SurveyTemplateRecord[] | null>(null);
@@ -90,21 +88,6 @@ export function SuperSystemPage() {
       versions.find((v) => v.id === template.current_version_id),
     [versions],
   );
-
-  const onRunBackup = async () => {
-    setBackupRunning(true);
-    try {
-      await runBackup();
-      toast('备份已执行，结果见状态卡片与审计日志', 'success');
-      setConfirmBackupOpen(false);
-      await backup.refresh();
-    } catch (err) {
-      toast(normalizeApiError(err).message, 'error');
-      await backup.refresh().catch(() => undefined);
-    } finally {
-      setBackupRunning(false);
-    }
-  };
 
   const onToggleTemplateStatus = async (template: SurveyTemplateRecord) => {
     setSaving(true);
@@ -225,9 +208,6 @@ export function SuperSystemPage() {
             </table>
           </div>
         )}
-        <div className="sa-actions" style={{ marginTop: '0.75rem' }}>
-          <Button onClick={() => setConfirmBackupOpen(true)}>手动触发一次备份</Button>
-        </div>
       </Card>
 
       <Card
@@ -359,28 +339,6 @@ export function SuperSystemPage() {
           </div>
         ) : null}
       </Card>
-
-      {/* 手动备份确认 */}
-      <Modal
-        open={confirmBackupOpen}
-        title="手动触发备份"
-        onClose={() => setConfirmBackupOpen(false)}
-        footer={
-          <>
-            <Button loading={backupRunning} onClick={() => void onRunBackup()}>
-              确认执行
-            </Button>
-            <Button variant="secondary" onClick={() => setConfirmBackupOpen(false)}>
-              取消
-            </Button>
-          </>
-        }
-      >
-        <p>
-          将立即执行一次完整备份（数据库 + 上传文件），执行结果写入审计日志；
-          失败时本页与全局看板将显示显著告警（AC-23）。
-        </p>
-      </Modal>
 
       {/* 版本题目预览（锁定题标识） */}
       <Modal

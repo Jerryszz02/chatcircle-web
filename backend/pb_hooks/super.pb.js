@@ -304,17 +304,28 @@ routerAdd('GET', '/api/cc/super/backup-status', (e) => {
   }
   const last = recent[0];
   const failed = last.get('result') === 'failure' || last.get('action') === 'backup.failed';
+  // 新鲜度检查（防陈旧成功掩盖中断）：备份为每日任务，最近一次成功超过
+  // 24h+12h 宽限仍未刷新，说明 cron 未运行或持续失败于登录等前置阶段
+  // （此类失败拿不到 token、写不了审计），须同样告警；created 解析失败按告警处理
+  const STALE_MS = 36 * 3600 * 1000;
+  const createdIso = String(last.get('created')).replace(' ', 'T');
+  const createdMs = Date.parse(createdIso);
+  const stale = !failed && (!(createdMs > 0) || Date.now() - createdMs > STALE_MS);
   const metadata = decodeJson(last.get('metadata'), null);
   return e.json(200, {
     last_backup: {
       action: last.get('action'),
       result: last.get('result'),
-      created: String(last.get('created')).replace(' ', 'T'),
+      created: createdIso,
       reason: last.get('reason'),
       file: metadata && metadata.file ? metadata.file : null,
       metadata: metadata,
     },
-    alert: failed,
+    alert: failed || stale,
+    stale: stale,
+    ...(stale
+      ? { message: '最近一次成功备份已超过 36 小时，自动备份任务疑似中断（cron 未运行或失败于登录等前置阶段，此类失败无法写审计）' }
+      : {}),
   });
 });
 
