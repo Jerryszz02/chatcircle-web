@@ -34,6 +34,8 @@ export function ActivitiesPage() {
       .then((res) => {
         if (cancelled) return;
         setActivities(res.activities);
+        // 重试成功后清除此前的错误提示与重试按钮
+        setActivitiesError(null);
       })
       .catch((err) => {
         if (cancelled) return;

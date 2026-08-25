@@ -129,19 +129,39 @@ body:has(.ccp-root) {
   font-size: var(--cc-fs-small);
 }
 
-/* 窄屏（≤480px）：压缩字号与间距，保证 logo + 两个导航链接 + 登录按钮不溢出 */
+/* 窄屏（≤480px）：头部换行为两行——第一行 logo + 登录入口，第二行站点导航。
+ * 单行排在 320px 视口必然溢出（登录入口文案可能为「我的中心」「机构管理面板」等长文案）。 */
 @media (max-width: 480px) {
   .ccp-site-header-inner {
-    gap: 8px;
+    flex-wrap: wrap;
+    gap: 0 8px;
+    padding-top: 6px;
+    padding-bottom: 6px;
   }
 
   .ccp-site-logo {
-    font-size: 16px;
+    font-size: 17px;
+  }
+
+  .ccp-site-actions {
+    margin-left: auto;
+  }
+
+  .ccp-site-nav {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
   }
 
   .ccp-site-nav a {
-    padding: 8px 8px;
+    min-height: 40px;
+    padding: 6px 10px;
     font-size: var(--cc-fs-small);
+  }
+
+  /* 两行头部变高，锚点偏移同步加大 */
+  .ccp-anchor {
+    scroll-margin-top: 110px;
   }
 }
 

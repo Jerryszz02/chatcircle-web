@@ -84,6 +84,20 @@ describe('HomePage 首页', () => {
     expect(screen.queryByText('六月试点场')).not.toBeInTheDocument();
   });
 
+  it('活动加载失败后重试成功：错误提示与重试按钮被清除', async () => {
+    stubApi({
+      'GET /api/cc/public/activities': { status: 500, body: { message: '服务器错误', data: {} } },
+    });
+    renderHome();
+    expect(await screen.findByText('服务器错误')).toBeInTheDocument();
+    // 重试时换成成功响应
+    stubActivities([activityItem()]);
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    expect(await screen.findByText('八月光影茶话会')).toBeInTheDocument();
+    expect(screen.queryByText('服务器错误')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+  });
+
   it('展示活动故事与往期活动静态占位区块', () => {
     stubActivities();
     renderHome();

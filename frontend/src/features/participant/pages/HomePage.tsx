@@ -107,7 +107,10 @@ function UpcomingActivitiesSection() {
     let cancelled = false;
     getPublicActivities()
       .then((res) => {
-        if (!cancelled) setActivities(res.activities);
+        if (cancelled) return;
+        setActivities(res.activities);
+        // 重试成功后清除此前的错误提示与重试按钮
+        setError(null);
       })
       .catch((err) => {
         if (!cancelled) setError(normalizeApiError(err));
