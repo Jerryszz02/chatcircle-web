@@ -78,7 +78,7 @@ npm install
 npm run dev
 ```
 
-Docker 一键启动（生产同构）：`cp .env.example .env` → `docker compose up --build` → `http://localhost:8090`。
+Docker 一键启动（生产同构）：`cp .env.example .env` → **先填好 `.env`** → `docker compose up --build` → `http://localhost:8090`。注意 compose 对四个变量用了 `${VAR:?}` 必填校验，而 `.env.example` 里它们默认注释掉，不填会在启动前的变量插值阶段直接报错：`PB_SUPERUSER_EMAIL` / `PB_SUPERUSER_PASSWORD`（backup 服务登录用超管）、`ALIYUN_ACCESS_KEY_ID` / `ALIYUN_ACCESS_KEY_SECRET`（caddy 的 DNS-01 证书签发）。本地只是想跑起来看看时，四个变量可填占位值（backup 登录失败、caddy 证书签发失败属预期，app 本身在 `http://localhost:8090` 可用）；日常本地开发更推荐上面的原生启动方式。
 
 常用端口约定：开发后端 8090 / 种子脚本临时实例 8096 / 集成测试 8097 / 迁移冒烟 8099 / e2e 18090+14173。
 
@@ -86,7 +86,7 @@ Docker 一键启动（生产同构）：`cp .env.example .env` → `docker compo
 
 1. **写入收口**。几乎所有业务写操作（报名、审核、签到、问卷、导出、邀请码……）都只走 `pb_hooks` 里的自定义端点（`POST /api/cc/*`），在服务端事务内完成；集合的直连 create/update 被 `guards.pb.js` 等守卫封堵，直连 delete 全部集合关闭。前端集合 API 主要用于**读**。
 2. **读路径分两路**。管理端读集合走 PocketBase 原生 API + API rules（机构隔离靠 rule 里的 `@request.auth.organization_id` 链式反查）；参与者读公开/聚合信息走 hooks 白名单端点（`/api/cc/public/*`、`/api/cc/me/*`），不直连集合。
-3. **机构隔离在服务端强制**。前端永远不传 `organization_id`——由 hooks 从登录身份注入、rules 按身份过滤。跨机构访问返回 **404 而非 403**（不泄露资源存在性）。
+3. **机构隔离在服务端强制**。写路径分两种：**自定义端点**内 `organization_id` 一律由 hooks 从登录身份注入，客户端传入的会被忽略；少数放行的**集合直连 create**（活动、培训、机构自定义报名字段）则由前端显式传本机构 `organization_id`（取自登录管理员身份，如 `ActivityForm.tsx`），由 API rules 校验 `@request.auth.organization_id = organization_id`，且 guards 禁止 update 再改它。读路径靠 rules 按身份过滤。跨机构访问返回 **404 而非 403**（不泄露资源存在性）。
 4. **无硬删除**。全部 23 个集合 `deleteRule: null`；停用/归档/作废/撤销一律用 `status` 字段表达（FR-AUD-001）。改代码时不要引入任何删除语义。
 5. **pb_hooks 是隔离作用域的 JS，不是 Node 项目**。PocketBase 0.28 JSVM 中各 `*.pb.js` 文件作用域完全隔离，没有 import/全局共享。`pb_hooks/lib/` 下三个文件（http/ratelimit/audit）是**契约标准源，运行时不会被加载**；每个领域文件把所需工具函数**原样内联**在自己闭包里。**改 lib 语义后必须同步所有内联副本**——这是本仓库最大的维护陷阱（文件头部有"勿手工改副本"警告）。
 
@@ -152,6 +152,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 - `_superusers` 天然绕过所有 rules；平台级集合（organizations、admin_invites、survey_templates/versions、reports）rules 全 `null`＝仅超管。
 - 机构管理员：统一靠 `@request.auth.organization_id = <本行机构>`；多级子表链式反查（如 `answers` 用 `submission_id.activity_survey_id.activity_id.organization_id` 三级）。
+- 放行的直连 create（activities、trainings、registration_field_defs 的机构自定义部分）：客户端传 `organization_id`，createRule 校验 `@request.auth.organization_id = organization_id`；因此新增同类直连创建流程时**必须传本机构值**，漏传会因校验失败被拒。
 - 凡 `organization_id` 可空的集合，rule 首段加 `@request.auth.organization_id != ''`，防止参与者/匿名命中 `''=''` 读到平台级记录。
 - 参与者：仅 list/view 本人记录；create 大多锁死或限本人且初始状态固定；提交后不可改。
 - 未认证 list 非空 rule 的集合返回**空集**而非 403（rule 为 null 才 401/403）——排查权限问题时先分清这两种形态。
@@ -394,7 +395,7 @@ CI（`.github/workflows/ci.yml`，push 到 main 与全部 PR 触发，三 job �
 1. schema 变更只能经 `pb_migrations/`，禁止在生产 admin UI 手改结构。
 2. 业务规则只写在 `pb_hooks/` 与 API rules；前端校验仅是体验层。
 3. 无硬删除：停用/归档/作废/撤销用 status 表达，任何集合不开 delete。
-4. 机构隔离在服务端强制：organization_id 由服务端注入，跨机构 404；新增带 organization_id 的接口必须同 PR 补越权测试。
+4. 机构隔离在服务端强制：自定义端点内 organization_id 由服务端注入，放行的直连 create 由客户端传本机构值并经 API rules 校验；跨机构 404；新增带 organization_id 的接口必须同 PR 补越权测试。
 5. 敏感数据导出只看 `is_sensitive` 标记位，禁止字段名启发式。
 6. 审计与业务写同事务；metadata 不含密码/完整敏感答案。
 7. hooks 无环境变量、无跨文件共享；改 `lib/` 契约必须同步全部内联副本。
