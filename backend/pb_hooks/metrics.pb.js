@@ -3,6 +3,12 @@
 // - GET /api/cc/metrics/{metric_key}?from&to&organization_id&activity_status&activity_role
 //   按 metric_key 分发到对应聚合函数；新增指标 = 注册表加一条配置 + 本文件加一个聚合函数，
 //   页面结构与数据表结构不变（FR-DASH-005）。
+// - GET /api/cc/public/outcome  首页公开成效数据（2026-08 后端改版，PRD 外扩展，AC-26）：
+//   无需登录、无参数、无手工维护，返回 { activity_sessions, service_visits,
+//   partner_organizations } 三个全平台累计值，口径复用本文件指标注册表
+//   （partner_organizations = 状态 active 的机构数，为新增口径）。
+//   注意：activity_sessions 此处含 archived，与公开活动列表 viewRule 可见范围
+//   （仅 published/closed）是两回事——Outcome 是累计宣传口径，不随下架/归档扣减。
 // - 机构范围注入（FR-DASH-001、FR-ORG-006）：管理员恒为本机构（忽略客户端 organization_id），
 //   超级管理员可全平台并按 organization_id 筛选；筛选统一作用于全部指标（FR-DASH-004）。
 // - 口径红线（technical-design §5.6，原文来自 PRD §7.1）：
@@ -328,4 +334,30 @@ routerAdd('GET', '/api/cc/metrics/{metricKey}', (e) => {
     },
     activity_count: activityIds.length,
   });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/cc/public/outcome — 首页公开成效数据（2026-08 后端改版，AC-26）
+// 无需登录、无参数、无手工维护；全平台累计口径（无机构范围注入，与看板端点不同）：
+//   activity_sessions     已发布/已关闭/已归档活动数（含 archived，见文件头口径说明）
+//   service_visits        有效签到记录数（服务人次；checkins.status='valid'）
+//   partner_organizations 状态 active 的机构数
+// 三次 COUNT 聚合（$app.countRecords 走 COUNT(*)，不取记录体；累计指标不能用
+// 定长 findRecordsByFilter——超上限会静默封顶），不加缓存（首页量级下足够）。
+// ---------------------------------------------------------------------------
+routerAdd('GET', '/api/cc/public/outcome', (e) => {
+  try {
+  return e.json(200, {
+    activity_sessions: $app.countRecords('activities',
+      $dbx.in('status', 'published', 'closed', 'archived')),
+    service_visits: $app.countRecords('checkins', $dbx.exp("status = {:s}", { s: 'valid' })),
+    partner_organizations: $app.countRecords('organizations', $dbx.exp("status = {:s}", { s: 'active' })),
+  });
+  } catch (err) {
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
+  }
 });

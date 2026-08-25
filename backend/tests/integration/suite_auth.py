@@ -73,23 +73,27 @@ def run(ctx):
 
     inv1 = new_invite()
     s, r = call(base, 'POST', '/api/cc/auth/admin-register',
-                {'invite_code': inv1.get('token'), 'username': 'AuthAdmin1', 'password': fx.PASSWORD})
+                {'invite_code': inv1.get('token'), 'username': 'AuthAdmin1',
+                 'email': 'authadmin1@it.cc.local', 'password': fx.PASSWORD})
     rep.check('AUTH-10 邀请码注册成功（用户名小写归一）',
               s == 200 and (r.get('record') or {}).get('username') == 'authadmin1', r)
     inv2 = new_invite()
     s, r = call(base, 'POST', '/api/cc/auth/admin-register',
-                {'invite_code': inv2.get('token'), 'username': 'AUTHADMIN1', 'password': fx.PASSWORD})
+                {'invite_code': inv2.get('token'), 'username': 'AUTHADMIN1',
+                 'email': 'authadmin1b@it.cc.local', 'password': fx.PASSWORD})
     rep.check('AUTH-11 用户名重复（大小写不敏感）→ 400 USERNAME_TAKEN',
               s == 400 and biz_code(r) == 'USERNAME_TAKEN', r)
     s, r = call(base, 'POST', '/api/cc/auth/admin-register',
-                {'invite_code': inv1.get('token'), 'username': 'other_admin', 'password': fx.PASSWORD})
+                {'invite_code': inv1.get('token'), 'username': 'other_admin',
+                 'email': 'other_admin@it.cc.local', 'password': fx.PASSWORD})
     rep.check('AUTH-12 已使用邀请码 → 400 INVITE_INVALID',
               s == 400 and biz_code(r) == 'INVITE_INVALID', r)
 
     inv3 = new_invite()
     call(base, 'POST', '/api/cc/super/invites/%s/revoke' % inv3.get('id'), {}, st)
     s, r = call(base, 'POST', '/api/cc/auth/admin-register',
-                {'invite_code': inv3.get('token'), 'username': 'revoked_user', 'password': fx.PASSWORD})
+                {'invite_code': inv3.get('token'), 'username': 'revoked_user',
+                 'email': 'revoked_user@it.cc.local', 'password': fx.PASSWORD})
     rep.check('AUTH-13 已撤销邀请码 → 400 INVITE_INVALID',
               s == 400 and biz_code(r) == 'INVITE_INVALID', r)
 
@@ -98,7 +102,8 @@ def run(ctx):
     s, r = call(base, 'PATCH', '/api/collections/admin_invites/records/%s' % inv4.get('id'),
                 {'expires_at': '2020-01-01 00:00:00.000Z'}, st)
     s, r = call(base, 'POST', '/api/cc/auth/admin-register',
-                {'invite_code': inv4.get('token'), 'username': 'expired_user', 'password': fx.PASSWORD})
+                {'invite_code': inv4.get('token'), 'username': 'expired_user',
+                 'email': 'expired_user@it.cc.local', 'password': fx.PASSWORD})
     rep.check('AUTH-14 已过期邀请码 → 400 INVITE_EXPIRED',
               s == 400 and biz_code(r) == 'INVITE_EXPIRED', r)
     s, r = call(base, 'GET', '/api/collections/admin_invites/records/%s' % inv4.get('id'), token=st)
@@ -112,7 +117,8 @@ def run(ctx):
     def use_invite(uname):
         barrier.wait()
         return call(base, 'POST', '/api/cc/auth/admin-register',
-                    {'invite_code': inv5.get('token'), 'username': uname, 'password': fx.PASSWORD})
+                    {'invite_code': inv5.get('token'), 'username': uname,
+                     'email': '%s@it.cc.local' % uname, 'password': fx.PASSWORD})
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         f1 = pool.submit(use_invite, 'race_admin1')

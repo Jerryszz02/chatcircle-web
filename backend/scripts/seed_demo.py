@@ -170,7 +170,7 @@ def main():
     assert vers, '模板版本不存在'
     ver_id = vers[0]['id']
 
-    # ---------- 演示管理员（邀请码流程）+ 未使用邀请码 ----------
+    # ---------- 演示管理员（邀请码流程，邮箱必填为 2026-08 改版新增）+ 未使用邀请码 ----------
     def ensure_admin(org_id, username):
         _, r2 = call(base, 'GET',
                      "/api/collections/admin_accounts/records?filter=(username='%s')" % username,
@@ -182,9 +182,10 @@ def main():
         assert s2 == 200, '生成邀请码失败：%s' % inv
         s2, reg = call(base, 'POST', '/api/cc/auth/admin-register',
                        {'invite_code': inv['invite']['token'], 'username': username,
+                        'email': '%s@demo.cc.local' % username,
                         'password': DEMO_ADMIN_PASS})
         assert s2 == 200, '注册管理员失败：%s' % reg
-        info('管理员 %s 已创建（密码 %s）' % (username, DEMO_ADMIN_PASS))
+        info('管理员 %s 已创建（密码 %s，邮箱 %s@demo.cc.local，未验证）' % (username, DEMO_ADMIN_PASS, username))
 
     ensure_admin(org_a, 'adminalpha')
     ensure_admin(org_b, 'adminbeta')

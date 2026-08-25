@@ -4,7 +4,7 @@
 
 ## 1. 文档目的
 
-- 给出 PRD §9.1 全部 19 个集合的 PocketBase collection 定义草案：字段名、类型、必填、唯一约束与索引。2026-08 实现期新增「聆听者培训体系」3 集合（trainings / training_checkin_sessions / training_attendances，§5.2.20~5.2.22，PRD 外扩展）与 reports 活动数据报告集合（§5.2.23），合计 23 个业务集合。
+- 给出 PRD §9.1 全部 19 个集合的 PocketBase collection 定义草案：字段名、类型、必填、唯一约束与索引。2026-08 实现期新增「聆听者培训体系」3 集合（trainings / training_checkin_sessions / training_attendances，§5.2.20~5.2.22，PRD 外扩展）与 reports 活动数据报告集合（§5.2.23）；2026-08 后端改版新增 posts 内容推文集合（§5.2.24，PRD 外扩展），合计 24 个业务集合。
 - 固化标识规则（`participant_id` 全平台稳定、`registration_id` 参与者×活动唯一、`question_code` 稳定性、`group_tag` 预留）。
 - 定义多机构隔离在 PocketBase 层面的实现方式：`organization_id` 冗余字段 + API Rules 服务端强制过滤。
 - 汇总全部状态枚举与状态机（活动 7 态、报名 4 态及迁移矩阵、签到场次/记录、问卷 5 态、答卷 3 态、邀请码 4 态、培训 3 态及培训签到场次/记录），并给出事务与并发约束。
@@ -91,10 +91,14 @@
 | 字段 | 类型 | 必填 | 约束/索引 | 说明 |
 |---|---|---|---|---|
 | username | text（auth 内置） | 是 | **唯一**（全局） | 登录用户名 |
+| email | text（auth 内置） | 否（schema 层） | **唯一** | 2026-08 后端改版起为**注册必填、登录身份之一**（PB 原生 `verified` 语义）；schema 层保持 optional 以兼容存量测试账号（email 为空串），必填约束由 admin-register hook 强制 |
 | organization_id | relation(organizations) | 是 | 索引 | 所属机构；**参与者账号无此字段**，这是管理员与参与者集合的关键差异（FR-AUTH-003） |
 | status | select(active, disabled) | 是 | — | 机构停用或账号停用时禁止进入后台 |
 | display_name | text | 否 | — | 后台显示名 |
 
+- 邮箱认证（2026-08 后端改版）：`passwordAuth.identityFields = ['username', 'email']`（用户名/邮箱 + 密码均可登录），并启用 PB 原生 OTP（`duration=300`，邮箱验证码登录）。注册后 `verified=false`，经 PB 内置 request-verification / confirm-verification 完成验证；**仅已验证邮箱可找回密码**（未验证账号请求重置时静默 204，不发邮件不放行，防账号枚举）；OTP 认证成功即证明邮箱所有权，账号同步置 `verified=true`。端点契约与限流见 technical-design §5.4「管理员邮箱认证」。
+- 换邮箱走 PB 内置 requestEmailChange 流程；直连 update 修改 `email` 由 guards.pb.js 禁止（加入禁改清单）。
+- 参与者账号红线不变：`participant_accounts` 不存邮箱/手机号等任何联系方式（见 §5.2.4），本次改版只动 `admin_accounts`。
 - API Rules 要点：管理员只能 view 本机构同事记录与本人记录；create 仅经邀请码注册接口（服务端）；不允许管理员修改 `organization_id`。
 - 机构 `status=disabled` 时由服务端钩子拒绝其全部管理操作（FR-ORG-001）。
 
@@ -410,6 +414,28 @@
 - 创建审计（`report.upload`）由 `reports.pb.js` 的 onRecordCreate 模型钩子与报告保存在**同一事务**写入（失败即整体回滚），机构归属经 `activity_id` 反查。
 - guards.pb.js 未为本集合加直连写守卫：rules 全 null 时非超管在 rule 层已被拒，守卫无额外收窄对象（守卫针对「规则放行但需收窄」的场景）。
 
+#### 5.2.24 posts — 内容推文（base，2026-08 后端改版，PRD 外扩展）
+
+> 内容推文为 2026-08 后端改版新增的**独立模块，与 activities 完全无关**；仅超管可编辑（机构管理员无入口），公开端仅见 `visible`。推文上不挂手填活动成果数据——首页成效由公开端点 `GET /api/cc/public/outcome` 自动聚合（见 technical-design §5.6）。
+
+| 字段 | 类型 | 必填 | 约束/索引 | 说明 |
+|---|---|---|---|---|
+| title | text | 是 | — | 推文标题 |
+| summary | text | 否 | — | 摘要；为空时前端摘取正文前 N 字兜底 |
+| cover | file | 否 | maxSelect=1、maxSize=5MB、mimeTypes 限 image/* | 封面图（单图；5MB 为暂定值，见「待确认」D-9）；文件 URL 随 viewRule 放行 |
+| body_md | text | 否 | — | Markdown 原文；**消毒在渲染端**（服务端只存原文，前端渲染时消毒） |
+| external_url | text | 否 | — | 外链 URL；非空时仅允许 http/https（hooks 校验 `^https?://`） |
+| is_pinned | bool | 否 | 复合索引 (is_pinned, published_at) | 置顶开关（bool 一律 required=false，同现有迁移约定） |
+| status | select(hidden, visible) | 是 | 索引；默认 hidden | 可见性开关；隐藏即删除（无硬删除） |
+| published_at | date | 否 | 复合索引 (is_pinned, published_at) | 首次置 visible 时由 hook 写入当前时间，之后不因隐藏/再可见而改 |
+| created_by / updated_by | text | 否 | hidden=true（仅超管可见） | 归因字段：服务端钩子强制填充（客户端传入无效），供审计 actor（同 reports.created_by 约定）；创建/更新审计与推文保存在同一事务写入（同 reports.pb.js 模式） |
+
+- **约束：正文（`body_md`）与外链（`external_url`）至少填一个**，全空由 posts.pb.js 校验拒绝（400）。
+- API Rules：listRule / viewRule = `status = 'visible' || @request.auth.collectionName = '_superusers'`（匿名/参与者/机构管理员仅见 visible；超管全见）；createRule / updateRule 仅 `_superusers`；deleteRule 关闭（隐藏即删除，见 §5.7）。
+- 公开读直接走集合 API，不新增公开读 hook：`GET /api/collections/posts/records?sort=-is_pinned,-published_at`，rule 天然过滤 hidden。
+- `status` 首次变为 visible 且 `published_at` 为空时，由 hooks 写入当前时间；创建/更新写审计（`post.create` / `post.update`，metadata 带 status 迁移）。
+- 实施前置验证点：先以探针确认匿名请求下 `@request.auth.collectionName` 规则求值行为符合预期（匿名时右侧整体为假）。
+
 ### 5.3 标识与关联规则
 
 | 标识 | 载体 | 作用域与稳定性 | 导出规则 |
@@ -540,3 +566,4 @@
 | D-6 | `audit_logs.action` 动作代码全集与 `metadata` 结构约定 | PRD §11.3/FR-AUD-004 给出事件类别，未给代码表 | 由 security-privacy.md 细化；首版实现时随代码冻结 |
 | D-7 | 二级业务表（`registrations` 等）是否冗余 `organization_id` 字段 | PRD §9.2 允许「带有或可可靠反查」两种实现，未指定 | 本文按「冗余」建议（规则简单、可索引）；实现评审可改纯反查 |
 | D-8 | 参与者多账号合并机制的表结构预留 | PRD §16.2 列入后续版本，无方案 | 仅保持 `participant_id` 稳定口径，不加合并字段 |
+| D-9 | posts 封面图体积上限与图片规格 | 2026-08 后端改版计划只定「封面图可空、单图、image/*」，体积上限无依据 | 迁移暂定 maxSize=5MB；确认后调整迁移与本文 |

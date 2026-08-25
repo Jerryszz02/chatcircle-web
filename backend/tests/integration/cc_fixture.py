@@ -71,12 +71,17 @@ def create_org(base, st, name, require_approval=False, allow_sensitive=False):
 
 
 def create_admin(base, st, org_id, username, password=PASSWORD):
-    """走邀请码流程创建管理员并登录，返回 (admin_id, token)。"""
+    """走邀请码流程创建管理员并登录，返回 (admin_id, token)。
+
+    email 必填为 2026-08 改版新增（AC-24）：固定用 <username>@it.cc.local（用户名全局唯一，
+    邮箱随之唯一）。
+    """
     s, inv = call(base, 'POST', '/api/cc/super/invites', {'organization_id': org_id}, st)
     assert s == 200, '生成邀请码失败：%s' % inv
     token_plain = inv['invite']['token']
     s, reg = call(base, 'POST', '/api/cc/auth/admin-register',
-                  {'invite_code': token_plain, 'username': username, 'password': password})
+                  {'invite_code': token_plain, 'username': username,
+                   'email': '%s@it.cc.local' % username, 'password': password})
     assert s == 200, '管理员注册失败：%s' % reg
     uname = reg['record']['username']
     s, auth = call(base, 'POST', '/api/collections/admin_accounts/auth-with-password',

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """suite_nodelete — 无硬删除（AC-18、FR-AUD-001、FR-AUD-002）。
 
-断言：全部 22 个业务集合的 delete 通道对机构管理员与参与者关闭（403/404）；
+断言：全部 23 个业务集合的 delete 通道对机构管理员与参与者关闭（403/404）；
 审计日志对普通管理员无创建/修改途径（FR-AUD-002）。
 归档/作废后记录仍可审计查询，由 suite_checkins CHK-18 与 suite_surveys SUR-20 覆盖。
 """
@@ -61,6 +61,11 @@ def run(ctx):
                    'status': 'valid', 'checked_in_at': '2026-08-10 12:30:00Z'}, st)
     assert s == 200, '超管直建培训签到失败：%s' % tat
     tattendance = tat['id']
+    # posts 内容推文（2026-08 改版；仅超管可写，超管通道直建）
+    s, po = call(base, 'POST', '/api/collections/posts/records',
+                 {'title': '删验推文', 'body_md': 'x', 'status': 'hidden'}, st)
+    assert s == 200, '超管直建推文失败：%s' % po
+    post = po['id']
 
     def sid(coll, flt):
         _, r = call(base, 'GET', '/api/collections/%s/records?perPage=1&filter=(%s)' % (coll, flt), token=st)
@@ -84,9 +89,9 @@ def run(ctx):
         ('survey_questions', question), ('submissions', submission),
         ('answers', answer), ('export_jobs', job), ('audit_logs', audit),
         ('trainings', training), ('training_checkin_sessions', tsession),
-        ('training_attendances', tattendance),
+        ('training_attendances', tattendance), ('posts', post),
     ]
-    rep.check('NDEL-00 fixture：22 个集合均有真实记录', all(t[1] for t in targets),
+    rep.check('NDEL-00 fixture：23 个集合均有真实记录', all(t[1] for t in targets),
               [t for t in targets if not t[1]])
 
     # ---------- 1. 机构管理员 delete 全部业务集合被拒 ----------

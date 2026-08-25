@@ -46,7 +46,8 @@ def run(ctx):
     rep.check('B1 邀请码响应形态 {invite:{token}}', s == 200 and bool(invite_token),
               inv if s != 200 else '')
     s, reg = call(base, 'POST', '/api/cc/auth/admin-register',
-                  {'invite_code': invite_token, 'username': 'FlowAdmin', 'password': fx.PASSWORD})
+                  {'invite_code': invite_token, 'username': 'FlowAdmin',
+                   'email': 'flowadmin@it.cc.local', 'password': fx.PASSWORD})
     rep.check('B2 admin-register 成功且用户名小写归一',
               s == 200 and reg.get('record', {}).get('username') == 'flowadmin',
               reg if s != 200 else '')
