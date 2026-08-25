@@ -15,7 +15,11 @@ import { BackupAlarmBanner } from '../components/BackupAlarmBanner';
 import { useBackupStatus } from '../hooks';
 import { ACTIVITY_ROLE_LABELS, ACTIVITY_STATUS_LABELS } from '../lib/labels';
 
-const STATUS_OPTIONS = Object.entries(ACTIVITY_STATUS_LABELS) as [ActivityStatus, string][];
+// 看板口径只统计 已发布/已关闭/已归档（metrics.pb.js activity_sessions 白名单，
+// technical-design §5.6）；草稿/待平台审核/已驳回恒为 0，不提供筛选项
+const STATUS_OPTIONS = (Object.entries(ACTIVITY_STATUS_LABELS) as [ActivityStatus, string][]).filter(
+  ([value]) => !['draft', 'pending_review', 'rejected'].includes(value),
+);
 
 /**
  * 全局看板（/super/dashboard，FR-DASH-001~005、technical-design §5.6）。
