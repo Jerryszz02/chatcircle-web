@@ -14,7 +14,7 @@ import { HomePage } from './HomePage';
 /**
  * 首页测试（C 端品牌官网落地页，2026-08 UI 重构）。
  * 覆盖：Hero 与 CTA、站点导航、现有活动区块（公开活动 API 真实数据）、
- * 活动故事 / 往期活动静态占位、Our Impact 首场试点真实数据、右上角角色入口。
+ * 往期活动（活动故事并入同一区块）静态占位、Our Impact 首场试点真实数据、右上角角色入口。
  */
 
 function activityItem(overrides: Record<string, unknown> = {}) {
@@ -49,7 +49,7 @@ describe('HomePage 首页', () => {
   beforeEach(clearAllSessions);
   afterEach(unstubApi);
 
-  it('展示品牌 Hero、CTA 与站点导航（logo / 现有活动 / 关于我们）', () => {
+  it('展示品牌 Hero、CTA 与站点导航（logo / 现有活动 / 往期活动 / 关于我们）', () => {
     stubActivities();
     renderHome();
     expect(screen.getByText('青年心理健康公益项目')).toBeInTheDocument();
@@ -58,6 +58,7 @@ describe('HomePage 首页', () => {
     // 站点导航
     expect(screen.getByRole('link', { name: 'Chat Circles' })).toHaveAttribute('href', '/');
     expect(screen.getByRole('link', { name: '现有活动' })).toHaveAttribute('href', '/activities');
+    expect(screen.getByRole('link', { name: '往期活动' })).toHaveAttribute('href', '/#past');
     expect(screen.getByRole('link', { name: '关于我们' })).toHaveAttribute('href', '/about');
   });
 
@@ -98,13 +99,13 @@ describe('HomePage 首页', () => {
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
   });
 
-  it('展示活动故事与往期活动静态占位区块', () => {
+  it('往期活动区块合并展示活动故事（同一区块，无独立「活动故事」标题）', () => {
     stubActivities();
     renderHome();
-    expect(screen.getByRole('heading', { name: '活动故事' })).toBeInTheDocument();
-    expect(screen.getByText(/首场活动回顾/)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '往期活动' })).toBeInTheDocument();
     expect(screen.getByText(/首场对话活动/)).toBeInTheDocument();
+    expect(screen.getByText(/首场活动回顾/)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '活动故事' })).not.toBeInTheDocument();
   });
 
   it('Our Impact 展示首场试点真实数据与参与者引言，并标注样本口径', () => {
