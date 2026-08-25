@@ -16,8 +16,8 @@
 //   survey_completion_rate  有效提交人数 ÷ 符合填写资格人数；资格=当前报名已通过（剔除已取消）
 //                           且角色符合问卷适用范围；分子同样只计报名当前仍为已通过的提交；
 //                           开放时间不影响最终分母
-// - 时间筛选 from/to 作用于活动 start_time（先圈定活动范围，再聚合其关联记录），
-//   与导出口径保持一致（FR-DASH-002）。
+// - 时间筛选 from/to 采用重叠口径：活动 [start_time, end_time] 与筛选区间有交集即计入
+//   （先圈定活动范围，再聚合其关联记录），与导出口径保持一致（FR-DASH-002）。
 //
 // 实现注意（PocketBase 0.28 JSVM 实测）：handler 在请求期以全新作用域执行，文件级函数/常量
 // 对 handler 不可见，故全部工具函数与指标注册表内联在 handler 内。
@@ -137,7 +137,8 @@ routerAdd('GET', '/api/cc/metrics/{metricKey}', (e) => {
     }
   }
 
-  // 范围内活动：机构注入 + activity_status + 时间范围（start_time）
+  // 范围内活动：机构注入 + activity_status + 时间范围（重叠口径：
+  // 活动 [start_time, end_time] 与筛选区间有交集即计入，而非仅按 start_time 单点落入）
   let filter = '';
   const params = {};
   if (orgId) {
@@ -149,12 +150,17 @@ routerAdd('GET', '/api/cc/metrics/{metricKey}', (e) => {
     params.st = query.activity_status;
   }
   let activities = queryAll('activities', filter, params, 'created');
+  // end_time 缺失时退化为 start_time（瞬时活动），避免空串比较把活动错误纳入/排除
+  const endIso = (a) => iso(a.get('end_time')) || iso(a.get('start_time'));
+  const endRaw = (a) => String(a.get('end_time') || a.get('start_time'));
   if (fromBound) {
+    // from 含边界：活动结束时间早于 from 才排除
     activities = fromBound.day
-      ? activities.filter((a) => iso(a.get('start_time')) >= fromBound.day)
-      : activities.filter((a) => String(a.get('start_time')) >= fromBound.dt);
+      ? activities.filter((a) => endIso(a) >= fromBound.day)
+      : activities.filter((a) => endRaw(a) >= fromBound.dt);
   }
   if (toBound) {
+    // to：纯日期为当日结束（含），datetime 不含边界；活动开始时间晚于 to 才排除
     activities = toBound.day
       ? activities.filter((a) => iso(a.get('start_time')) <= toBound.day + 'T23:59:59.999Z')
       : activities.filter((a) => String(a.get('start_time')) < toBound.dt);

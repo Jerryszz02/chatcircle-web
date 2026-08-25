@@ -9,8 +9,22 @@
 对应 AC：AC-02/04/05/06/09/11/12/14/15/16/20/23 的happy path 与关键分支；
 专项反例（越权、并发、矩阵枚举、限流等）在各自套件。
 """
+import csv
+import io
+import zipfile
+
 import cc_fixture as fx
 from cc_client import biz_code, call
+
+
+def _csv_rows(zip_blob, name):
+    """从导出 ZIP 中取指定 CSV 的数据行（去表头）；blob 非 ZIP 时返回 []。"""
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(zip_blob))
+        rows = list(csv.reader(io.StringIO(zf.read(name).decode('utf-8-sig'))))
+        return rows[1:]
+    except Exception:
+        return []
 
 
 def run(ctx):
@@ -225,6 +239,33 @@ def run(ctx):
               s == 200 and rate.get('value') == 0.5 and rate.get('denominator') == 2, rate)
     s, ms = call(base, 'GET', '/api/cc/metrics/applications?organization_id=%s' % org_b, token=st)
     rep.check('F3 super 按机构筛选 metrics（机构B=0）', s == 200 and ms.get('value') == 0, ms)
+
+    # F3b~F3f 时间筛选重叠口径回归：活动 [start_time, end_time] 与筛选区间有交集即计入，
+    # 看板 metrics 与导出共用同一口径（FR-DASH-002）。
+    # 跨区间活动 08-05~08-15：start_time 落在 08-13~08-21 之外，旧单点口径下被漏计。
+    span_id = fx.create_activity(base, AT, org_a, 'CC_IT_FLOW_01B', '跨周倾诉茶话会',
+                                 fields=[(fields['nickname'], True, True)],
+                                 start='2026-08-05 12:00:00Z', end='2026-08-15 12:00:00Z')
+    rep.check('F3b 跨区间活动创建并发布（08-05~08-15）', bool(span_id), span_id)
+    s, m = call(base, 'GET', '/api/cc/metrics/activity_sessions?from=2026-08-13&to=2026-08-21', token=AT)
+    rep.check('F3c 重叠口径：start 在区间外但活动期重叠 → 计入（=1，不含 08-10 场）',
+              s == 200 and m.get('value') == 1, m)
+    s, m = call(base, 'GET', '/api/cc/metrics/activity_sessions?from=2026-08-16&to=2026-08-21', token=AT)
+    rep.check('F3d 重叠口径：活动已结束（end < from）→ 不计入（=0）',
+              s == 200 and m.get('value') == 0, m)
+    s, m = call(base, 'GET', '/api/cc/metrics/activity_sessions?from=2026-08-09&to=2026-08-11', token=AT)
+    rep.check('F3e 重叠口径：两场活动均与区间重叠 → 都计入（=2）',
+              s == 200 and m.get('value') == 2, m)
+    s, exp0 = call(base, 'POST', '/api/cc/exports',
+                   {'scope': {'type': 'organization',
+                              'date_range': {'from': '2026-08-13', 'to': '2026-08-21'}},
+                    'include_pii': False}, AT)
+    job0 = (exp0.get('export_job') or {}).get('id')
+    s, blob0 = call(base, 'GET', '/api/cc/exports/%s/download' % job0, token=AT, raw=True)
+    acts0 = _csv_rows(blob0, 'activities.csv') if s == 200 else []
+    rep.check('F3f 导出与看板同口径（FR-DASH-002）：date_range 13~21 仅含跨区间场（1 行）',
+              s == 200 and len(acts0) == 1 and acts0 and acts0[0][0] == span_id,
+              {'status': s, 'rows': len(acts0)})
 
     s, exp = call(base, 'POST', '/api/cc/exports',
                   {'scope': {'type': 'organization'}, 'include_pii': False}, AT)
