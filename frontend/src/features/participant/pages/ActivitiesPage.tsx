@@ -3,19 +3,14 @@ import { Link, useLocation } from 'react-router-dom';
 import { normalizeApiError, type ApiError } from '../../../shared/api/http';
 import { currentRole, participantAuth } from '../../../shared/auth';
 import { useSessionSnapshot } from '../../../shared/session';
-import { Button, Loading, PageLayout } from '../../../shared/ui';
-import {
-  getMeOverview,
-  getPublicActivities,
-  type MeOverview,
-  type PublicActivityListItem,
-} from '../api';
-import { activityStatusLabel, formatTimeRange, registrationClosedReasonCopy } from '../lib/status';
-import { HeaderActions } from '../components/HeaderActions';
+import { Button, Loading } from '../../../shared/ui';
+import { getMeOverview, getPublicActivities, type MeOverview, type PublicActivityListItem } from '../api';
+import { ActivityCard } from '../components/ActivityCard';
+import { PublicPageLayout } from '../components/PublicPageLayout';
 
 /**
  * 活动与问卷页（/activities，未登录可看）：由首页拆出。
- * 活动广场（公开活动列表，点击进详情/报名）+ 问卷入口（登录后显示本人可填问卷，
+ * 活动广场（公开活动列表，卡片样式，点击进详情/报名）+ 问卷入口（登录后显示本人可填问卷，
  * 未登录显示扫码指引）。浏览活动不需要账号；报名与填写问卷时在对应链路内
  * 登录/自动注册（FR-AUTH-001）。问卷也可直接扫描活动现场二维码进入
  * （/survey/:qrToken，未登录由守卫引导登录后回跳）。
@@ -80,7 +75,7 @@ export function ActivitiesPage() {
       : '';
 
   return (
-    <PageLayout actions={<HeaderActions />} className="ccp-root" backTo="/">
+    <PublicPageLayout>
       <section id="activities" className="ccp-anchor">
         <h2 className="ccp-section-title">活动</h2>
         {activities === null && !activitiesError ? <Loading /> : null}
@@ -107,48 +102,10 @@ export function ActivitiesPage() {
         ) : null}
 
         {activities !== null && activities.length > 0 ? (
-          <ul className="cc-item-list">
-            {activities.map((activity) => {
-              const reg = activity.registration;
-              const regCopy = reg.open ? null : registrationClosedReasonCopy(reg.reason);
-              return (
-                <li key={activity.id} className="cc-item">
-                  <div className="cc-item-head">
-                    <Link to={`/a/${activity.id}`} className="cc-item-title">
-                      {activity.title}
-                    </Link>
-                    {reg.open ? (
-                      <span className="cc-tag cc-tag-success">报名中</span>
-                    ) : (
-                      <span className="cc-tag cc-tag-muted">
-                        {activity.status === 'closed'
-                          ? activityStatusLabel(activity.status)
-                          : (regCopy?.title ?? '报名未开放')}
-                      </span>
-                    )}
-                  </div>
-                  <p className="cc-item-meta">
-                    {formatTimeRange(activity.start_time, activity.end_time)}
-                    {activity.location ? ` · ${activity.location}` : ''}
-                  </p>
-                  {reg.open && reg.remaining_total != null ? (
-                    <p className="cc-item-meta">剩余名额：{reg.remaining_total}</p>
-                  ) : null}
-                  {reg.open ? (
-                    <Link
-                      to={`/a/${activity.id}/register`}
-                      className="cc-btn cc-btn-primary cc-btn-block"
-                    >
-                      立即报名
-                    </Link>
-                  ) : (
-                    <Link to={`/a/${activity.id}`} className="cc-btn cc-btn-secondary cc-btn-block">
-                      查看详情
-                    </Link>
-                  )}
-                </li>
-              );
-            })}
+          <ul className="ccp-card-grid">
+            {activities.map((activity) => (
+              <ActivityCard key={activity.id} activity={activity} />
+            ))}
           </ul>
         ) : null}
       </section>
@@ -196,6 +153,6 @@ export function ActivitiesPage() {
           </div>
         )}
       </section>
-    </PageLayout>
+    </PublicPageLayout>
   );
 }

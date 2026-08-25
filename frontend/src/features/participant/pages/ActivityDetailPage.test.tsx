@@ -54,14 +54,14 @@ describe('ActivityDetailPage 公开活动详情', () => {
   it('未登录可看：展示活动信息、剩余名额与报名入口（FR-ACT-003）', async () => {
     stubApi({ 'GET /api/cc/public/activities/': { body: detailBody() } });
     renderDetail();
-    expect(await screen.findByText('八月光影茶话会')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '公开活动详情' })).toBeInTheDocument();
+    // 页面主标题即活动标题
+    expect(await screen.findByRole('heading', { name: '八月光影茶话会' })).toBeInTheDocument();
     expect(screen.getByText('三楼活动室')).toBeInTheDocument();
     expect(screen.getByText(/总名额剩余 5 个/)).toBeInTheDocument();
     expect(screen.getByText(/倾诉者剩余 2 个名额/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '立即报名' })).toHaveAttribute('href', '/a/act1/register');
-    // 顶部提供返回首页入口
-    expect(screen.getByRole('link', { name: '返回首页' })).toHaveAttribute('href', '/');
+    // 站点导航 logo 回首页
+    expect(screen.getByRole('link', { name: 'Chat Circles' })).toHaveAttribute('href', '/');
   });
 
   it('报名未开放：按原因展示（名额已满）', async () => {
@@ -86,6 +86,6 @@ describe('ActivityDetailPage 公开活动详情', () => {
     });
     renderDetail();
     expect(await screen.findByText('活动不存在或未开放')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '公开活动详情' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '活动详情' })).toBeInTheDocument();
   });
 });

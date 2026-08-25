@@ -57,8 +57,8 @@ describe('ActivitiesPage 活动与问卷页', () => {
     );
     // 顶部「登录」菜单（未登录时聚合三类登录入口）
     expect(screen.getByRole('button', { name: '登录' })).toBeInTheDocument();
-    // 顶部「返回首页」入口
-    expect(screen.getByRole('link', { name: '返回首页' })).toHaveAttribute('href', '/');
+    // 站点导航 logo 回首页
+    expect(screen.getByRole('link', { name: 'Chat Circles' })).toHaveAttribute('href', '/');
   });
 
   it('报名未开放的活动展示原因标签与「查看详情」', async () => {
