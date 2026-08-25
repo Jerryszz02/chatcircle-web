@@ -44,7 +44,10 @@ docker compose exec app ./pocketbase superuser create "$PB_SUPERUSER_EMAIL" "$PB
   `POST /api/files/token` 换文件 token，脚本已处理）；
 - 归档下载到 `backups` 卷后删除 `pb_data/backups` 内的服务端副本（含 `.attrs` 边车）；
 - 滚动清理 30 天前归档（`BACKUP_RETENTION_DAYS` 可调）；
-- 每次结果写 `backups` 卷内 `last_backup.json` 标记（result/file/bytes/duration/reason/finished_at）。
+- 每次结果写 `backups` 卷内 `last_backup.json` 标记（result/file/bytes/duration/reason/finished_at）；
+- 同时写 `audit_logs`（actor=system，action=`backup.success`/`backup.failed`），驱动
+  `/super` 后台 backup-status 告警（AC-23）；审计写入为尽力而为，失败不影响备份结果，
+  登录失败等拿不到超管 token 的早期失败无法写审计，以 `last_backup.json` 标记为准。
 
 手工触发一次：`docker compose exec backup sh /etc/periodic/daily/backup`，
 然后查看标记：`docker compose exec backup cat /backups/last_backup.json`。
@@ -53,12 +56,13 @@ docker compose exec app ./pocketbase superuser create "$PB_SUPERUSER_EMAIL" "$PB
 
 | 入口 | 触发 | 结果去向 |
 | --- | --- | --- |
-| `deploy/backup.sh`（本目录） | 每日 cron 自动 | `backups/last_backup.json` 标记文件 |
-| `POST /api/cc/super/backup/run`（产品端点） | 超管手动 / AC-23 演练（支持 force_fail 故障注入） | `audit_logs`（backup.success/failed），驱动 `/super` 后台 `backup-status` 告警 |
+| `deploy/backup.sh`（本目录） | 每日 cron 自动 | `backups/last_backup.json` 标记文件 + `audit_logs`（backup.success/failed），驱动 `/super` 后台 `backup-status` 告警 |
+| `POST /api/cc/super/backup/run`（产品端点） | 已下线（410 Gone，2026-08 安全加固） | 不再写审计；手动演练改用 `docker compose exec backup sh /etc/periodic/daily/backup` |
 
-TODO(待后端配合)：每日备份结果接入 `audit_logs` 与 backup-status 告警需 hook 侧内部端点，
-已回报主流程；接入前 AC-23 告警链路以 backup/run 演练为准，每日备份失败请巡检
-`last_backup.json`（建议接入外部监控轮询该标记）。
+备份结果写 `audit_logs` 复用脚本已有的超管 token 直插集合 API（createRule 对超管放行，
+口径与 `tests/integration/suite_backup.py` 的播种一致），无需新增 hook 端点。
+早期失败（健康等待超时、超管登录失败等拿不到 token 的场景）无法写审计，
+请巡检 `last_backup.json`（建议接入外部监控轮询该标记）。
 
 ## 4. 恢复演练（AC-19，M5 冻结前在测试环境实测签字）
 
@@ -147,6 +151,11 @@ docker compose up --build -d`——即 §2 手动升级命令的自动化，无�
   5 场景 18 断言全过（成功路径含 `"`/`\` 凭据的 JSON 转义往返、非法保留天数、
   登录失败、下载失败服务端副本清理、模拟 set -e 中断的 trap 兜底标记）；
   仍**未经 busybox/容器内真实环境验证**。
+- 2026-08 审计接入改动（record_audit 写 audit_logs）：`sh -n` 语法检查通过；
+  本机以真实 PocketBase 0.28.4 实例进程级验证（wget 语义以 curl shim 模拟）：
+  成功路径（建备份→下载→PK 校验→写标记→写 backup.success 审计→
+  backup-status 返回 alert=false 且含文件名/时间）与失败路径（失败→failure 标记
+  + backup.failed 审计含 reason）均实测通过；**busybox wget 真实兼容性仍未验证**。
 - `docker-compose.yml`：通过 YAML 语法与结构自查（depends_on/healthcheck/环境插值）；
   安全加固新增项（三服务 logging、backup TZ + tzdata 安装）经 YAML 解析与结构断言；
   **未经 `docker compose config` 与真实构建验证**（本机无 Docker）。

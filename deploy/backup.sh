@@ -13,13 +13,19 @@
 # 先写临时文件再 mv 原子替换；脚本任何非零退出（fail 或 set -e 意外中断）都会
 # 留下 failure 标记，避免外部监控读到陈旧的成功标记。
 # 与 super.pb.js 的分工（详见 deploy/README.md「备份分工」）：
-#   - 本脚本：每日自动一致性快照，结果写标记文件（backups/last_backup.json）；
+#   - 本脚本：每日自动一致性快照，结果写标记文件（backups/last_backup.json），
+#     同时写入 audit_logs（见下）；
 #   - GET /api/cc/super/backup-status：超管后台告警读取（聚合 backup.* 审计，AC-23）。
 #   - POST /api/cc/super/backup/run 已下线（410 Gone，2026-08 安全加固）：原 JSVM
 #     库文件复制并非一致性快照（假备份），不再写 backup.success/failed 审计，
 #     手动演练一律改用本脚本（见 docs/security-hardening-2026-08.md §3）。
-#   - TODO(待后端配合)：每日备份结果接入 audit_logs 需 hook 侧提供内部写入端点，
-#     属后端改动，已回报主流程；接入前 AC-23 告警巡检以 last_backup.json 标记为准。
+#
+# 审计接入（方案 A，2026-08）：备份结果经 record_audit() 写入 audit_logs
+# （actor=system，action=backup.success/backup.failed，口径与
+# tests/integration/suite_backup.py 的播种一致），驱动超管后台 backup-status 告警。
+# 实现上复用脚本已有的超管 token 直插集合 API（audit_logs createRule 对超管放行，
+# 无需新增 hook 端点）。审计写入为尽力而为：失败仅打 warn、不影响备份结果与标记；
+# 超管登录失败等拿不到 token 的早期失败无法写审计，此场景以 last_backup.json 为准。
 set -eu
 
 PB_URL=${PB_URL:-http://app:8090}
@@ -38,6 +44,8 @@ STARTED=$(date +%s)
 MARKER_WRITTEN=0
 # 超管登录请求体临时文件路径（--post-file 用），trap 兜底清理
 AUTH_BODY=""
+# 超管 token（审计写入用）；登录成功前为空，fail() 据此判断是否可写审计
+TOKEN=""
 
 # JSON 字符串转义（busybox 无 jq）：转义会破坏 JSON 结构的反斜杠与双引号
 json_escape() {
@@ -62,9 +70,25 @@ write_marker() {
     MARKER_WRITTEN=1
 }
 
+# 备份结果写 audit_logs（方案 A）：驱动超管后台 backup-status 告警（AC-23）。
+# 复用超管 token 直插集合 API（createRule 对超管放行）；尽力而为，调用方须容忍失败。
+# $1=result(success/failure) $2=file $3=bytes $4=reason
+record_audit() {
+    [ -n "$TOKEN" ] || return 0
+    if [ "$1" = "success" ]; then ACTION="backup.success"; else ACTION="backup.failed"; fi
+    DURATION_MS=$(( ($(date +%s) - STARTED) * 1000 ))
+    FINISHED_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    wget -qO- \
+        --post-data "{\"actor_id\":\"system\",\"actor_role\":\"system\",\"organization_id\":\"\",\"action\":\"$ACTION\",\"target_type\":\"backup\",\"target_id\":\"daily\",\"result\":\"$1\",\"reason\":\"$(json_escape "$4")\",\"metadata\":{\"file\":\"$(json_escape "$2")\",\"bytes\":$3,\"duration_ms\":$DURATION_MS,\"finished_at\":\"$FINISHED_ISO\"}}" \
+        --header "Authorization: $TOKEN" \
+        --header 'Content-Type: application/json' \
+        "$PB_URL/api/collections/audit_logs/records" >/dev/null
+}
+
 fail() {
     echo "[backup] FAILED: $1" >&2
     write_marker failure "" 0 "$1"
+    record_audit failure "" 0 "$1" || echo "[backup] warn: 备份失败审计写入失败" >&2
     exit 1
 }
 
@@ -74,6 +98,8 @@ on_exit() {
     rc=$?
     if [ "$rc" -ne 0 ] && [ "$MARKER_WRITTEN" -eq 0 ]; then
         write_marker failure "" 0 "脚本异常退出（exit=$rc）" || true
+        record_audit failure "" 0 "脚本异常退出（exit=$rc）" \
+            || echo "[backup] warn: 备份失败审计写入失败" >&2
     fi
     [ -z "$AUTH_BODY" ] || secure_rm "$AUTH_BODY"
 }
@@ -154,4 +180,5 @@ cleanup_server_copy
 find "$DEST" -name 'cc_daily_*.zip' -type f -mtime "+${RETENTION_DAYS}" -delete
 
 write_marker success "$NAME" "$BYTES" ""
+record_audit success "$NAME" "$BYTES" "" || echo "[backup] warn: 备份成功审计写入失败" >&2
 echo "[backup] written: $DEST/$NAME (${BYTES} bytes, retention: ${RETENTION_DAYS} days)"
