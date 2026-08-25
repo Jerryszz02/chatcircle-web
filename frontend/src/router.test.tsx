@@ -37,7 +37,11 @@ beforeEach(() => {
   localStorage.clear();
   Object.values(pbClients).forEach((c) => c.authStore.clear());
   // 活动与问卷页会拉取公开活动列表，统一兜底为空列表，避免真实网络请求。
-  stubApi({ 'GET /api/cc/public/activities': { body: { activities: [] } } });
+  // 仅匹配列表端点本身；详情端点 /activities/:id 不匹配（走 404 错误分支）。
+  stubApi({
+    'GET /api/cc/public/activities': (url) =>
+      url.includes('/api/cc/public/activities/') ? undefined : { body: { activities: [] } },
+  });
 });
 
 afterEach(() => {
@@ -45,10 +49,14 @@ afterEach(() => {
 });
 
 describe('路由分区（公开页）', () => {
-  it('/ 渲染首页（项目介绍落地页，未登录可看）', () => {
+  it('/ 渲染首页（C 端品牌官网落地页，未登录可看）', () => {
     renderAt('/');
-    expect(screen.getByText('参与者端')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Chat Circles' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /真正听见/ })).toBeInTheDocument();
+  });
+
+  it('/about 渲染关于我们页（项目介绍，未登录可看）', () => {
+    renderAt('/about');
+    expect(screen.getByRole('heading', { name: '关于 Chat Circles' })).toBeInTheDocument();
   });
 
   it('/activities 渲染活动与问卷页（活动广场，未登录可看）', () => {
@@ -57,9 +65,9 @@ describe('路由分区（公开页）', () => {
     expect(screen.getByRole('heading', { name: '问卷' })).toBeInTheDocument();
   });
 
-  it('/a/:activityId 公开活动详情未登录可看（FR-ACT-003）', () => {
+  it('/a/:activityId 公开活动详情未登录可看（FR-ACT-003）', async () => {
     renderAt('/a/act123');
-    expect(screen.getByRole('heading', { name: '公开活动详情' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '活动详情' })).toBeInTheDocument();
   });
 
   it('/login 通用登录页未登录可看', () => {
@@ -118,13 +126,13 @@ describe('路由守卫（technical-design §5.3）', () => {
     saveSession('participant');
     renderAt('/admin/login');
     expect(screen.queryByRole('heading', { name: '管理员登录' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Chat Circles' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /真正听见/ })).toBeInTheDocument();
   });
 
   it('单会话互斥：机构管理员会话访问 /login、/super/login：回首页或本端面板', () => {
     saveSession('admin');
     renderAt('/super/login');
     expect(screen.queryByRole('heading', { name: '超级管理员登录' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Chat Circles' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /真正听见/ })).toBeInTheDocument();
   });
 });

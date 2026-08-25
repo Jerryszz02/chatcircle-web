@@ -1,22 +1,495 @@
-/* 参与者端页面样式（温暖社会创新风：暖白底、深青绿品牌色、柔和圆角）。
+/* 参与者端页面样式（C 端品牌官网风：米白底、深蓝品牌色、薄荷/珊瑚点缀）。
  * 配合 shared/styles/global.css 的 token 与 .cc-* 基件使用；仅引用 CSS 变量。
  * 状态标签（.cc-tag-*）已上移到 global.css 统一维护。 */
 
-/* ---------- 页面底色：暖灰白（Neutral 50），仅参与者页面生效 ---------- */
+/* ---------- 参与者端品牌色板 V2（2026-08 C 端品牌官网化重构） ----------
+ * 仅在 .ccp-root 内覆盖共享 token：主色深蓝 #176B9C、辅助薄荷 #8CCFC0、
+ * 强调珊瑚橙 #F28B78、页面底色米白 #FBFAF5。
+ * global.css :root 原值不动，admin / super 两端视觉不受影响。
+ * toast/modal 经 portal 挂在 body 下、不在本作用域内，保持原中性/状态色。 */
+.ccp-root {
+  /* 品牌色：深蓝（600 白字对比约 5.8:1，满足 WCAG AA） */
+  --cc-brand-50: #eef5fa;
+  --cc-brand-100: #d7e9f4;
+  --cc-brand-300: #8ccfc0; /* 深色区上的眉题/点缀：薄荷绿 */
+  --cc-brand-500: #2f84b5;
+  --cc-brand-600: #176b9c; /* 主品牌色、主按钮 */
+  --cc-brand-700: #11557d; /* 悬停、深色文本强调 */
+  --cc-brand-900: #0b3b58; /* 深色区块背景 */
+
+  /* 强调色：珊瑚橙（仅点缀；需文本级对比时用 700） */
+  --cc-accent-100: #fce9e4;
+  --cc-accent-500: #f28b78;
+  --cc-accent-700: #c05a48;
+
+  /* 参与者端私有辅助色：薄荷绿 */
+  --ccp-mint: #8ccfc0;
+  --ccp-mint-bg: #e2f4ef;
+
+  /* 页面底色：米白 */
+  --cc-neutral-50: #fbfaf5;
+}
+
+/* ---------- 页面底色：米白（仅参与者页面生效；body 在 .ccp-root 作用域外，写死色值） ---------- */
 
 body:has(.ccp-root) {
-  background: var(--cc-neutral-50);
+  background: #fbfaf5;
 }
 
 .ccp-root {
   padding-bottom: 24px;
 }
 
-/* 存在底部固定操作栏的页面预留空间 */
+/* 存在底部固定操作栏的页面预留空间（双类选择器：优先级高于 .ccp-site 的 padding-bottom: 0） */
 @media (max-width: 767px) {
-  .ccp-has-sticky-cta {
+  .ccp-root.ccp-has-sticky-cta {
     padding-bottom: 104px;
   }
+}
+
+/* ---------- 站点公共框架：吸顶导航 + 页脚（公开页 PublicPageLayout） ---------- */
+
+.ccp-site {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding-bottom: 0;
+}
+
+.ccp-site-main {
+  flex: 1;
+  width: 100%;
+  max-width: var(--cc-content-max-p);
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.ccp-site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  border-bottom: 1px solid var(--cc-neutral-300);
+  background: rgba(251, 250, 245, 0.92); /* 米白底半透明 */
+  backdrop-filter: blur(8px);
+}
+
+.ccp-site-header-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: var(--cc-content-max-p);
+  min-height: 60px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.ccp-site-logo {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--cc-brand-600);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ccp-site-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.ccp-site-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: var(--cc-radius-control);
+  font-size: var(--cc-fs-body);
+  font-weight: 600;
+  color: var(--cc-neutral-900);
+  text-decoration: none;
+}
+
+.ccp-site-nav a:hover {
+  color: var(--cc-brand-600);
+  background: var(--cc-brand-50);
+}
+
+.ccp-site-nav a.active {
+  color: var(--cc-brand-600);
+}
+
+.ccp-site-actions .cc-btn {
+  display: inline-block;
+  width: auto;
+  min-height: 40px;
+  padding: 6px 14px;
+  font-size: var(--cc-fs-small);
+}
+
+/* 窄屏（≤480px）：头部换行为两行——第一行 logo + 登录入口，第二行站点导航。
+ * 单行排在 320px 视口必然溢出（登录入口文案可能为「我的中心」「机构管理面板」等长文案）。 */
+@media (max-width: 480px) {
+  .ccp-site-header-inner {
+    flex-wrap: wrap;
+    gap: 0 8px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .ccp-site-logo {
+    font-size: 17px;
+  }
+
+  .ccp-site-actions {
+    margin-left: auto;
+  }
+
+  .ccp-site-nav {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .ccp-site-nav a {
+    min-height: 40px;
+    padding: 6px 10px;
+    font-size: var(--cc-fs-small);
+  }
+
+  /* 两行头部变高，锚点偏移同步加大 */
+  .ccp-anchor {
+    scroll-margin-top: 110px;
+  }
+}
+
+.ccp-site-footer {
+  margin-top: 40px;
+  border-top: 1px solid var(--cc-neutral-300);
+  background: var(--cc-neutral-0);
+}
+
+.ccp-site-footer-inner {
+  max-width: var(--cc-content-max-p);
+  margin: 0 auto;
+  padding: 24px 16px 32px;
+  text-align: center;
+}
+
+.ccp-site-footer-brand {
+  margin: 0 0 8px;
+  font-weight: 700;
+  color: var(--cc-brand-600);
+}
+
+.ccp-site-footer-line {
+  margin: 0 0 4px;
+  font-size: var(--cc-fs-small);
+  color: var(--cc-neutral-600);
+}
+
+.ccp-site-footer-line a {
+  color: var(--cc-brand-600);
+}
+
+.ccp-site-footer-copy {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--cc-neutral-600);
+}
+
+/* ---------- 区块头：标题 + 更多链接/备注（首页/About 共用） ---------- */
+
+.ccp-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ccp-section-more {
+  font-size: var(--cc-fs-small);
+  font-weight: 600;
+  color: var(--cc-brand-600);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ccp-section-more:hover {
+  text-decoration: underline;
+}
+
+.ccp-section-note {
+  font-size: var(--cc-fs-small);
+  color: var(--cc-neutral-600);
+  white-space: nowrap;
+}
+
+/* ---------- 首页 Hero 区：品牌卡 + 大图占位（桌面并排，移动堆叠） ---------- */
+
+.ccp-hero-wrap {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.ccp-hero-wrap .ccp-hero {
+  margin-bottom: 0;
+}
+
+@media (min-width: 900px) {
+  .ccp-hero-wrap {
+    grid-template-columns: 3fr 2fr;
+  }
+}
+
+/* ---------- 图片占位块（待真实素材替换：品牌 logo / 活动照片） ---------- */
+
+.ccp-photo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--ccp-mint);
+  border-radius: var(--cc-radius-card-p);
+  background: var(--ccp-mint-bg);
+  color: var(--cc-brand-700);
+  font-size: var(--cc-fs-small);
+}
+
+.ccp-photo-hero {
+  min-height: 220px;
+}
+
+@media (max-width: 899px) {
+  .ccp-photo-hero {
+    aspect-ratio: 4 / 3;
+  }
+}
+
+.ccp-photo-card {
+  aspect-ratio: 16 / 10;
+  border: none;
+  border-bottom: 1px dashed var(--ccp-mint);
+  border-radius: 0;
+}
+
+.ccp-photo-past {
+  aspect-ratio: 16 / 9;
+  border: none;
+  border-bottom: 1px dashed var(--ccp-mint);
+  border-radius: 0;
+}
+
+/* 活动详情封面占位 */
+.ccp-photo-detail {
+  aspect-ratio: 16 / 9;
+}
+
+/* 活动详情主标题（活动标题即页面标题） */
+.ccp-detail-title {
+  margin: 12px 0;
+  font-size: var(--cc-fs-page-title);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* ---------- 卡片网格（首页活动/故事、About 参与方式等共用） ---------- */
+
+.ccp-card-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 640px) {
+  .ccp-card-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.ccp-card {
+  overflow: hidden;
+  border: 1px solid var(--cc-neutral-300);
+  border-radius: var(--cc-radius-card-p);
+  background: var(--cc-neutral-0);
+  box-shadow: var(--cc-shadow-1);
+}
+
+.ccp-card-body {
+  padding: 16px;
+}
+
+.ccp-card-body .cc-btn-block {
+  margin-top: 12px;
+}
+
+.ccp-card-title {
+  margin: 0 0 6px;
+  font-size: var(--cc-fs-card-title);
+  font-weight: 600;
+}
+
+.ccp-card-past {
+  margin-bottom: 16px;
+}
+
+/* ---------- 指标网格（Our Impact / About 数据点） ---------- */
+
+.ccp-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 768px) {
+  .ccp-metric-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* ---------- 引言块（珊瑚橙左边线，点缀用法） ---------- */
+
+.ccp-quote {
+  margin: 0 0 16px;
+  padding: 4px 0 4px 16px;
+  border-left: 3px solid var(--cc-accent-500);
+}
+
+.ccp-quote-text {
+  margin: 0 0 6px;
+  font-size: var(--cc-fs-card-title);
+  line-height: 1.7;
+}
+
+.ccp-quote-source {
+  font-style: normal;
+  font-size: var(--cc-fs-small);
+  color: var(--cc-neutral-600);
+}
+
+.ccp-impact-footnote,
+.ccp-about-footnote {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--cc-neutral-600);
+}
+
+/* ---------- About 页 ---------- */
+
+.ccp-about-title {
+  margin: 0 0 8px;
+  font-size: var(--cc-fs-display);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--cc-brand-700);
+}
+
+.ccp-about-lead {
+  margin: 0 0 8px;
+  max-width: 640px;
+  font-size: var(--cc-fs-card-title);
+  line-height: 1.7;
+  color: var(--cc-neutral-600);
+}
+
+.ccp-about-section {
+  margin-top: 32px;
+}
+
+.ccp-about-text {
+  margin: 0 0 12px;
+  max-width: 720px;
+  line-height: 1.8;
+}
+
+.ccp-text-link {
+  color: var(--cc-brand-600);
+}
+
+.ccp-step-list {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.ccp-step {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--cc-neutral-300);
+  border-radius: var(--cc-radius-card-p);
+  background: var(--cc-neutral-0);
+  box-shadow: var(--cc-shadow-1);
+}
+
+.ccp-step-num {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--cc-brand-600);
+  color: var(--cc-neutral-0);
+  font-weight: 700;
+}
+
+.ccp-step-title {
+  margin: 0 0 6px;
+  font-size: var(--cc-fs-card-title);
+  font-weight: 600;
+}
+
+.ccp-step-sub {
+  margin-left: 8px;
+  font-size: var(--cc-fs-small);
+  font-weight: 400;
+  color: var(--cc-neutral-600);
+}
+
+.ccp-flow-list {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 640px) {
+  .ccp-flow-list {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.ccp-flow-item {
+  padding: 16px;
+  border-radius: var(--cc-radius-card-p);
+  background: var(--ccp-mint-bg);
+}
+
+.ccp-flow-time {
+  margin: 0 0 4px;
+  font-size: var(--cc-fs-small);
+  font-weight: 600;
+  color: var(--cc-brand-700);
+}
+
+.ccp-flow-name {
+  margin: 0 0 6px;
+  font-size: var(--cc-fs-card-title);
+  font-weight: 600;
 }
 
 /* ---------- 首页 Hero（Brand 900 深色区 + 圆形母题，全站仅首页 1 处 Display） ---------- */
@@ -519,469 +992,7 @@ a.cc-btn {
   box-sizing: border-box;
 }
 
-/* ---------- 首页项目介绍（内容移植自计划书，视觉沿用现有 token 与圆形/卡片语言） ---------- */
-
-/* 锚点导航：吸顶 + 移动端横向滚动 */
-.ccp-nav {
-  position: sticky;
-  top: 0;
-  z-index: 40;
-  display: flex;
-  gap: 8px;
-  margin: 0 -16px 16px;
-  padding: 8px 16px;
-  overflow-x: auto;
-  background: rgba(247, 246, 242, 0.94); /* neutral-50 半透明，与页面底色一致 */
-  backdrop-filter: blur(6px);
-}
-
-.ccp-nav a {
-  flex-shrink: 0;
-  padding: 6px 14px;
-  border: 1px solid var(--cc-neutral-300);
-  border-radius: var(--cc-radius-pill);
-  background: var(--cc-neutral-0);
-  font-size: var(--cc-fs-small);
-  font-weight: 600;
-  color: var(--cc-brand-700);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.ccp-nav a:hover {
-  background: var(--cc-brand-50);
-  border-color: var(--cc-brand-300);
-}
-
-/* 锚点偏移：避免区块标题被吸顶导航遮挡 */
+/* ---------- 锚点偏移：避免区块标题被吸顶导航遮挡（ActivitiesPage 区块锚点使用） ---------- */
 .ccp-anchor {
   scroll-margin-top: 64px;
-}
-
-.ccp-intro-section {
-  margin-bottom: 36px;
-}
-
-.ccp-intro-lead {
-  margin: 0 0 16px;
-  max-width: 680px;
-  font-size: var(--cc-fs-body);
-  line-height: 1.8;
-  color: var(--cc-neutral-600);
-}
-
-/* 卡片网格（移动端单列，桌面 2/3 列） */
-.ccp-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 12px;
-}
-
-@media (min-width: 768px) {
-  .ccp-grid-2 {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .ccp-grid-3 {
-    grid-template-columns: 1fr 1fr 1fr;
-  }
-}
-
-.ccp-grid-span {
-  grid-column: 1 / -1;
-}
-
-.ccp-card {
-  padding: 16px;
-  border: 1px solid var(--cc-neutral-300);
-  border-radius: var(--cc-radius-card-p);
-  background: var(--cc-neutral-0);
-  box-shadow: var(--cc-shadow-1);
-}
-
-.ccp-card-label {
-  margin: 0 0 6px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--cc-brand-600);
-}
-
-.ccp-card h3 {
-  margin: 0 0 8px;
-  font-size: var(--cc-fs-card-title);
-  font-weight: 600;
-}
-
-.ccp-card p {
-  margin: 0;
-  font-size: var(--cc-fs-small);
-  line-height: 1.7;
-  color: var(--cc-neutral-600);
-}
-
-/* 浅底色变体：仅换背景，边框/圆角保持一致 */
-.ccp-tint-brand {
-  background: var(--cc-brand-50);
-}
-
-.ccp-tint-accent {
-  background: var(--cc-accent-100);
-}
-
-.ccp-tint-info {
-  background: var(--cc-info-bg);
-}
-
-.ccp-tint-warning {
-  background: var(--cc-warning-bg);
-}
-
-.ccp-tint-success {
-  background: var(--cc-success-bg);
-}
-
-/* 深色区块（Brand 900，与首页 Hero 同一语言，含径向微光） */
-.ccp-dark {
-  position: relative;
-  overflow: hidden;
-  padding: 24px;
-  border-radius: var(--cc-radius-card-p);
-  background: var(--cc-brand-900);
-  color: var(--cc-neutral-0);
-}
-
-.ccp-dark::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse at 78% 20%, rgba(120, 198, 176, 0.18) 0%, transparent 60%);
-  pointer-events: none;
-}
-
-.ccp-dark > * {
-  position: relative;
-}
-
-.ccp-dark h3,
-.ccp-dark h4 {
-  margin: 0 0 8px;
-  color: var(--cc-neutral-0);
-}
-
-.ccp-dark p {
-  color: rgba(255, 255, 255, 0.75);
-}
-
-/* 深色区块内的玻璃卡片 */
-.ccp-dark-card {
-  padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: var(--cc-radius-control);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.ccp-dark-card h4 {
-  margin: 0 0 6px;
-  font-size: var(--cc-fs-small);
-  font-weight: 600;
-  color: var(--cc-neutral-0);
-}
-
-.ccp-dark-card p {
-  margin: 0;
-  font-size: var(--cc-fs-small);
-  line-height: 1.6;
-  color: rgba(255, 255, 255, 0.65);
-}
-
-/* 1 + 2 = 3 计划组成条 */
-.ccp-pkg-strip {
-  display: grid;
-  gap: 8px;
-  align-items: stretch;
-}
-
-@media (min-width: 768px) {
-  .ccp-pkg-strip {
-    grid-template-columns: 1fr auto 1fr auto 1fr;
-    gap: 0;
-  }
-}
-
-.ccp-pkg-card {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.ccp-pkg-num {
-  flex-shrink: 0;
-  font-size: 24px;
-  font-weight: 700;
-  line-height: 1.2;
-  color: var(--cc-brand-600);
-}
-
-.ccp-pkg-op {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px 12px;
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--cc-accent-500);
-}
-
-/* 深色区块内的要点柱（pillar） */
-.ccp-pillars {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.ccp-pillar {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: var(--cc-radius-control);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.ccp-pillar-dot {
-  flex-shrink: 0;
-  width: 8px;
-  height: 8px;
-  margin-top: 6px;
-  border-radius: 50%;
-  background: var(--cc-brand-300);
-}
-
-.ccp-pillar-dot-accent {
-  background: var(--cc-accent-500);
-}
-
-.ccp-pillar-title {
-  font-size: var(--cc-fs-small);
-  font-weight: 600;
-  color: var(--cc-neutral-0);
-}
-
-.ccp-pillar-sub {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
-}
-
-/* 双栏：文字 + 要点柱（桌面） */
-.ccp-split {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 20px;
-  align-items: center;
-}
-
-@media (min-width: 768px) {
-  .ccp-split {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-/* 活动当天流程（5 步） */
-.ccp-flow {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 8px;
-}
-
-@media (min-width: 768px) {
-  .ccp-flow {
-    grid-template-columns: repeat(5, 1fr);
-  }
-}
-
-.ccp-flow-step {
-  padding: 12px;
-  border: 1px solid var(--cc-neutral-300);
-  border-radius: var(--cc-radius-control);
-  background: var(--cc-neutral-0);
-}
-
-.ccp-flow-time {
-  margin: 0 0 4px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--cc-brand-600);
-}
-
-.ccp-flow-name {
-  margin: 0 0 2px;
-  font-size: var(--cc-fs-small);
-  font-weight: 700;
-}
-
-.ccp-flow-desc {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--cc-neutral-600);
-}
-
-/* 角色卡列表（倾诉者 / 聆听者） */
-.ccp-role-sub {
-  margin: 0;
-  font-size: 12px;
-  color: var(--cc-neutral-600);
-}
-
-.ccp-role-list {
-  margin: 12px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.ccp-role-list li {
-  display: flex;
-  gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px dashed var(--cc-neutral-300);
-  font-size: var(--cc-fs-small);
-  line-height: 1.6;
-}
-
-.ccp-role-list li:last-child {
-  border-bottom: none;
-}
-
-.ccp-role-list li::before {
-  content: '→';
-  flex-shrink: 0;
-  font-weight: 600;
-  color: var(--cc-brand-600);
-}
-
-/* 培训时段条（左侧时间列 + 右侧内容） */
-.ccp-training {
-  display: grid;
-  grid-template-columns: 64px 1fr;
-  overflow: hidden;
-}
-
-.ccp-training-time {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 16px 8px;
-  background: var(--cc-brand-50);
-  border-right: 1px solid var(--cc-neutral-300);
-}
-
-.ccp-training-min {
-  font-size: 22px;
-  font-weight: 700;
-  line-height: 1;
-  color: var(--cc-brand-600);
-}
-
-.ccp-training-min-label {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--cc-neutral-600);
-}
-
-.ccp-training-body {
-  padding: 16px;
-}
-
-.ccp-training-body h4 {
-  margin: 0 0 6px;
-  font-size: var(--cc-fs-body);
-  font-weight: 600;
-}
-
-.ccp-training-body p {
-  margin: 0 0 10px;
-  font-size: var(--cc-fs-small);
-  line-height: 1.6;
-  color: var(--cc-neutral-600);
-}
-
-.ccp-tag-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-/* 组内小标题（对倾诉者 / 对聆听者……）：accent 左边条 */
-.ccp-group-label {
-  margin: 24px 0 12px;
-  padding-left: 10px;
-  border-left: 3px solid var(--cc-accent-500);
-  font-size: var(--cc-fs-small);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--cc-brand-700);
-}
-
-/* 评估表格：移动端横向滚动 */
-.ccp-table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--cc-neutral-300);
-  border-radius: var(--cc-radius-card-a);
-  background: var(--cc-neutral-0);
-}
-
-.ccp-table {
-  width: 100%;
-  min-width: 560px;
-  border-collapse: collapse;
-  font-size: var(--cc-fs-small);
-}
-
-.ccp-table th {
-  padding: 10px 12px;
-  background: var(--cc-brand-600);
-  color: var(--cc-neutral-0);
-  font-weight: 600;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.ccp-table td {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--cc-neutral-300);
-  vertical-align: top;
-  line-height: 1.6;
-}
-
-.ccp-table tr:last-child td {
-  border-bottom: none;
-}
-
-.ccp-table tbody tr:nth-child(even) td {
-  background: var(--cc-neutral-50);
-}
-
-/* 理念引言（深色区块内） */
-.ccp-quote-text {
-  margin: 0;
-  max-width: 700px;
-  font-size: var(--cc-fs-card-title);
-  line-height: 1.8;
-  font-style: italic;
-  color: var(--cc-neutral-0);
-}
-
-.ccp-quote-cite {
-  display: block;
-  margin-top: 12px;
-  font-size: 12px;
-  font-style: normal;
-  color: rgba(255, 255, 255, 0.55);
 }

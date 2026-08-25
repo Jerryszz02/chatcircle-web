@@ -1,59 +1,63 @@
 import { Link, useParams } from 'react-router-dom';
-import { Button, Card, Loading, PageLayout } from '../../../shared/ui';
+import { Button, Card, Loading } from '../../../shared/ui';
 import { usePublicActivity } from '../lib/usePublicActivity';
 import { formatTimeRange, registrationClosedReasonCopy } from '../lib/status';
+import { PublicPageLayout } from '../components/PublicPageLayout';
 
 /**
  * 公开活动详情（/a/:activityId，FR-ACT-003：未登录可看，点击报名时才要求登录）。
  * 仅 published/closed 活动由服务端放行；展示报名开放状态与剩余名额口径。
+ * 2026-08 UI 重构：改用站点公共框架（导航 + 页脚），活动标题即页面主标题，
+ * 顶部封面为图片占位块，待活动照片素材替换。
  */
 export function ActivityDetailPage() {
   const { activityId = '' } = useParams();
   const { data, error, loading, reload } = usePublicActivity(activityId);
 
   return (
-    <PageLayout
-      section="参与者端"
-      title="公开活动详情"
-      className="ccp-root ccp-has-sticky-cta"
-      backTo="/"
-    >
+    <PublicPageLayout className="ccp-has-sticky-cta">
       {loading ? <Loading fullscreen /> : null}
 
       {!loading && error ? (
-        <Card>
-          <p>{error.status === 404 || error.status === 403 ? '活动不存在或未开放' : error.message}</p>
-          {error.status !== 404 && error.status !== 403 ? (
-            <Button variant="secondary" onClick={reload}>
-              重试
-            </Button>
-          ) : null}
-        </Card>
+        <>
+          <h1 className="ccp-detail-title">活动详情</h1>
+          <Card>
+            <p>{error.status === 404 || error.status === 403 ? '活动不存在或未开放' : error.message}</p>
+            {error.status !== 404 && error.status !== 403 ? (
+              <Button variant="secondary" onClick={reload}>
+                重试
+              </Button>
+            ) : null}
+          </Card>
+        </>
       ) : null}
 
       {!loading && data ? (
         <>
-          <Card title={data.activity.title}>
-            <dl className="cc-meta">
+          {/* 活动封面占位：待活动照片素材替换 */}
+          <div className="ccp-photo ccp-photo-detail" aria-hidden="true">
+            活动照片
+          </div>
+          <h1 className="ccp-detail-title">{data.activity.title}</h1>
+          <dl className="cc-meta">
+            <div className="cc-meta-row">
+              <dt>活动时间</dt>
+              <dd>{formatTimeRange(data.activity.start_time, data.activity.end_time)}</dd>
+            </div>
+            {data.activity.location ? (
               <div className="cc-meta-row">
-                <dt>活动时间</dt>
-                <dd>{formatTimeRange(data.activity.start_time, data.activity.end_time)}</dd>
+                <dt>活动地点</dt>
+                <dd>{data.activity.location}</dd>
               </div>
-              {data.activity.location ? (
-                <div className="cc-meta-row">
-                  <dt>活动地点</dt>
-                  <dd>{data.activity.location}</dd>
-                </div>
-              ) : null}
-              <div className="cc-meta-row">
-                <dt>活动代码</dt>
-                <dd>{data.activity.activity_code}</dd>
-              </div>
-            </dl>
-            {data.activity.description ? (
-              <p className="cc-activity-desc">{data.activity.description}</p>
             ) : null}
-          </Card>
+            <div className="cc-meta-row">
+              <dt>活动代码</dt>
+              <dd>{data.activity.activity_code}</dd>
+            </div>
+          </dl>
+          {data.activity.description ? (
+            <p className="cc-activity-desc">{data.activity.description}</p>
+          ) : null}
 
           <Card title="活动报名">
             {data.registration.open ? (
@@ -94,6 +98,6 @@ export function ActivityDetailPage() {
           </Card>
         </>
       ) : null}
-    </PageLayout>
+    </PublicPageLayout>
   );
 }
