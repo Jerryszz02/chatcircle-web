@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { normalizeApiError, type ApiError } from '../../../shared/api/http';
 import { Button, Loading } from '../../../shared/ui';
 import { getPublicActivities, type PublicActivityListItem } from '../api';
@@ -9,7 +9,7 @@ import { PublicPageLayout } from '../components/PublicPageLayout';
 /**
  * 首页（/，未登录可看）：Chat Circles C 端品牌官网落地页（2026-08 UI 重构）。
  * 区块：Hero（品牌 + 大图占位）→ 现有活动（公开活动 API 真实数据）→
- * 活动故事（静态占位，待后端任务对接）→ 往期活动（静态占位）→ 我们的影响
+ * 往期活动（活动故事并入同一区块，均为静态占位，待后端任务对接）→ 我们的影响
  * （首场试点真实数据，诚实标注样本口径）。
  * 所有图片均为占位块，待品牌素材（logo / 活动照片）到位后替换。
  * 浏览活动不需要账号；报名活动在对应链路内登录/自动注册（FR-AUTH-001）。
@@ -55,11 +55,47 @@ const IMPACT_QUOTE = {
 };
 
 export function HomePage() {
+  // key 随每次导航变化（含重复点击同一锚点链接），用于触发重复滚动
+  const { hash, key } = useLocation();
+  const [activities, setActivities] = useState<PublicActivityListItem[] | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    getPublicActivities()
+      .then((res) => {
+        if (cancelled) return;
+        setActivities(res.activities);
+        // 重试成功后清除此前的错误提示与重试按钮
+        setError(null);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(normalizeApiError(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tick]);
+
+  // 锚点直达（站点导航「往期活动」→ /#past）：等现有活动请求落定（数据或错误其一）
+  // 再滚动，避免上方布局变化导致错位（同 ActivitiesPage 的锚点处理）；
+  // key 入依赖使 hash 不变时的重复点击也能重新滚动。
+  const activitiesSettled = activities !== null || error !== null;
+  useEffect(() => {
+    if (!hash || !activitiesSettled) return;
+    const el = document.getElementById(hash.slice(1));
+    el?.scrollIntoView();
+  }, [hash, key, activitiesSettled]);
+
   return (
     <PublicPageLayout>
       <HeroSection />
-      <UpcomingActivitiesSection />
-      <StoriesSection />
+      <UpcomingActivitiesSection
+        activities={activities}
+        error={error}
+        onRetry={() => setTick((t) => t + 1)}
+      />
       <PastActivitySection />
       <ImpactSection />
     </PublicPageLayout>
@@ -96,30 +132,17 @@ function HeroSection() {
   );
 }
 
-/* ---------- 现有活动：公开活动 API 真实数据 ---------- */
+/* ---------- 现有活动：公开活动 API 真实数据（数据请求上移至 HomePage，供锚点滚动依赖） ---------- */
 
-function UpcomingActivitiesSection() {
-  const [activities, setActivities] = useState<PublicActivityListItem[] | null>(null);
-  const [error, setError] = useState<ApiError | null>(null);
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    getPublicActivities()
-      .then((res) => {
-        if (cancelled) return;
-        setActivities(res.activities);
-        // 重试成功后清除此前的错误提示与重试按钮
-        setError(null);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(normalizeApiError(err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [tick]);
-
+function UpcomingActivitiesSection({
+  activities,
+  error,
+  onRetry,
+}: {
+  activities: PublicActivityListItem[] | null;
+  error: ApiError | null;
+  onRetry: () => void;
+}) {
   // 现有活动：已结束（closed）的不在首页展示；最多 4 张卡片
   const upcoming = (activities ?? []).filter((a) => a.status !== 'closed').slice(0, 4);
 
@@ -139,7 +162,7 @@ function UpcomingActivitiesSection() {
       {error ? (
         <>
           <p className="cc-empty">{error.message}</p>
-          <Button variant="secondary" onClick={() => setTick((t) => t + 1)}>
+          <Button variant="secondary" onClick={onRetry}>
             重试
           </Button>
         </>
@@ -160,15 +183,27 @@ function UpcomingActivitiesSection() {
   );
 }
 
-/* ---------- 活动故事：静态占位卡片（支持公众号外链），待后端任务对接 ---------- */
+/* ---------- 往期活动：活动故事并入本区块（均为静态占位卡片，待后端任务对接） ---------- */
 
-function StoriesSection() {
+function PastActivitySection() {
   return (
-    <section aria-labelledby="home-stories">
+    <section className="ccp-anchor" id="past" aria-labelledby="home-past">
       <div className="ccp-section-head">
-        <h2 className="ccp-section-title" id="home-stories">
-          活动故事
+        <h2 className="ccp-section-title" id="home-past">
+          往期活动
         </h2>
+      </div>
+      <div className="ccp-card ccp-card-past">
+        {/* 活动照片占位：待首场活动真实照片替换 */}
+        <div className="ccp-photo ccp-photo-past" aria-hidden="true">
+          活动照片
+        </div>
+        <div className="ccp-card-body">
+          <h3 className="ccp-card-title">
+            {PAST_ACTIVITY_PLACEHOLDER.title} · {PAST_ACTIVITY_PLACEHOLDER.date}
+          </h3>
+          <p className="cc-item-meta">{PAST_ACTIVITY_PLACEHOLDER.desc}</p>
+        </div>
       </div>
       <ul className="ccp-card-grid">
         {STORY_PLACEHOLDERS.map((story) => (
@@ -196,32 +231,6 @@ function StoriesSection() {
           </li>
         ))}
       </ul>
-    </section>
-  );
-}
-
-/* ---------- 往期活动：静态占位卡片，待后端任务对接真实往期列表 ---------- */
-
-function PastActivitySection() {
-  return (
-    <section aria-labelledby="home-past">
-      <div className="ccp-section-head">
-        <h2 className="ccp-section-title" id="home-past">
-          往期活动
-        </h2>
-      </div>
-      <div className="ccp-card ccp-card-past">
-        {/* 活动照片占位：待首场活动真实照片替换 */}
-        <div className="ccp-photo ccp-photo-past" aria-hidden="true">
-          活动照片
-        </div>
-        <div className="ccp-card-body">
-          <h3 className="ccp-card-title">
-            {PAST_ACTIVITY_PLACEHOLDER.title} · {PAST_ACTIVITY_PLACEHOLDER.date}
-          </h3>
-          <p className="cc-item-meta">{PAST_ACTIVITY_PLACEHOLDER.desc}</p>
-        </div>
-      </div>
     </section>
   );
 }
