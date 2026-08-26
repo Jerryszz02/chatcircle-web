@@ -11,24 +11,42 @@ import { ActivitiesPage } from './ActivitiesPage';
 
 /**
  * 活动与问卷页测试（/activities，由首页拆出）：
- * 覆盖活动列表渲染与报名状态分支、空列表、未登录问卷指引、
- * 已登录时展示「我的」开放问卷（含草稿续填）。
+ * 覆盖现有活动列表渲染与报名状态分支、已结束活动过滤（归入往期活动页）、
+ * 空列表、未登录问卷指引、已登录时展示「我的」开放问卷（含草稿续填）。
  */
 
+/** PocketBase 日期格式（'YYYY-MM-DD HH:mm:ss.sssZ'）。 */
+const pbDateTime = (d: Date) => d.toISOString().replace('T', ' ');
+
+/** 未结束活动：7 天后开始，持续 2 小时。 */
 function activityItem(overrides: Record<string, unknown> = {}) {
+  const start = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   return {
     id: 'act1',
     title: '八月光影茶话会',
     activity_code: 'CC_SG_202608_01',
     description: '一场关于光影与倾诉的聚会。',
     location: '三楼活动室',
-    start_time: '2026-08-10 02:00:00.000Z',
-    end_time: '2026-08-10 04:00:00.000Z',
+    start_time: pbDateTime(start),
+    end_time: pbDateTime(new Date(start.getTime() + 2 * 60 * 60 * 1000)),
     status: 'published',
     capacity_total: 20,
     registration: { open: true, reason: null, remaining_total: 5 },
     ...overrides,
   };
+}
+
+/** 已结束活动：14 天前举行；默认仍为 published（机构未手动关闭，同凯德专场场景）。 */
+function pastActivityItem(overrides: Record<string, unknown> = {}) {
+  const start = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  return activityItem({
+    id: 'act0',
+    title: '六月试点场',
+    start_time: pbDateTime(start),
+    end_time: pbDateTime(new Date(start.getTime() + 2 * 60 * 60 * 1000)),
+    registration: { open: false, reason: 'ended', remaining_total: 0 },
+    ...overrides,
+  });
 }
 
 function renderPage(initialEntry = '/activities') {
@@ -79,6 +97,25 @@ describe('ActivitiesPage 活动与问卷页', () => {
     stubApi({ 'GET /api/cc/public/activities': { body: { activities: [] } } });
     renderPage();
     expect(await screen.findByText(/暂无进行中的活动/)).toBeInTheDocument();
+  });
+
+  it('已结束活动（closed 或 end_time 已过）不在本页展示，归入往期活动页', async () => {
+    stubApi({
+      'GET /api/cc/public/activities': {
+        body: {
+          activities: [
+            activityItem({ id: 'c1', title: '八月光影茶话会' }),
+            // 凯德专场回归：end_time 已过但机构未手动关闭（status 仍是 published）
+            pastActivityItem({ id: 'p1', title: 'Chat Circles · 凯德专场（2026-06-12）' }),
+            pastActivityItem({ id: 'p2', title: '六月试点场', status: 'closed' }),
+          ],
+        },
+      },
+    });
+    renderPage();
+    expect(await screen.findByText('八月光影茶话会')).toBeInTheDocument();
+    expect(screen.queryByText(/凯德专场/)).not.toBeInTheDocument();
+    expect(screen.queryByText('六月试点场')).not.toBeInTheDocument();
   });
 
   it('未登录时问卷区引导扫码/登录，不请求「我的」总览', async () => {

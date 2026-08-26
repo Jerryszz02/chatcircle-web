@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -13,24 +13,43 @@ import { HomePage } from './HomePage';
 
 /**
  * 首页测试（C 端品牌官网落地页，2026-08 UI 重构）。
- * 覆盖：Hero 与 CTA、站点导航、现有活动区块（公开活动 API 真实数据）、
- * 往期活动（活动故事并入同一区块）静态占位、Our Impact 首场试点真实数据、右上角角色入口。
+ * 覆盖：Hero 与 CTA、站点导航、现有活动区块（最近 2 场 + 查看全部）、
+ * 往期活动区块（已结束场次最近 2 场 + 查看全部，活动故事并入同一区块）、
+ * Our Impact 首场试点真实数据、右上角角色入口。
  */
 
+/** PocketBase 日期格式（'YYYY-MM-DD HH:mm:ss.sssZ'）。 */
+const pbDateTime = (d: Date) => d.toISOString().replace('T', ' ');
+
+/** 未结束活动：7 天后开始，持续 2 小时。 */
 function activityItem(overrides: Record<string, unknown> = {}) {
+  const start = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   return {
     id: 'act1',
     title: '八月光影茶话会',
     activity_code: 'CC_SG_202608_01',
     description: '一场关于光影与倾诉的聚会。',
     location: '三楼活动室',
-    start_time: '2026-08-10 02:00:00.000Z',
-    end_time: '2026-08-10 04:00:00.000Z',
+    start_time: pbDateTime(start),
+    end_time: pbDateTime(new Date(start.getTime() + 2 * 60 * 60 * 1000)),
     status: 'published',
     capacity_total: 20,
     registration: { open: true, reason: null, remaining_total: 5 },
     ...overrides,
   };
+}
+
+/** 已结束活动：14 天前举行；默认仍为 published（机构未手动关闭，同凯德专场场景）。 */
+function pastActivityItem(overrides: Record<string, unknown> = {}) {
+  const start = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  return activityItem({
+    id: 'act0',
+    title: '六月试点场',
+    start_time: pbDateTime(start),
+    end_time: pbDateTime(new Date(start.getTime() + 2 * 60 * 60 * 1000)),
+    registration: { open: false, reason: 'ended', remaining_total: 0 },
+    ...overrides,
+  });
 }
 
 function renderHome() {
@@ -49,7 +68,7 @@ describe('HomePage 首页', () => {
   beforeEach(clearAllSessions);
   afterEach(unstubApi);
 
-  it('展示品牌 Hero、CTA 与站点导航（logo / 现有活动 / 往期活动 / 关于我们）', () => {
+  it('展示品牌 Hero、CTA 与站点导航（logo / 首页 / 现有活动 / 往期活动 / 关于我们）', () => {
     stubActivities();
     renderHome();
     expect(screen.getByText('青年心理健康公益项目')).toBeInTheDocument();
@@ -57,12 +76,16 @@ describe('HomePage 首页', () => {
     expect(screen.getByRole('link', { name: '浏览活动' })).toHaveAttribute('href', '/activities');
     // 站点导航
     expect(screen.getByRole('link', { name: 'Chat Circles' })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: '首页' })).toHaveAttribute('href', '/');
     expect(screen.getByRole('link', { name: '现有活动' })).toHaveAttribute('href', '/activities');
-    expect(screen.getByRole('link', { name: '往期活动' })).toHaveAttribute('href', '/#past');
+    expect(screen.getByRole('link', { name: '往期活动' })).toHaveAttribute(
+      'href',
+      '/activities/past',
+    );
     expect(screen.getByRole('link', { name: '关于我们' })).toHaveAttribute('href', '/about');
   });
 
-  it('现有活动区块渲染公开活动卡片（报名状态 + 报名入口）', async () => {
+  it('现有活动区块渲染公开活动卡片（报名状态 + 报名入口 + 查看全部）', async () => {
     stubActivities([activityItem()]);
     renderHome();
     expect(await screen.findByText('八月光影茶话会')).toBeInTheDocument();
@@ -72,17 +95,51 @@ describe('HomePage 首页', () => {
       'href',
       '/a/act1/register',
     );
-    expect(screen.getByRole('link', { name: '全部活动 →' })).toHaveAttribute(
+    const upcoming = screen.getByRole('region', { name: '现有活动' });
+    expect(within(upcoming).getByRole('link', { name: '查看全部 →' })).toHaveAttribute(
       'href',
       '/activities',
     );
   });
 
-  it('已结束（closed）活动不在首页现有活动区展示；无活动时显示空态文案', async () => {
-    stubActivities([activityItem({ id: 'act0', title: '六月试点场', status: 'closed' })]);
+  it('已结束活动不在现有活动区展示（closed 或 end_time 已过），归入往期活动区', async () => {
+    stubActivities([
+      pastActivityItem({ id: 'act-closed', title: '六月试点场', status: 'closed' }),
+      // 凯德专场回归：end_time 已过但机构未手动关闭（status 仍是 published）
+      pastActivityItem({ id: 'act-kaide', title: 'Chat Circles · 凯德专场（2026-06-12）' }),
+    ]);
     renderHome();
-    expect(await screen.findByText(/新活动筹备中/)).toBeInTheDocument();
-    expect(screen.queryByText('六月试点场')).not.toBeInTheDocument();
+    const upcoming = screen.getByRole('region', { name: '现有活动' });
+    expect(await within(upcoming).findByText(/新活动筹备中/)).toBeInTheDocument();
+    expect(within(upcoming).queryByText('六月试点场')).not.toBeInTheDocument();
+    expect(within(upcoming).queryByText(/凯德专场/)).not.toBeInTheDocument();
+    const past = screen.getByRole('region', { name: '往期活动' });
+    expect(within(past).getByText('六月试点场')).toBeInTheDocument();
+    expect(within(past).getByText(/凯德专场/)).toBeInTheDocument();
+    expect(within(past).getByRole('link', { name: '查看全部 →' })).toHaveAttribute(
+      'href',
+      '/activities/past',
+    );
+  });
+
+  it('现有活动与往期活动区各最多展示 2 场，完整列表进独立页', async () => {
+    stubActivities([
+      activityItem({ id: 'c1', title: '现有场次一' }),
+      activityItem({ id: 'c2', title: '现有场次二' }),
+      activityItem({ id: 'c3', title: '现有场次三' }),
+      pastActivityItem({ id: 'p1', title: '往期场次一' }),
+      pastActivityItem({ id: 'p2', title: '往期场次二' }),
+      pastActivityItem({ id: 'p3', title: '往期场次三' }),
+    ]);
+    renderHome();
+    const upcoming = screen.getByRole('region', { name: '现有活动' });
+    expect(await within(upcoming).findByText('现有场次一')).toBeInTheDocument();
+    expect(within(upcoming).getByText('现有场次二')).toBeInTheDocument();
+    expect(within(upcoming).queryByText('现有场次三')).not.toBeInTheDocument();
+    const past = screen.getByRole('region', { name: '往期活动' });
+    expect(within(past).getByText('往期场次一')).toBeInTheDocument();
+    expect(within(past).getByText('往期场次二')).toBeInTheDocument();
+    expect(within(past).queryByText('往期场次三')).not.toBeInTheDocument();
   });
 
   it('活动加载失败后重试成功：错误提示与重试按钮被清除', async () => {
@@ -99,12 +156,14 @@ describe('HomePage 首页', () => {
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
   });
 
-  it('往期活动区块合并展示活动故事（同一区块，无独立「活动故事」标题）', () => {
+  it('往期活动区块合并展示活动故事（同一区块，无独立「活动故事」标题）', async () => {
     stubActivities();
     renderHome();
     expect(screen.getByRole('heading', { name: '往期活动' })).toBeInTheDocument();
-    expect(screen.getByText(/首场对话活动/)).toBeInTheDocument();
+    // 无往期活动时诚实展示空态，不再使用静态占位活动
+    expect(await screen.findByText('暂无往期活动。')).toBeInTheDocument();
     expect(screen.getByText(/首场活动回顾/)).toBeInTheDocument();
+    expect(screen.getByText(/倾听者手记/)).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '活动故事' })).not.toBeInTheDocument();
   });
 

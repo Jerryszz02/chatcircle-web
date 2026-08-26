@@ -4,16 +4,23 @@ import { normalizeApiError, type ApiError } from '../../../shared/api/http';
 import { currentRole, participantAuth } from '../../../shared/auth';
 import { useSessionSnapshot } from '../../../shared/session';
 import { Button, Loading } from '../../../shared/ui';
-import { getMeOverview, getPublicActivities, type MeOverview, type PublicActivityListItem } from '../api';
+import {
+  getMeOverview,
+  getPublicActivities,
+  type MeOverview,
+  type PublicActivityListItem,
+} from '../api';
 import { ActivityCard } from '../components/ActivityCard';
 import { PublicPageLayout } from '../components/PublicPageLayout';
+import { isCurrentActivity } from '../lib/activitySplit';
 
 /**
  * 活动与问卷页（/activities，未登录可看）：由首页拆出。
- * 活动广场（公开活动列表，卡片样式，点击进详情/报名）+ 问卷入口（登录后显示本人可填问卷，
- * 未登录显示扫码指引）。浏览活动不需要账号；报名与填写问卷时在对应链路内
- * 登录/自动注册（FR-AUTH-001）。问卷也可直接扫描活动现场二维码进入
- * （/survey/:qrToken，未登录由守卫引导登录后回跳）。
+ * 现有活动（公开活动列表中尚未结束的场次，卡片样式，点击进详情/报名）+
+ * 问卷入口（登录后显示本人可填问卷，未登录显示扫码指引）。浏览活动不需要账号；
+ * 报名与填写问卷时在对应链路内登录/自动注册（FR-AUTH-001）。问卷也可直接扫描
+ * 活动现场二维码进入（/survey/:qrToken，未登录由守卫引导登录后回跳）。
+ * 已结束/已关闭的场次归入往期活动页（/activities/past），判定口径见 lib/activitySplit.ts。
  * 支持 #activities / #surveys 锚点直达对应区块。
  */
 export function ActivitiesPage() {
@@ -69,6 +76,9 @@ export function ActivitiesPage() {
     el?.scrollIntoView();
   }, [hash, activities, overview]);
 
+  // 现有活动：已结束（closed 或 end_time 已过）的场次归入往期活动页，不在此展示
+  const current = (activities ?? []).filter((a) => isCurrentActivity(a));
+
   // 问卷区兜底提示：仅完全未登录时引导登录；管理端会话下不引导（单会话互斥）。
   const surveyHint = authed
     ? '当前没有可填写的问卷。'
@@ -79,7 +89,7 @@ export function ActivitiesPage() {
   return (
     <PublicPageLayout>
       <section id="activities" className="ccp-anchor">
-        <h2 className="ccp-section-title">活动</h2>
+        <h2 className="ccp-section-title">现有活动</h2>
         {activities === null && !activitiesError ? <Loading /> : null}
 
         {activitiesError ? (
@@ -91,7 +101,7 @@ export function ActivitiesPage() {
           </>
         ) : null}
 
-        {activities !== null && activities.length === 0 ? (
+        {activities !== null && current.length === 0 ? (
           <div className="ccp-empty">
             <span className="ccp-empty-chip" aria-hidden="true">
               <svg viewBox="0 0 24 24">
@@ -103,9 +113,9 @@ export function ActivitiesPage() {
           </div>
         ) : null}
 
-        {activities !== null && activities.length > 0 ? (
+        {current.length > 0 ? (
           <ul className="ccp-card-grid">
-            {activities.map((activity) => (
+            {current.map((activity) => (
               <ActivityCard key={activity.id} activity={activity} />
             ))}
           </ul>

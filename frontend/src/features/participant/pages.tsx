@@ -7,6 +7,7 @@ import './participant.css';
 export { HomePage } from './pages/HomePage';
 export { AboutPage } from './pages/AboutPage';
 export { ActivitiesPage } from './pages/ActivitiesPage';
+export { PastActivitiesPage } from './pages/PastActivitiesPage';
 export { ActivityDetailPage } from './pages/ActivityDetailPage';
 export { RegisterPage } from './pages/RegisterPage';
 export { LoginPage } from './pages/LoginPage';
