@@ -137,9 +137,10 @@ body:has(.ccp-root) {
   font-size: var(--cc-fs-small);
 }
 
-/* 窄屏（≤480px）：头部换行为两行——第一行 logo + 登录入口，第二行站点导航。
- * 单行排在 320px 视口必然溢出（登录入口文案可能为「我的中心」「机构管理面板」等长文案）。 */
-@media (max-width: 480px) {
+/* 窄屏（≤680px）：头部换行为两行——第一行 logo + 登录入口，第二行站点导航。
+ * 单行排在窄视口必然溢出：logo 图形 + 文字约 175px、4 项导航约 320px、登录入口
+ * 文案可能为「我的中心」「机构管理面板」等长文案（约 110px），合计超过 600px。 */
+@media (max-width: 680px) {
   .ccp-site-header-inner {
     flex-wrap: wrap;
     gap: 0 8px;
