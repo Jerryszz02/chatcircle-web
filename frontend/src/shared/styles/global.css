@@ -1,29 +1,29 @@
 /* ==========================================================================
- * ChatCircle 设计系统（docs/planning/ui-design.md V1）
- * 参与者端：温暖社会创新风；管理后台：极简公益科技风。
+ * ChatCircle 设计系统（docs/planning/ui-design.md；2026-08 起全端统一为 V2 品牌色板：
+ * 深蓝主色 + 薄荷/珊瑚橙点缀 + 米白底，原 participant.css 的 .ccp-root 覆盖已并入 :root）。
  * 全部色值/圆角/阴影/动效经由 CSS 变量引用，组件样式不写死 hex。
  * 移动端优先基础样式：360px 宽无横向滚动（PRD §13）。
  * ========================================================================== */
 
 :root {
-  /* ---------- 品牌色（深青绿：信任、成长、社会连接） ---------- */
-  --cc-brand-50: #eff8f5;
-  --cc-brand-100: #d7efe7;
-  --cc-brand-300: #78c6b0;
-  --cc-brand-500: #23866f;
-  --cc-brand-600: #176b5b; /* 主品牌色、主按钮 */
-  --cc-brand-700: #115548; /* 悬停、深色文本强调 */
-  --cc-brand-900: #0c2e29; /* 深色背景 */
+  /* ---------- 品牌色（V2，2026-08 C 端品牌官网化后全端统一：深蓝=信任、专业、可依赖） ---------- */
+  --cc-brand-50: #eef5fa;
+  --cc-brand-100: #d7e9f4;
+  --cc-brand-300: #8ccfc0; /* 深色区上的眉题/点缀：薄荷绿 */
+  --cc-brand-500: #2f84b5;
+  --cc-brand-600: #176b9c; /* 主品牌色、主按钮（白字对比约 5.8:1，满足 WCAG AA） */
+  --cc-brand-700: #11557d; /* 悬停、深色文本强调 */
+  --cc-brand-900: #0b3b58; /* 深色背景 */
 
-  /* ---------- 强调色（暖黄，仅作点缀，不做大面积背景） ---------- */
-  --cc-accent-100: #fff5dc;
-  --cc-accent-500: #f4b942;
-  --cc-accent-700: #c98713;
+  /* ---------- 强调色（V2 珊瑚橙，仅作点缀，不做大面积背景） ---------- */
+  --cc-accent-100: #fce9e4;
+  --cc-accent-500: #f28b78;
+  --cc-accent-700: #c05a48;
 
   /* ---------- 中性色 ---------- */
   --cc-neutral-0: #ffffff;
-  --cc-neutral-50: #f7f6f2; /* 参与者端页面背景 */
-  --cc-neutral-100: #f0f2f1; /* 后台页面背景 */
+  --cc-neutral-50: #fbfaf5; /* 页面背景（米白） */
+  --cc-neutral-100: #f4f2ec; /* 后台页面背景/浅填充（暖灰，与米白底协调） */
   --cc-neutral-300: #d9e2de; /* 边框与分隔 */
   --cc-neutral-600: #64736e; /* 次级文字 */
   --cc-neutral-900: #1d2926; /* 主文字 */
@@ -190,6 +190,35 @@ svg {
   color: var(--cc-brand-600);
 }
 
+/* ---------- 登录页品牌观感（三端登录页共用）：米白底 + 双圆环母题标记 ---------- */
+
+/* 页面底色米白：body 在页面根类作用域外，用 :has 选择器（同参与者端 ccp-root 的处理） */
+body:has(.cc-auth-page) {
+  background: var(--cc-neutral-50);
+}
+
+/* 双圆环交叠品牌标记（同后台侧栏 admin-brand-mark / sa-brand-mark 母题） */
+.cc-auth-mark {
+  position: relative;
+  width: 64px;
+  height: 44px;
+  margin: 8px auto 16px;
+}
+
+.cc-auth-mark span {
+  position: absolute;
+  top: 0;
+  width: 44px;
+  height: 44px;
+  border: 2.5px solid var(--cc-brand-500);
+  border-radius: 50%;
+}
+
+.cc-auth-mark span:last-child {
+  left: 20px;
+  border-color: var(--cc-accent-500);
+}
+
 /* ---------- 按钮（Button） ----------
  * Primary 深青底白字（每视图区最多 1 个）；Secondary 白底品牌边框；
  * Danger 浅红底红字（不用品牌色、不用实心红）。
@@ -345,7 +374,7 @@ svg {
 .cc-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(12, 46, 41, 0.45);
+  background: rgba(11, 59, 88, 0.45); /* brand-900 深色遮罩 */
   display: flex;
   align-items: flex-end;
   justify-content: center;

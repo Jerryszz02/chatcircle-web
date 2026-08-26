@@ -41,7 +41,11 @@ export function SuperLoginPage() {
   };
 
   return (
-    <PageLayout section="超级管理端" backTo="/">
+    <PageLayout section="超级管理端" backTo="/" className="cc-auth-page">
+      <div className="cc-auth-mark" aria-hidden="true">
+        <span />
+        <span />
+      </div>
       <Card>
         <h1 className="page-title">超级管理员登录</h1>
         <form onSubmit={(e) => void onSubmit(e)}>

@@ -40,7 +40,11 @@ export function AdminLoginPage() {
   };
 
   return (
-    <PageLayout section="机构管理端" title="管理员登录" backTo="/">
+    <PageLayout section="机构管理端" title="管理员登录" backTo="/" className="cc-auth-page">
+      <div className="cc-auth-mark" aria-hidden="true">
+        <span />
+        <span />
+      </div>
       <form onSubmit={handleSubmit} noValidate>
         <Input
           label="用户名"

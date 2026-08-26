@@ -109,7 +109,7 @@ export function RegisterPage() {
 
   return (
     <PageLayout section="参与者端" title="活动报名" className="ccp-root">
-      <div className="ccp-auth-mark" aria-hidden="true">
+      <div className="cc-auth-mark" aria-hidden="true">
         <span />
         <span />
       </div>
