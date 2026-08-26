@@ -167,7 +167,7 @@ chatcircle-web/
 | `/super/approvals`、`/super/activities` | 活动发布审批、全部活动监管/下架 |
 | `/super/dashboard`、`/super/exports`、`/super/audit` | 全局看板、全局导出、全局审计 |
 | `/super/system` | 备份状态与失败告警 |
-| `/super/posts` | 内容推文管理：列表/新建/编辑/置顶/显隐（仅超管入口，机构管理员无入口；2026-08 后端改版，前端页面后续实现） |
+| `/super/posts` | 内容推文管理：列表/新建/编辑/置顶/显隐（仅超管入口，机构管理员无入口；2026-08 后端改版，前端已实现） |
 
 分区原则：
 

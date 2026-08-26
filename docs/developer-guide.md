@@ -325,7 +325,7 @@ src/
 |---|---|
 | 参与者 `/`（公开页不要求登录） | `/` 落地页、`/activities` 活动广场、`/a/:activityId` 详情、`/a/:activityId/register` 报名、`/login`；需会话：`/me` 我的、`/checkin/:token` 扫码签到、`/survey/:qrToken` 填问卷、`/trainings`、`/training-checkin/:token` |
 | 机构 `/admin` | 公开：`/admin/login`、`/admin/register`（邀请码）；守卫：`/admin/activities`(+`/:activityId` 四 tab 详情)、`/admin/trainings`(+`/:id`)、`/admin/dashboard`、`/admin/exports`、`/admin/audit` |
-| 超管 `/super` | 公开：`/super/login`；守卫：`/super/organizations`（机构+邀请码+开关）、`/super/approvals`、`/super/activities`、`/super/dashboard`、`/super/exports`、`/super/audit`、`/super/system`（备份告警+模板管理） |
+| 超管 `/super` | 公开：`/super/login`；守卫：`/super/organizations`（机构+邀请码+开关）、`/super/approvals`、`/super/activities`、`/super/posts`（内容推文）、`/super/dashboard`、`/super/exports`、`/super/audit`、`/super/system`（备份告警+模板管理） |
 
 ### 6.6 样式体系
 
@@ -333,7 +333,7 @@ src/
 
 ### 6.7 前端测试
 
-Vitest + jsdom + Testing Library，37 个测试文件与源码 colocate，主力打**纯函数 lib**（状态机、文案、表单校验）与页面行为（`src/test/mockApi.ts` 的 `stubApi()` 按"METHOD 路径片段"stub fetch，`makeTestToken/saveParticipantSession` 注入登录态）；`router.test.tsx` 用 MemoryRouter 验证三分区守卫。运行 `npm test`。
+Vitest + jsdom + Testing Library，40 个测试文件与源码 colocate，主力打**纯函数 lib**（状态机、文案、表单校验）与页面行为（`src/test/mockApi.ts` 的 `stubApi()` 按"METHOD 路径片段"stub fetch，`makeTestToken/saveParticipantSession` 注入登录态）；`router.test.tsx` 用 MemoryRouter 验证三分区守卫。运行 `npm test`。
 
 ## 7. 端到端业务流程（前后端串起来）
 
@@ -341,7 +341,7 @@ Vitest + jsdom + Testing Library，37 个测试文件与源码 colocate，主力
 
 **机构管理员日常**：建活动（draft）→ （如机构开审核则提交审批）→ 发布 → 审核报名（transition，事务内名额硬校验）→ 现场开放签到场次、展示二维码、补签/撤销 → 从模板复制问卷并开放 → 看板/导出 ZIP（13 个 CSV）→ 培训同理（trainings 三件套）。
 
-**超管**：建机构、生成一次性邀请码（明文只展示一次）、机构开关（发布审核/敏感导出）、活动审批/下架、问卷模板版本管理、全局看板/导出/审计、备份告警（`/super/system`）。
+**超管**：建机构、生成一次性邀请码（明文只展示一次）、机构开关（发布审核/敏感导出）、活动审批/下架、内容推文管理（`/super/posts`，置顶/显隐，无硬删除）、问卷模板版本管理、全局看板/导出/审计、备份告警（`/super/system`）。
 
 **数据出口**：导出 ZIP → 外部分析 agent 经 `mcp/` MCP server 取数（`export_activity_data` 恒 `include_pii:false`，只回文件路径不回正文）→ 报告经 `upload_report` 回传 `reports` 集合（强制 draft，人工审核发布，钩子记 `report.upload` 审计）。
 
