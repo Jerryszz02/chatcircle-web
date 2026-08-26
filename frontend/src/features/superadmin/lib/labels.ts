@@ -6,6 +6,7 @@ import type {
   ExportScope,
   ExportStatus,
   InviteStatus,
+  PostStatus,
   QuestionType,
 } from '../../../shared/api/types';
 
@@ -76,4 +77,10 @@ export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
   scale_0_10: '0-10 量表',
   text_short: '单行文本',
   text_long: '多行文本',
+};
+
+/** 推文可见性标签（database-design §5.2.24）：hidden=隐藏，visible=可见。 */
+export const POST_STATUS_LABELS: Record<PostStatus, string> = {
+  hidden: '隐藏',
+  visible: '可见',
 };

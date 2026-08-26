@@ -32,6 +32,7 @@ import {
   SuperExportsPage,
   SuperLoginPage,
   SuperOrganizationsPage,
+  SuperPostsPage,
   SuperSystemPage,
 } from './features/superadmin/pages';
 
@@ -175,6 +176,14 @@ export function AppRoutes() {
         element={
           <RequireRole role="super">
             <SuperActivitiesPage />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="/super/posts"
+        element={
+          <RequireRole role="super">
+            <SuperPostsPage />
           </RequireRole>
         }
       />

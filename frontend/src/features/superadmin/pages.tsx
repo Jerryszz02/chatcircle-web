@@ -8,6 +8,7 @@ export { SuperLoginPage } from './pages/LoginPage';
 export { SuperOrganizationsPage } from './pages/OrganizationsPage';
 export { SuperApprovalsPage } from './pages/ApprovalsPage';
 export { SuperActivitiesPage } from './pages/ActivitiesPage';
+export { SuperPostsPage } from './pages/PostsPage';
 export { SuperDashboardPage } from './pages/DashboardPage';
 export { SuperExportsPage } from './pages/ExportsPage';
 export { SuperAuditPage } from './pages/AuditPage';

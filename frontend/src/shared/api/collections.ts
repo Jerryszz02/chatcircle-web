@@ -14,6 +14,7 @@ import type {
   ExportJobRecord,
   OrganizationRecord,
   ParticipantAccountRecord,
+  PostRecord,
   RegistrationAnswerRecord,
   RegistrationFieldDefRecord,
   RegistrationRecord,
@@ -27,7 +28,7 @@ import type {
 } from './types';
 
 /**
- * 各集合的类型化 pb.collection() 封装（database-design §5.2，含培训体系三个集合）。
+ * 各集合的类型化 pb.collection() 封装（database-design §5.2，另含培训体系、posts 等改版新增集合）。
  *
  * 用法：
  *   import { collectionsForRole } from '@/shared/api';
@@ -63,6 +64,7 @@ export const COLLECTION_NAMES = {
   trainings: 'trainings',
   trainingCheckinSessions: 'training_checkin_sessions',
   trainingAttendances: 'training_attendances',
+  posts: 'posts',
 } as const;
 
 /** 某个 client 下全部集合的类型化访问入口。 */
@@ -89,6 +91,7 @@ export interface TypedCollections {
   trainings: RecordService<TrainingRecord>;
   trainingCheckinSessions: RecordService<TrainingCheckinSessionRecord>;
   trainingAttendances: RecordService<TrainingAttendanceRecord>;
+  posts: RecordService<PostRecord>;
 }
 
 /** 按 client 构建类型化集合访问入口（每次调用新建轻量 RecordService，无状态）。 */
@@ -130,6 +133,7 @@ export function collections(client: PocketBase): TypedCollections {
     trainingAttendances: client.collection<TrainingAttendanceRecord>(
       COLLECTION_NAMES.trainingAttendances,
     ),
+    posts: client.collection<PostRecord>(COLLECTION_NAMES.posts),
   };
 }
 

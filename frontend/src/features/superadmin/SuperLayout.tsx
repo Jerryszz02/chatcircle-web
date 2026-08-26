@@ -7,7 +7,7 @@ import { Button } from '../../shared/ui';
  * 超级管理端布局（technical-design §5.3 路由表 /super 前缀）。
  * 与机构端共享设计系统：左侧固定侧栏 + 顶部上下文栏；
  * 侧栏显式标注「平台级」上下文，避免跨机构误操作（ui-design §3.3）。
- * 导航覆盖：机构、审批、活动、看板、导出、审计、系统；
+ * 导航覆盖：机构、审批、活动、推文、看板、导出、审计、系统；
  * 底部显示当前账号与退出登录（主动退出 token 立即失效，PRD §12.4）。
  */
 
@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { to: '/super/organizations', label: '机构与邀请码' },
   { to: '/super/approvals', label: '发布审批' },
   { to: '/super/activities', label: '活动监管' },
+  { to: '/super/posts', label: '内容推文' },
   { to: '/super/dashboard', label: '全局看板' },
   { to: '/super/exports', label: '全局导出' },
   { to: '/super/audit', label: '全局审计' },
