@@ -41,6 +41,8 @@ export function SuperPostsPage() {
   const [status, setStatus] = useState<PostStatus>('hidden');
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverObjectUrl, setCoverObjectUrl] = useState<string | null>(null);
+  /** 显式移除既有封面（独立于 coverFile：null 表示保留原图，须单独标记才能清空）。 */
+  const [removeCover, setRemoveCover] = useState(false);
   const [formErrors, setFormErrors] = useState<PostFormErrors>({});
 
   const loadPosts = useCallback(async () => {
@@ -82,6 +84,7 @@ export function SuperPostsPage() {
     setIsPinned(false);
     setStatus('hidden');
     setCoverFile(null);
+    setRemoveCover(false);
     setFormErrors({});
     setEditorOpen(true);
   };
@@ -95,6 +98,7 @@ export function SuperPostsPage() {
     setIsPinned(post.is_pinned);
     setStatus(post.status);
     setCoverFile(null);
+    setRemoveCover(false);
     setFormErrors({});
     setEditorOpen(true);
   };
@@ -110,7 +114,9 @@ export function SuperPostsPage() {
     setFormErrors(errors);
     if (hasPostFormErrors(errors)) return;
     setSaving(true);
-    // 封面为 file 字段，整体走 FormData；未选新封面时不带 cover 键，保留原图
+    // 封面为 file 字段，整体走 FormData；cover 键三态：
+    // 选了新文件 → 上传替换；显式点「移除封面」→ 空字符串删除原图（已实测后端行为）；
+    // 两者皆无 → 不带 cover 键，保留原图
     const data = new FormData();
     data.set('title', title.trim());
     data.set('summary', summary.trim());
@@ -118,7 +124,11 @@ export function SuperPostsPage() {
     data.set('external_url', externalUrl.trim());
     data.set('is_pinned', String(isPinned));
     data.set('status', status);
-    if (coverFile) data.set('cover', coverFile);
+    if (coverFile) {
+      data.set('cover', coverFile);
+    } else if (removeCover && editing?.cover) {
+      data.set('cover', '');
+    }
     try {
       if (editing) {
         await cc.posts.update(editing.id, data);
@@ -166,7 +176,8 @@ export function SuperPostsPage() {
     }
   };
 
-  const coverPreview = coverObjectUrl ?? (editing?.cover ? postCoverUrl(editing) : null);
+  const coverPreview =
+    coverObjectUrl ?? (editing?.cover && !removeCover ? postCoverUrl(editing) : null);
 
   return (
     <SuperLayout title="内容推文">
@@ -289,11 +300,32 @@ export function SuperPostsPage() {
               id="sa-post-cover"
               type="file"
               accept="image/jpeg,image/png,image/webp,image/gif"
-              onChange={(e) => setCoverFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => {
+                const file = e.target.files?.[0] ?? null;
+                setCoverFile(file);
+                // 重选新文件即放弃「移除封面」标记
+                if (file) setRemoveCover(false);
+              }}
             />
             <p className="cc-hint">选填，单图，不超过 5MB（image/jpeg、png、webp、gif）</p>
             {coverPreview ? (
               <img className="sa-post-cover-preview" src={coverPreview} alt="封面预览" />
+            ) : null}
+            {editing?.cover && !coverFile ? (
+              <div className="sa-post-cover-actions">
+                {removeCover ? (
+                  <>
+                    <span className="sa-muted">封面将在保存后移除</span>
+                    <Button variant="secondary" onClick={() => setRemoveCover(false)}>
+                      撤销
+                    </Button>
+                  </>
+                ) : (
+                  <Button variant="secondary" onClick={() => setRemoveCover(true)}>
+                    移除封面
+                  </Button>
+                )}
+              </div>
             ) : null}
           </div>
           <div className="cc-field">

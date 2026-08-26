@@ -201,6 +201,50 @@ describe('SuperPostsPage 内容推文管理', () => {
     expect(callsOf(mock, 'PATCH')[1].init?.body).toBe(JSON.stringify({ status: 'visible' }));
   });
 
+  it('编辑有封面推文：点「移除封面」后提交，FormData 带 cover 空字符串', async () => {
+    const mock = stubApi({
+      'GET /api/collections/posts/records': listBody([
+        makePost({ id: 'post9', title: '带封面', cover: 'cover_abc.png' }),
+      ]),
+      'PATCH /api/collections/posts/records': { body: makePost({ id: 'post9' }) },
+    });
+    renderPage();
+    await screen.findByText('带封面');
+    fireEvent.click(within(rowOf('带封面')).getByRole('button', { name: '编辑' }));
+    const dialog = screen.getByRole('dialog', { name: '编辑推文' });
+    // 初始展示既有封面预览；点击移除后预览消失
+    expect(within(dialog).getByRole('img', { name: '封面预览' })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: '移除封面' }));
+    expect(within(dialog).queryByRole('img', { name: '封面预览' })).not.toBeInTheDocument();
+    expect(within(dialog).getByText(/封面将在保存后移除/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(callsOf(mock, 'PATCH')).toHaveLength(1));
+    const fd = callsOf(mock, 'PATCH')[0].init?.body as FormData;
+    // 空字符串 = 删除该文件（已实测后端行为）
+    expect(fd.get('cover')).toBe('');
+  });
+
+  it('编辑有封面推文：移除后再「撤销」，提交不带 cover 键（保留原图）', async () => {
+    const mock = stubApi({
+      'GET /api/collections/posts/records': listBody([
+        makePost({ id: 'post9', title: '带封面', cover: 'cover_abc.png' }),
+      ]),
+      'PATCH /api/collections/posts/records': { body: makePost({ id: 'post9' }) },
+    });
+    renderPage();
+    await screen.findByText('带封面');
+    fireEvent.click(within(rowOf('带封面')).getByRole('button', { name: '编辑' }));
+    const dialog = screen.getByRole('dialog', { name: '编辑推文' });
+    fireEvent.click(within(dialog).getByRole('button', { name: '移除封面' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '撤销' }));
+    // 撤销后预览恢复
+    expect(within(dialog).getByRole('img', { name: '封面预览' })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(callsOf(mock, 'PATCH')).toHaveLength(1));
+    const fd = callsOf(mock, 'PATCH')[0].init?.body as FormData;
+    expect(fd.get('cover')).toBeNull();
+  });
+
   it('置顶切换：PATCH is_pinned 取反', async () => {
     const mock = stubApi({
       'GET /api/collections/posts/records': listBody([
