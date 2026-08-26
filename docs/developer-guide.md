@@ -197,7 +197,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 | 端点 | 鉴权 | 说明 |
 |---|---|---|
-| GET `/api/cc/public/activities` `/{id}` | anon | 活动广场/公开详情（仅 published/closed，其余 404），含报名开放状态与剩余名额 |
+| GET `/api/cc/public/activities` `/{id}` | anon | 活动广场/公开详情（仅 published/closed，其余 404），含报名开放状态与剩余名额；列表支持 `?scope=current`（未结束）/`past`（已结束或已关闭）服务端过滤，报名开放判定含活动 `end_time`（已结束即截止，reason=ended） |
 | POST `/api/cc/activities/{id}/submit-review` | admin | draft/rejected → pending_review |
 | POST `/api/cc/activities/{id}/publish` `/close` `/archive` | admin | 直发（机构开审核则拒绝）/ 关闭 / 归档 |
 | POST `/api/cc/activities/{id}/approve` `/reject` `/unpublish` | super | 审批 / 驳回（reason 必填）/ 下架（不走 approvals） |
@@ -323,7 +323,7 @@ src/
 
 | 区 | 路由 |
 |---|---|
-| 参与者 `/`（公开页不要求登录） | `/` 落地页、`/activities` 活动广场、`/a/:activityId` 详情、`/a/:activityId/register` 报名、`/login`；需会话：`/me` 我的、`/checkin/:token` 扫码签到、`/survey/:qrToken` 填问卷、`/trainings`、`/training-checkin/:token` |
+| 参与者 `/`（公开页不要求登录） | `/` 落地页、`/activities` 现有活动（仅未结束场次）、`/activities/past` 往期活动（closed 或 end_time 已过）、`/a/:activityId` 详情、`/a/:activityId/register` 报名、`/login`；需会话：`/me` 我的、`/checkin/:token` 扫码签到、`/survey/:qrToken` 填问卷、`/trainings`、`/training-checkin/:token` |
 | 机构 `/admin` | 公开：`/admin/login`、`/admin/register`（邀请码）；守卫：`/admin/activities`(+`/:activityId` 四 tab 详情)、`/admin/trainings`(+`/:id`)、`/admin/dashboard`、`/admin/exports`、`/admin/audit` |
 | 超管 `/super` | 公开：`/super/login`；守卫：`/super/organizations`（机构+邀请码+开关）、`/super/approvals`、`/super/activities`、`/super/dashboard`、`/super/exports`、`/super/audit`、`/super/system`（备份告警+模板管理） |
 

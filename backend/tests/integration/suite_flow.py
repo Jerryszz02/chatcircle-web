@@ -4,7 +4,8 @@
 覆盖：邀请码 → 管理员注册/登录 → 建活动（数组版 form_config）→ 发布 →
 参与者自动注册 → 公开详情 → 报名 → 审核 → 签到（错误分支 + 幂等）→
 问卷（资格/草稿/提交幂等/只读答案/me 聚合）→ 看板指标口径 → 导出 ZIP →
-备份端点下线形态（410/无审计）→ 未认证错误形态。
+备份端点下线形态（410/无审计）→ 未认证错误形态 →
+现有/往期划分（公开列表 scope 过滤）与已结束活动报名截止（end_time 兜底）。
 
 对应 AC：AC-02/04/05/06/09/11/12/14/15/16/20/23 的happy path 与关键分支；
 专项反例（越权、并发、矩阵枚举、限流等）在各自套件。
@@ -12,6 +13,7 @@
 import csv
 import io
 import zipfile
+from datetime import datetime, timedelta, timezone
 
 import cc_fixture as fx
 from cc_client import biz_code, call
@@ -57,13 +59,18 @@ def run(ctx):
     rep.check('B3 管理员登录（小写用户名）', bool(AT), aauth)
 
     # ---------- C. 活动：创建（channel 停用）→ 发布 ----------
+    # 活动时间为动态未来（30 天后）：已结束活动不再接受报名（end_time 计入报名开放判定），
+    # 主链路报名/签到/问卷均在本场上跑，须保证未结束。
+    now = datetime.now(timezone.utc)
+    act_start = now + timedelta(days=30)
     s, act = call(base, 'POST', '/api/collections/activities/records', {
         'organization_id': org_a, 'activity_code': 'CC_IT_FLOW_01', 'title': '八月倾诉茶话会',
         'description': '测试活动', 'location': '线上',
-        'start_time': '2026-08-10 12:00:00Z', 'end_time': '2026-08-10 14:00:00Z',
+        'start_time': fx.pb_dt(act_start), 'end_time': fx.pb_dt(act_start + timedelta(hours=2)),
         'status': 'draft', 'capacity_total': 10, 'capacity_speaker': 5, 'capacity_listener': 5,
         'registration_open': True,
-        'registration_start_at': '2026-08-01 00:00:00Z', 'registration_end_at': '2026-12-31 23:59:59Z',
+        'registration_start_at': fx.pb_dt(now - timedelta(days=1)),
+        'registration_end_at': fx.pb_dt(act_start),
         'group_tag': '',
         'form_config_json': {'fields': [
             {'field_def_id': fields['nickname'], 'enabled': True, 'required': True},
@@ -243,23 +250,28 @@ def run(ctx):
 
     # F3b~F3f 时间筛选重叠口径回归：活动 [start_time, end_time] 与筛选区间有交集即计入，
     # 看板 metrics 与导出共用同一口径（FR-DASH-002）。
-    # 跨区间活动 08-05~08-15：start_time 落在 08-13~08-21 之外，旧单点口径下被漏计。
+    # 跨区间活动围绕主活动日期（act_start）布置：start 落在筛选区间之外，旧单点口径下被漏计。
     span_id = fx.create_activity(base, AT, org_a, 'CC_IT_FLOW_01B', '跨周倾诉茶话会',
                                  fields=[(fields['nickname'], True, True)],
-                                 start='2026-08-05 12:00:00Z', end='2026-08-15 12:00:00Z')
-    rep.check('F3b 跨区间活动创建并发布（08-05~08-15）', bool(span_id), span_id)
-    s, m = call(base, 'GET', '/api/cc/metrics/activity_sessions?from=2026-08-13&to=2026-08-21', token=AT)
-    rep.check('F3c 重叠口径：start 在区间外但活动期重叠 → 计入（=1，不含 08-10 场）',
+                                 start=fx.pb_dt(act_start - timedelta(days=5)),
+                                 end=fx.pb_dt(act_start + timedelta(days=5)))
+    rep.check('F3b 跨区间活动创建并发布（主活动 ±5 天）', bool(span_id), span_id)
+    day = lambda n: (act_start + timedelta(days=n)).strftime('%Y-%m-%d')
+    s, m = call(base, 'GET',
+                '/api/cc/metrics/activity_sessions?from=%s&to=%s' % (day(3), day(11)), token=AT)
+    rep.check('F3c 重叠口径：start 在区间外但活动期重叠 → 计入（=1，不含主场次）',
               s == 200 and m.get('value') == 1, m)
-    s, m = call(base, 'GET', '/api/cc/metrics/activity_sessions?from=2026-08-16&to=2026-08-21', token=AT)
+    s, m = call(base, 'GET',
+                '/api/cc/metrics/activity_sessions?from=%s&to=%s' % (day(6), day(11)), token=AT)
     rep.check('F3d 重叠口径：活动已结束（end < from）→ 不计入（=0）',
               s == 200 and m.get('value') == 0, m)
-    s, m = call(base, 'GET', '/api/cc/metrics/activity_sessions?from=2026-08-09&to=2026-08-11', token=AT)
+    s, m = call(base, 'GET',
+                '/api/cc/metrics/activity_sessions?from=%s&to=%s' % (day(-1), day(1)), token=AT)
     rep.check('F3e 重叠口径：两场活动均与区间重叠 → 都计入（=2）',
               s == 200 and m.get('value') == 2, m)
     s, exp0 = call(base, 'POST', '/api/cc/exports',
                    {'scope': {'type': 'organization',
-                              'date_range': {'from': '2026-08-13', 'to': '2026-08-21'}},
+                              'date_range': {'from': day(3), 'to': day(11)}},
                     'include_pii': False}, AT)
     job0 = (exp0.get('export_job') or {}).get('id')
     s, blob0 = call(base, 'GET', '/api/cc/exports/%s/download' % job0, token=AT, raw=True)
@@ -376,3 +388,50 @@ def run(ctx):
               and s2 == 200 and ov2.get('has_approved_listener_registration') is True,
               [ov1.get('has_approved_listener_registration'),
                ov2.get('has_approved_listener_registration')])
+
+    # ---------- I. 现有/往期划分（scope）与已结束活动报名截止（2026-08 往期活动改版） ----------
+    # 「已结束但机构未手动关闭」场次：end_time 已过、status 仍 published、报名窗口仍开放
+    ended_start = now - timedelta(days=14)
+    act_ended = fx.create_activity(base, AT, org_a, 'CC_IT_FLOW_03', '已结束未关闭场',
+                                   fields=[(fields['nickname'], True, True)],
+                                   start=fx.pb_dt(ended_start),
+                                   end=fx.pb_dt(ended_start + timedelta(hours=2)))
+    s, det3 = call(base, 'GET', '/api/cc/public/activities/%s' % act_ended)
+    rep.check('I1 已结束未关闭活动详情：registration.open=false 且 reason=ended',
+              s == 200 and det3.get('registration', {}).get('open') is False
+              and det3.get('registration', {}).get('reason') == 'ended', det3)
+    _, p3 = call(base, 'POST', '/api/cc/auth/participant',
+                 {'username': 'flow_user_three', 'password': fx.PASSWORD})
+    s, r3 = call(base, 'POST', '/api/cc/activities/%s/register' % act_ended,
+                 {'activity_role': 'speaker',
+                  'answers': [{'field_def_id': fields['nickname'], 'value': '阿三'}]},
+                 p3.get('token'))
+    rep.check('I2 已结束活动提交报名 → 400 REGISTRATION_CLOSED',
+              s == 400 and biz_code(r3) == 'REGISTRATION_CLOSED', r3)
+
+    # 提前手动关闭（end_time 未到）的场次同样归往期
+    act_closed = fx.create_activity(base, AT, org_a, 'CC_IT_FLOW_04', '提前关闭场',
+                                    fields=[(fields['nickname'], True, True)])
+    s, cl = call(base, 'POST', '/api/cc/activities/%s/close' % act_closed, {}, AT)
+    rep.check('I3 手动关闭活动（end_time 未到）前置', s == 200, cl)
+
+    s, allr = call(base, 'GET', '/api/cc/public/activities')
+    all_ids = [a.get('id') for a in (allr.get('activities') or [])]
+    ended_in_all = next((a for a in (allr.get('activities') or []) if a.get('id') == act_ended),
+                        None)
+    rep.check('I4 不传 scope 返回全部（兼容），已结束场列表口径 open=false/reason=ended',
+              s == 200 and act_ended in all_ids and AID in all_ids
+              and ended_in_all is not None
+              and ended_in_all.get('registration', {}).get('open') is False
+              and ended_in_all.get('registration', {}).get('reason') == 'ended',
+              ended_in_all if s == 200 else allr)
+    s, cur = call(base, 'GET', '/api/cc/public/activities?scope=current')
+    cur_ids = [a.get('id') for a in (cur.get('activities') or [])]
+    rep.check('I5 scope=current 只含未结束场次（不含已结束/已关闭场）',
+              s == 200 and AID in cur_ids
+              and act_ended not in cur_ids and act_closed not in cur_ids, cur)
+    s, pst = call(base, 'GET', '/api/cc/public/activities?scope=past')
+    pst_ids = [a.get('id') for a in (pst.get('activities') or [])]
+    rep.check('I6 scope=past 含已结束场与已关闭场，不含未结束场次',
+              s == 200 and act_ended in pst_ids and act_closed in pst_ids
+              and AID not in pst_ids, pst)

@@ -8,6 +8,7 @@ import {
   HomePage,
   LoginPage,
   MePage,
+  PastActivitiesPage,
   RegisterPage,
   SurveyPage,
   TrainingCheckinPage,
@@ -43,10 +44,11 @@ import {
 export function AppRoutes() {
   return (
     <Routes>
-      {/* 参与者端（公开页：首页、关于我们、活动广场、活动详情、报名链路、登录） */}
+      {/* 参与者端（公开页：首页、关于我们、活动广场、往期活动、活动详情、报名链路、登录） */}
       <Route path="/" element={<HomePage />} />
       <Route path="/about" element={<AboutPage />} />
       <Route path="/activities" element={<ActivitiesPage />} />
+      <Route path="/activities/past" element={<PastActivitiesPage />} />
       <Route path="/a/:activityId" element={<ActivityDetailPage />} />
       <Route path="/a/:activityId/register" element={<RegisterPage />} />
       <Route path="/login" element={<LoginPage />} />

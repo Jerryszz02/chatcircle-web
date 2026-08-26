@@ -5,12 +5,13 @@ import { Button, Loading } from '../../../shared/ui';
 import { getPublicActivities, type PublicActivityListItem } from '../api';
 import { ActivityCard } from '../components/ActivityCard';
 import { PublicPageLayout } from '../components/PublicPageLayout';
+import { isCurrentActivity, isPastActivity } from '../lib/activitySplit';
 
 /**
  * 首页（/，未登录可看）：Chat Circles C 端品牌官网落地页（2026-08 UI 重构）。
- * 区块：Hero（品牌 + 大图占位）→ 现有活动（公开活动 API 真实数据）→
- * 往期活动（活动故事并入同一区块，均为静态占位，待后端任务对接）→ 我们的影响
- * （首场试点真实数据，诚实标注样本口径）。
+ * 区块：Hero（品牌 + 大图占位）→ 现有活动（公开活动 API 真实数据，最近 2 场 + 查看全部）→
+ * 往期活动（已结束场次真实数据，最近 2 场 + 查看全部；活动故事并入同一区块，
+ * 故事仍为静态占位，待后端任务对接）→ 我们的影响（首场试点真实数据，诚实标注样本口径）。
  * 所有图片均为占位块，待品牌素材（logo / 活动照片）到位后替换。
  * 浏览活动不需要账号；报名活动在对应链路内登录/自动注册（FR-AUTH-001）。
  */
@@ -32,13 +33,6 @@ const STORY_PLACEHOLDERS: { title: string; excerpt: string; url: string }[] = [
     url: '',
   },
 ];
-
-/** 往期活动占位（真实往期列表由后端任务另行提供）。 */
-const PAST_ACTIVITY_PLACEHOLDER = {
-  title: '首场对话活动',
-  date: '2026 年 6 月 12 日',
-  desc: '13 位青年倾诉者与 15 位企业员工倾听者，完成了第一轮一对一倾听对话。',
-};
 
 /** Our Impact：首场试点真实数据（2026-06-12 匿名问卷，倾诉者 n=13、倾听者 n=15）。 */
 const IMPACT_METRICS = [
@@ -78,7 +72,7 @@ export function HomePage() {
     };
   }, [tick]);
 
-  // 锚点直达（站点导航「往期活动」→ /#past）：等现有活动请求落定（数据或错误其一）
+  // 锚点直达（如 /#past，兼容旧的外部分享链接）：等现有活动请求落定（数据或错误其一）
   // 再滚动，避免上方布局变化导致错位（同 ActivitiesPage 的锚点处理）；
   // key 入依赖使 hash 不变时的重复点击也能重新滚动。
   const activitiesSettled = activities !== null || error !== null;
@@ -96,7 +90,7 @@ export function HomePage() {
         error={error}
         onRetry={() => setTick((t) => t + 1)}
       />
-      <PastActivitySection />
+      <PastActivitySection activities={activities} />
       <ImpactSection />
     </PublicPageLayout>
   );
@@ -117,7 +111,8 @@ function HeroSection() {
           一个安全、温暖的倾诉空间，让每位青年被<em>真正听见</em>
         </h1>
         <p className="ccp-hero-sub">
-          Chat Circles 把经过 3 小时专业培训的志愿者「倾听者」，与正处于升学、初入职场等过渡期的青年一对一配对——在轻松的空间里进行一场
+          Chat Circles 把经过 3
+          小时专业培训的志愿者「倾听者」，与正处于升学、初入职场等过渡期的青年一对一配对——在轻松的空间里进行一场
           60 分钟的结构化对话：没有评判，没有说教，只有真正的倾听。
         </p>
         <Link to="/activities" className="cc-btn cc-btn-primary ccp-hero-cta">
@@ -143,8 +138,8 @@ function UpcomingActivitiesSection({
   error: ApiError | null;
   onRetry: () => void;
 }) {
-  // 现有活动：已结束（closed）的不在首页展示；最多 4 张卡片
-  const upcoming = (activities ?? []).filter((a) => a.status !== 'closed').slice(0, 4);
+  // 现有活动：已结束（closed 或 end_time 已过）的不在首页展示；最多 2 张卡片，全部见 /activities
+  const upcoming = (activities ?? []).filter((a) => isCurrentActivity(a)).slice(0, 2);
 
   return (
     <section aria-labelledby="home-activities">
@@ -153,7 +148,7 @@ function UpcomingActivitiesSection({
           现有活动
         </h2>
         <Link to="/activities" className="ccp-section-more">
-          全部活动 →
+          查看全部 →
         </Link>
       </div>
 
@@ -183,28 +178,30 @@ function UpcomingActivitiesSection({
   );
 }
 
-/* ---------- 往期活动：活动故事并入本区块（均为静态占位卡片，待后端任务对接） ---------- */
+/* ---------- 往期活动：已结束场次真实数据（最多 2 张 + 查看全部）；活动故事并入本区块（静态占位，待后端任务对接） ---------- */
 
-function PastActivitySection() {
+function PastActivitySection({ activities }: { activities: PublicActivityListItem[] | null }) {
+  // 往期活动：closed 或 end_time 已过的场次；最多 2 张卡片，全部见 /activities/past
+  const past = (activities ?? []).filter((a) => isPastActivity(a)).slice(0, 2);
+
   return (
     <section className="ccp-anchor" id="past" aria-labelledby="home-past">
       <div className="ccp-section-head">
         <h2 className="ccp-section-title" id="home-past">
           往期活动
         </h2>
+        <Link to="/activities/past" className="ccp-section-more">
+          查看全部 →
+        </Link>
       </div>
-      <div className="ccp-card ccp-card-past">
-        {/* 活动照片占位：待首场活动真实照片替换 */}
-        <div className="ccp-photo ccp-photo-past" aria-hidden="true">
-          活动照片
-        </div>
-        <div className="ccp-card-body">
-          <h3 className="ccp-card-title">
-            {PAST_ACTIVITY_PLACEHOLDER.title} · {PAST_ACTIVITY_PLACEHOLDER.date}
-          </h3>
-          <p className="cc-item-meta">{PAST_ACTIVITY_PLACEHOLDER.desc}</p>
-        </div>
-      </div>
+      {activities !== null && past.length === 0 ? <p className="cc-empty">暂无往期活动。</p> : null}
+      {past.length > 0 ? (
+        <ul className="ccp-card-grid">
+          {past.map((activity) => (
+            <ActivityCard key={activity.id} activity={activity} />
+          ))}
+        </ul>
+      ) : null}
       <ul className="ccp-card-grid">
         {STORY_PLACEHOLDERS.map((story) => (
           <li key={story.title} className="ccp-card">

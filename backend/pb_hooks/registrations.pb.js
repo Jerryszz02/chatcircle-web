@@ -80,7 +80,7 @@ routerAdd('POST', '/api/cc/activities/{id}/register', (e) => {
     return e.json(200, { registration: existing, existing: true });
   }
 
-  // 报名开放校验（FR-ACT-005）：已发布 + 手动开关 + 起止时间内
+  // 报名开放校验（FR-ACT-005）：已发布 + 手动开关 + 起止时间内 + 活动未结束
   if (activity.get('status') !== 'published' || !activity.get('registration_open')) {
     ccError(400, 'REGISTRATION_CLOSED', '报名未开放');
   }
@@ -89,6 +89,12 @@ routerAdd('POST', '/api/cc/activities/{id}/register', (e) => {
   const regEnd = String(activity.get('registration_end_at') || '');
   if ((regStart && now < regStart) || (regEnd && now > regEnd)) {
     ccError(400, 'REGISTRATION_CLOSED', '报名未在开放时间内');
+  }
+  // 活动已结束（end_time 已过）不再接受报名：机构未手动关闭（仍 published）时也兜底，
+  // 与公开列表/详情的 registration.open 口径一致（FR-ACT-005）
+  const activityEnd = String(activity.get('end_time') || '');
+  if (activityEnd && now > activityEnd) {
+    ccError(400, 'REGISTRATION_CLOSED', '活动已结束，报名已截止');
   }
 
   // 角色校验（FR-REG-002：角色存于报名，不写入账号）

@@ -59,10 +59,15 @@ describe('路由分区（公开页）', () => {
     expect(screen.getByRole('heading', { name: '关于 Chat Circles' })).toBeInTheDocument();
   });
 
-  it('/activities 渲染活动与问卷页（活动广场，未登录可看）', () => {
+  it('/activities 渲染活动与问卷页（现有活动，未登录可看）', () => {
     renderAt('/activities');
-    expect(screen.getByRole('heading', { name: '活动' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '现有活动' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '问卷' })).toBeInTheDocument();
+  });
+
+  it('/activities/past 渲染往期活动页（未登录可看）', () => {
+    renderAt('/activities/past');
+    expect(screen.getByRole('heading', { name: '往期活动' })).toBeInTheDocument();
   });
 
   it('/a/:activityId 公开活动详情未登录可看（FR-ACT-003）', async () => {
