@@ -55,7 +55,8 @@ const IMPACT_QUOTE = {
 };
 
 export function HomePage() {
-  const { hash } = useLocation();
+  // key 随每次导航变化（含重复点击同一锚点链接），用于触发重复滚动
+  const { hash, key } = useLocation();
   const [activities, setActivities] = useState<PublicActivityListItem[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [tick, setTick] = useState(0);
@@ -77,13 +78,15 @@ export function HomePage() {
     };
   }, [tick]);
 
-  // 锚点直达（站点导航「往期活动」→ /#past）：现有活动列表加载会改变上方布局高度，
-  // 故等活动数据到达后再滚动（同 ActivitiesPage 的锚点处理）。
+  // 锚点直达（站点导航「往期活动」→ /#past）：等现有活动请求落定（数据或错误其一）
+  // 再滚动，避免上方布局变化导致错位（同 ActivitiesPage 的锚点处理）；
+  // key 入依赖使 hash 不变时的重复点击也能重新滚动。
+  const activitiesSettled = activities !== null || error !== null;
   useEffect(() => {
-    if (!hash) return;
+    if (!hash || !activitiesSettled) return;
     const el = document.getElementById(hash.slice(1));
     el?.scrollIntoView();
-  }, [hash, activities]);
+  }, [hash, key, activitiesSettled]);
 
   return (
     <PublicPageLayout>
