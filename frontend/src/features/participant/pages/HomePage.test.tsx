@@ -74,8 +74,12 @@ describe('HomePage 首页', () => {
     expect(screen.getByText('青年心理健康公益项目')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /真正听见/ })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '浏览活动' })).toHaveAttribute('href', '/activities');
-    // 站点导航
-    expect(screen.getByRole('link', { name: 'Chat Circles' })).toHaveAttribute('href', '/');
+    // Hero 首场活动真实照片（2026-08 素材到位后由占位块替换）
+    expect(screen.getByRole('img', { name: /首场活动现场/ })).toBeInTheDocument();
+    // 站点导航：品牌标为 logo 图形（装饰性 alt=""）+ 文字，可访问名仍为「Chat Circles」
+    const brandLink = screen.getByRole('link', { name: 'Chat Circles' });
+    expect(brandLink).toHaveAttribute('href', '/');
+    expect(brandLink.querySelector('.ccp-site-logo-img')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '首页' })).toHaveAttribute('href', '/');
     expect(screen.getByRole('link', { name: '现有活动' })).toHaveAttribute('href', '/activities');
     expect(screen.getByRole('link', { name: '往期活动' })).toHaveAttribute(

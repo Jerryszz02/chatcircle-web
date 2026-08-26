@@ -6,13 +6,14 @@ import { getPublicActivities, type PublicActivityListItem } from '../api';
 import { ActivityCard } from '../components/ActivityCard';
 import { PublicPageLayout } from '../components/PublicPageLayout';
 import { isCurrentActivity, isPastActivity } from '../lib/activitySplit';
+import heroEventPhoto from '../../../assets/brand/hero-event-photo.jpg';
 
 /**
  * 首页（/，未登录可看）：Chat Circles C 端品牌官网落地页（2026-08 UI 重构）。
- * 区块：Hero（品牌 + 大图占位）→ 现有活动（公开活动 API 真实数据，最近 2 场 + 查看全部）→
+ * 区块：Hero（品牌 + 首场活动真实照片）→ 现有活动（公开活动 API 真实数据，最近 2 场 + 查看全部）→
  * 往期活动（已结束场次真实数据，最近 2 场 + 查看全部；活动故事并入同一区块，
  * 故事仍为静态占位，待后端任务对接）→ 我们的影响（首场试点真实数据，诚实标注样本口径）。
- * 所有图片均为占位块，待品牌素材（logo / 活动照片）到位后替换。
+ * 除 Hero 外其余图片均为占位块，待品牌素材（文章配图等）到位后替换。
  * 浏览活动不需要账号；报名活动在对应链路内登录/自动注册（FR-AUTH-001）。
  */
 
@@ -96,7 +97,7 @@ export function HomePage() {
   );
 }
 
-/* ---------- Hero：品牌主张 + 大图占位 ---------- */
+/* ---------- Hero：品牌主张 + 首场活动现场照片 ---------- */
 
 function HeroSection() {
   return (
@@ -119,10 +120,12 @@ function HeroSection() {
           浏览活动
         </Link>
       </div>
-      {/* Hero 大图占位：待首场活动真实照片（注意肖像授权，优先背影/局部特写）替换 */}
-      <div className="ccp-photo ccp-photo-hero" role="img" aria-label="活动现场照片（素材待补充）">
-        活动现场照片
-      </div>
+      {/* Hero 大图：首场活动现场真实照片（2026-06-12，1920px 宽压缩版，原图 3520px） */}
+      <img
+        src={heroEventPhoto}
+        alt="Chat Circles 首场活动现场：青年与倾听者围桌对话"
+        className="ccp-hero-photo"
+      />
     </section>
   );
 }
