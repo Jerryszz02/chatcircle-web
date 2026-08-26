@@ -384,6 +384,40 @@
   color: var(--cc-neutral-900);
 }
 
+/* 内容推文封面：列表缩略图与表单预览 */
+.sa-post-cover {
+  display: block;
+  width: 64px;
+  height: 40px;
+  object-fit: cover;
+  border: 1px solid var(--cc-neutral-300);
+  border-radius: var(--cc-radius-control-a);
+}
+
+.sa-post-cover-preview {
+  display: block;
+  margin-top: 8px;
+  max-width: 240px;
+  max-height: 140px;
+  object-fit: cover;
+  border: 1px solid var(--cc-neutral-300);
+  border-radius: var(--cc-radius-control-a);
+}
+
+/* 移除封面操作行（编辑既有封面时） */
+.sa-post-cover-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.sa-post-cover-actions .cc-btn {
+  min-height: 36px;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
 /* 窄屏：侧栏转为顶部横排导航 */
 @media (max-width: 767px) {
   .sa-shell {

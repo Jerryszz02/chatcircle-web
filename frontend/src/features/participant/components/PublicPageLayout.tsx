@@ -6,7 +6,8 @@ import { SiteHeader } from './SiteHeader';
  * 参与者端公开页布局（C 端品牌官网化，2026-08 UI 重构）：
  * 吸顶站点导航 + 内容容器 + 站点页脚，用于首页 / 活动列表 / 活动详情 / 关于我们。
  * 功能流程页（登录 / 报名 / 签到 / 问卷 / 我的中心等）仍使用 shared/ui 的 PageLayout。
- * .ccp-root 挂在根元素上：参与者端品牌色板 V2 的 token 覆盖对整个公开页（含导航与页脚）生效。
+ * .ccp-root 挂在根元素上：参与者端私有 token（薄荷辅助色）与页面底色（body:has 米白）对整个公开页
+ * （含导航与页脚）生效；V2 品牌色板本身已在 global.css :root 全端统一。
  */
 export function PublicPageLayout({
   className,

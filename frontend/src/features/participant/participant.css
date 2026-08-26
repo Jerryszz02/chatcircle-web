@@ -3,37 +3,19 @@
  * 状态标签（.cc-tag-*）已上移到 global.css 统一维护。 */
 
 /* ---------- 参与者端品牌色板 V2（2026-08 C 端品牌官网化重构） ----------
- * 仅在 .ccp-root 内覆盖共享 token：主色深蓝 #176B9C、辅助薄荷 #8CCFC0、
- * 强调珊瑚橙 #F28B78、页面底色米白 #FBFAF5。
- * global.css :root 原值不动，admin / super 两端视觉不受影响。
- * toast/modal 经 portal 挂在 body 下、不在本作用域内，保持原中性/状态色。 */
+ * V2 品牌 token（深蓝 #176B9C、薄荷 #8CCFC0、珊瑚橙 #F28B78、米白 #FBFAF5）
+ * 已于 2026-08 全端统一并入 global.css :root，本端不再重复覆盖；
+ * 此处仅保留参与者端私有辅助色。 */
 .ccp-root {
-  /* 品牌色：深蓝（600 白字对比约 5.8:1，满足 WCAG AA） */
-  --cc-brand-50: #eef5fa;
-  --cc-brand-100: #d7e9f4;
-  --cc-brand-300: #8ccfc0; /* 深色区上的眉题/点缀：薄荷绿 */
-  --cc-brand-500: #2f84b5;
-  --cc-brand-600: #176b9c; /* 主品牌色、主按钮 */
-  --cc-brand-700: #11557d; /* 悬停、深色文本强调 */
-  --cc-brand-900: #0b3b58; /* 深色区块背景 */
-
-  /* 强调色：珊瑚橙（仅点缀；需文本级对比时用 700） */
-  --cc-accent-100: #fce9e4;
-  --cc-accent-500: #f28b78;
-  --cc-accent-700: #c05a48;
-
   /* 参与者端私有辅助色：薄荷绿 */
   --ccp-mint: #8ccfc0;
   --ccp-mint-bg: #e2f4ef;
-
-  /* 页面底色：米白 */
-  --cc-neutral-50: #fbfaf5;
 }
 
-/* ---------- 页面底色：米白（仅参与者页面生效；body 在 .ccp-root 作用域外，写死色值） ---------- */
+/* ---------- 页面底色：米白（body 在 .ccp-root 作用域外，用 :has 选择器；值即 :root 的 --cc-neutral-50） ---------- */
 
 body:has(.ccp-root) {
-  background: #fbfaf5;
+  background: var(--cc-neutral-50);
 }
 
 .ccp-root {
@@ -594,28 +576,7 @@ body:has(.ccp-root) {
   letter-spacing: -0.01em;
 }
 
-/* ---------- 登录/注册页圆形母题标记 ---------- */
-
-.ccp-auth-mark {
-  position: relative;
-  width: 64px;
-  height: 44px;
-  margin: 8px auto 16px;
-}
-
-.ccp-auth-mark span {
-  position: absolute;
-  top: 0;
-  width: 44px;
-  height: 44px;
-  border: 2.5px solid var(--cc-brand-500);
-  border-radius: 50%;
-}
-
-.ccp-auth-mark span:last-child {
-  left: 20px;
-  border-color: var(--cc-accent-500);
-}
+/* ---------- 登录/注册页圆形母题标记：已上移 global.css（.cc-auth-mark，三端登录页共用） ---------- */
 
 /* ---------- 顶部登录聚合菜单（参与者/机构管理员/超管） ---------- */
 

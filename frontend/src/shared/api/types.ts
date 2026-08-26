@@ -382,3 +382,28 @@ export interface TrainingAttendanceRecord extends BaseRecord {
   reason?: string;
   revoked_at?: string;
 }
+
+// ---------- 5.2.24 posts — 内容推文（2026-08 后端改版，PRD 外扩展） ----------
+
+/** 推文可见性 2 态：hidden=隐藏（默认），visible=可见（公开端可读）。 */
+export type PostStatus = 'hidden' | 'visible';
+
+/**
+ * 内容推文（与 activities 完全无关的独立模块；仅超管可写，公开端仅见 visible）。
+ * created_by/updated_by 为 hidden 归因字段（服务端强制填充，前端不传也不读）。
+ */
+export interface PostRecord extends BaseRecord {
+  title: string;
+  /** 摘要；为空时公开端摘取正文前若干字兜底。 */
+  summary?: string;
+  /** 封面图文件名（file 单图，可空）；展示经 files.getUrl 构造 URL。 */
+  cover?: string;
+  /** Markdown 原文；与 external_url 至少填一个（posts.pb.js 校验）。 */
+  body_md?: string;
+  /** 外链 URL；非空时仅允许 http/https。 */
+  external_url?: string;
+  is_pinned: boolean;
+  status: PostStatus;
+  /** 首次置 visible 由服务端写入，之后不因隐藏/再可见而改。 */
+  published_at?: string;
+}

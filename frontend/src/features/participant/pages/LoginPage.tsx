@@ -26,7 +26,7 @@ export function LoginPage() {
 
   return (
     <PageLayout section="参与者端" title="平台通用登录" className="ccp-root" backTo="/">
-      <div className="ccp-auth-mark" aria-hidden="true">
+      <div className="cc-auth-mark" aria-hidden="true">
         <span />
         <span />
       </div>
