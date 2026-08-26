@@ -129,9 +129,16 @@ export interface PublicActivityList {
   activities: PublicActivityListItem[];
 }
 
-/** 公开活动列表（首页活动广场：未登录可看；仅 published/closed，按开始时间倒序）。 */
-export function getPublicActivities(): Promise<PublicActivityList> {
-  return apiGet(pbClients.participant, '/api/cc/public/activities');
+/**
+ * 公开活动列表（首页活动广场：未登录可看；仅 published/closed，按开始时间倒序）。
+ * scope='current' 仅未结束场次、'past' 仅已结束/已关闭场次（服务端过滤，避免列表
+ * 100 条上限跨口径截断往期）；不传返回全部。划分口径同 lib/activitySplit.ts。
+ */
+export function getPublicActivities(scope?: 'current' | 'past'): Promise<PublicActivityList> {
+  return apiGet(
+    pbClients.participant,
+    `/api/cc/public/activities${scope ? `?scope=${scope}` : ''}`,
+  );
 }
 
 /** 报名答案项（POST /api/cc/activities/:id/register 的 answers 元素）。 */
@@ -277,11 +284,7 @@ export async function selfTrainingCheckin(token: string): Promise<SelfTrainingCh
 
 /** 问卷资格校验失败原因（GET /api/cc/surveys/:qrToken 的 reasons 元素，FR-SUR-006）。 */
 export type SurveyIneligibleReason =
-  | 'not_logged_in'
-  | 'not_approved'
-  | 'role_mismatch'
-  | 'not_open'
-  | 'ended';
+  'not_logged_in' | 'not_approved' | 'role_mismatch' | 'not_open' | 'ended';
 
 /** 题目答案项（服务端出参形态：{ question_code, value }，已实跑核对）。 */
 export interface SurveyAnswerItem {

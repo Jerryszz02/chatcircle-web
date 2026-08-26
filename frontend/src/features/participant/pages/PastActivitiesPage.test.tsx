@@ -57,7 +57,7 @@ describe('PastActivitiesPage 往期活动页', () => {
   afterEach(unstubApi);
 
   it('展示已结束/已关闭活动：closed 与 end_time 已过（未手动关闭）都算往期', async () => {
-    stubApi({
+    const mock = stubApi({
       'GET /api/cc/public/activities': {
         body: {
           activities: [
@@ -70,6 +70,10 @@ describe('PastActivitiesPage 往期活动页', () => {
       },
     });
     renderPage();
+    // 往期页经 ?scope=past 服务端过滤（完整往期列表不被 100 条上限截断）
+    expect(mock.calls.some((c) => c.url.includes('/api/cc/public/activities?scope=past'))).toBe(
+      true,
+    );
     expect(await screen.findByText(/凯德专场/)).toBeInTheDocument();
     expect(screen.getByText('六月试点场')).toBeInTheDocument();
     // closed 场次展示「已关闭」标签，卡片只提供「查看详情」不提供报名入口

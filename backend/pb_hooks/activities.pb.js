@@ -2,7 +2,10 @@
 //
 // 端点契约（technical-design §5.5、database-design §5.5，统一端点契约）：
 // - GET  /api/cc/public/activities                     公开活动列表（未登录可看；首页活动广场，
-//     仅 published/closed 可见，按开始时间倒序，含报名开放状态与剩余名额口径）
+//     仅 published/closed 可见，按开始时间倒序，含报名开放状态与剩余名额口径；
+//     可选 ?scope=current|past 服务端过滤：current=未结束（published 且 end_time 未过），
+//     past=已结束（closed 或 end_time 已过），不传返回全部。报名开放判定含活动 end_time：
+//     活动已结束即使未手动关闭也视为报名截止，reason=ended）
 // - GET  /api/cc/public/activities/{id}                公开活动详情（未登录可看，FR-ACT-003；
 //     仅 published/closed 可见，含报名开放状态（open + 未开放 reason）与剩余名额口径、
 //     活动级生效报名字段 registration_fields（form_config_json 数组版解析）；下架后公开入口不可访问）
@@ -34,12 +37,25 @@ routerAdd('GET', '/api/cc/public/activities', (e) => {
   const ccNow = () => new Date().toISOString().replace('T', ' ').slice(0, 23) + 'Z';
 
   const now = ccNow();
+  // scope 服务端过滤（口径与前端 lib/activitySplit.ts 一致）：先于 100 条上限生效，
+  // 避免「最新 100 条均为未结束场次」时往期活动被整体截断；不传 scope 返回全部（兼容旧调用）。
+  const scope = e.request.url.query().get('scope') || '';
+  let filter = "(status = 'published' || status = 'closed')";
+  const params = {};
+  if (scope === 'current') {
+    filter = "status = 'published' && end_time >= {:now}";
+    params.now = now;
+  } else if (scope === 'past') {
+    filter = "(status = 'closed' || end_time < {:now})";
+    params.now = now;
+  }
   const records = $app.findRecordsByFilter(
     'activities',
-    "status = 'published' || status = 'closed'",
+    filter,
     '-start_time',
     100,
     0,
+    params,
   );
 
   const activities = [];
@@ -48,7 +64,10 @@ routerAdd('GET', '/api/cc/public/activities', (e) => {
     const approvedTotal = ccApprovedCount($app, activity.id, null);
     const regStart = String(activity.get('registration_start_at') || '');
     const regEnd = String(activity.get('registration_end_at') || '');
-    const withinWindow = (!regStart || now >= regStart) && (!regEnd || now <= regEnd);
+    // 活动本身已结束（end_time 已过）视为报名截止：机构未手动关闭（仍 published）时也兜底
+    const activityEnd = String(activity.get('end_time') || '');
+    const ended = activityEnd !== '' && now > activityEnd;
+    const withinWindow = (!regStart || now >= regStart) && (!regEnd || now <= regEnd) && !ended;
     const accepting = status === 'published' && !!activity.get('registration_open') &&
       withinWindow && approvedTotal < activity.get('capacity_total');
 
@@ -56,7 +75,7 @@ routerAdd('GET', '/api/cc/public/activities', (e) => {
     let closedReason = null;
     if (status !== 'published' || !activity.get('registration_open')) closedReason = 'closed';
     else if (regStart && now < regStart) closedReason = 'not_started';
-    else if (regEnd && now > regEnd) closedReason = 'ended';
+    else if ((regEnd && now > regEnd) || ended) closedReason = 'ended';
     else if (approvedTotal >= activity.get('capacity_total')) closedReason = 'full';
 
     activities.push({
@@ -123,11 +142,14 @@ routerAdd('GET', '/api/cc/public/activities/{id}', (e) => {
   const remainingSpeaker = Math.max(0, activity.get('capacity_speaker') - approvedSpeaker);
   const remainingListener = Math.max(0, activity.get('capacity_listener') - approvedListener);
 
-  // 报名开放状态（FR-ACT-005/007）：已发布 + 手动开关开 + 起止时间内 + 总名额未满
+  // 报名开放状态（FR-ACT-005/007）：已发布 + 手动开关开 + 起止时间内 + 活动未结束 + 总名额未满
   const now = ccNow();
   const regStart = String(activity.get('registration_start_at') || '');
   const regEnd = String(activity.get('registration_end_at') || '');
-  const withinWindow = (!regStart || now >= regStart) && (!regEnd || now <= regEnd);
+  // 活动本身已结束（end_time 已过）视为报名截止：机构未手动关闭（仍 published）时也兜底
+  const activityEnd = String(activity.get('end_time') || '');
+  const ended = activityEnd !== '' && now > activityEnd;
+  const withinWindow = (!regStart || now >= regStart) && (!regEnd || now <= regEnd) && !ended;
   const accepting = status === 'published' && !!activity.get('registration_open') &&
     withinWindow && approvedTotal < activity.get('capacity_total');
 
@@ -173,11 +195,11 @@ routerAdd('GET', '/api/cc/public/activities/{id}', (e) => {
   }
 
   // 报名开放状态与未开放原因（参与者端分因展示，FR-ACT-005/007）：
-  // closed=活动已关闭或手动开关关闭；not_started=未到报名开始；ended=已过截止；full=总名额已满
+  // closed=活动已关闭或手动开关关闭；not_started=未到报名开始；ended=已过报名截止或活动已结束；full=总名额已满
   let closedReason = null;
   if (status !== 'published' || !activity.get('registration_open')) closedReason = 'closed';
   else if (regStart && now < regStart) closedReason = 'not_started';
-  else if (regEnd && now > regEnd) closedReason = 'ended';
+  else if ((regEnd && now > regEnd) || ended) closedReason = 'ended';
   else if (approvedTotal >= activity.get('capacity_total')) closedReason = 'full';
 
   return e.json(200, {

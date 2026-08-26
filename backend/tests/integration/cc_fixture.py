@@ -9,10 +9,17 @@
   无法经 API 一次创建（迁移 1785888660 注释），首版由 run.py --sql-fixture 以
   sqlite3 直插，此处仅查询。
 """
+from datetime import datetime, timedelta, timezone
+
 from cc_client import call
 
 # 套件内统一使用的演示密码（一次性临时实例，无真实凭据）
 PASSWORD = 'cc_it_pass_123'
+
+
+def pb_dt(dt):
+    """PocketBase 日期字符串（'YYYY-MM-DD HH:mm:ssZ'）。"""
+    return dt.strftime('%Y-%m-%d %H:%M:%SZ')
 
 
 def super_login(base, identity, password):
@@ -115,11 +122,19 @@ def create_participant(base, username, password=PASSWORD):
 
 
 def create_activity(base, at, org_id, code, title, fields=None, caps=(10, 5, 5),
-                    publish=True, start='2026-08-10 12:00:00Z', end='2026-08-10 14:00:00Z'):
+                    publish=True, start=None, end=None, reg_start=None, reg_end=None):
     """创建活动（数组版 form_config）并可选直接发布（机构须关闭发布审核），返回活动 id。
 
     fields: [(field_def_id, enabled, required)]；caps: (total, speaker, listener)。
+    活动时间与报名窗口缺省为未来（30 天后举行、窗口开放中）：已结束活动不再接受报名
+    （end_time 计入报名开放判定），缺省未来日期保证报名链路可用；显式传过去的
+    start/end 可构造「已结束未手动关闭」场次（往期划分回归）。
     """
+    now = datetime.now(timezone.utc)
+    start = start or pb_dt(now + timedelta(days=30))
+    end = end or pb_dt(now + timedelta(days=30, hours=2))
+    reg_start = reg_start or pb_dt(now - timedelta(days=1))
+    reg_end = reg_end or pb_dt(now + timedelta(days=30))
     field_cfg = [{'field_def_id': fid, 'enabled': en, 'required': req}
                  for fid, en, req in (fields or [])]
     s, act = call(base, 'POST', '/api/collections/activities/records', {
@@ -128,7 +143,7 @@ def create_activity(base, at, org_id, code, title, fields=None, caps=(10, 5, 5),
         'start_time': start, 'end_time': end,
         'status': 'draft', 'capacity_total': caps[0], 'capacity_speaker': caps[1],
         'capacity_listener': caps[2], 'registration_open': True,
-        'registration_start_at': '2026-08-01 00:00:00Z', 'registration_end_at': '2026-12-31 23:59:59Z',
+        'registration_start_at': reg_start, 'registration_end_at': reg_end,
         'group_tag': '',
         'form_config_json': {'fields': field_cfg}}, at)
     assert s == 200, '创建活动失败：%s' % act

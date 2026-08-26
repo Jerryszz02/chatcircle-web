@@ -37,7 +37,7 @@ export function ActivitiesPage() {
 
   useEffect(() => {
     let cancelled = false;
-    getPublicActivities()
+    getPublicActivities('current')
       .then((res) => {
         if (cancelled) return;
         setActivities(res.activities);

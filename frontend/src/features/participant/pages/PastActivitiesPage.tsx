@@ -9,7 +9,8 @@ import { isPastActivity } from '../lib/activitySplit';
 /**
  * 往期活动页（/activities/past，未登录可看）：已结束/已关闭活动的完整列表，
  * 由站点导航与首页「往期活动」区块的「查看全部」进入。
- * 往期判定口径（closed 或 end_time 已过）见 lib/activitySplit.ts；
+ * 数据经 ?scope=past 服务端过滤（避免列表 100 条上限截断更早的往期），
+ * 前端再按同一口径（closed 或 end_time 已过，见 lib/activitySplit.ts）兜底；
  * 列表由后端按 start_time 倒序返回，最新场次在前。
  */
 export function PastActivitiesPage() {
@@ -19,7 +20,7 @@ export function PastActivitiesPage() {
 
   useEffect(() => {
     let cancelled = false;
-    getPublicActivities()
+    getPublicActivities('past')
       .then((res) => {
         if (cancelled) return;
         setActivities(res.activities);

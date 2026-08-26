@@ -62,11 +62,15 @@ describe('ActivitiesPage 活动与问卷页', () => {
   afterEach(unstubApi);
 
   it('未登录可看：展示活动列表与报名入口，无需账号', async () => {
-    stubApi({
+    const mock = stubApi({
       'GET /api/cc/public/activities': { body: { activities: [activityItem()] } },
     });
     renderPage();
     expect(await screen.findByText('八月光影茶话会')).toBeInTheDocument();
+    // 现有活动页经 ?scope=current 服务端过滤（100 条上限不跨口径截断往期）
+    expect(mock.calls.some((c) => c.url.includes('/api/cc/public/activities?scope=current'))).toBe(
+      true,
+    );
     expect(screen.getByText('报名中')).toBeInTheDocument();
     expect(screen.getByText(/剩余名额：5/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '立即报名' })).toHaveAttribute(
