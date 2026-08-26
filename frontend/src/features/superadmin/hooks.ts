@@ -10,16 +10,20 @@ import type { BackupStatus } from './lib/backup';
  * 超管端 Toast 通道。
  * 生产环境 main.tsx 已挂载全局 ToastProvider；路由级裸渲染（如 router.test）
  * 没有 Provider 时降级为 console 输出，保证页面可独立渲染、不阻断交互。
+ * 降级对象为模块级常量：引用稳定，避免页面把 toast 放进 effect 依赖时
+ * 因每次渲染返回新对象而陷入「effect → setState → 重渲染 → effect」循环。
  */
+const FALLBACK_TOAST: ToastContextValue = {
+  toast: (message, kind = 'info') => {
+    const log = kind === 'error' ? console.error : console.info;
+    log(`[toast:${kind}] ${message}`);
+  },
+};
+
 export function useSuperToast(): ToastContextValue {
   const ctx = useContext(ToastContext);
   if (ctx) return ctx;
-  return {
-    toast: (message, kind = 'info') => {
-      const log = kind === 'error' ? console.error : console.info;
-      log(`[toast:${kind}] ${message}`);
-    },
-  };
+  return FALLBACK_TOAST;
 }
 
 /**
