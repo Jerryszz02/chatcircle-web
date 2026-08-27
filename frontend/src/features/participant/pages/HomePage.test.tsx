@@ -100,6 +100,7 @@ describe('HomePage 首页', () => {
       '/a/act1/register',
     );
     const upcoming = screen.getByRole('region', { name: '现有活动' });
+    expect(within(upcoming).queryByText('活动照片')).not.toBeInTheDocument();
     expect(within(upcoming).getByRole('link', { name: '查看全部 →' })).toHaveAttribute(
       'href',
       '/activities',

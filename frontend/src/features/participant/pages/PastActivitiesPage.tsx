@@ -3,6 +3,7 @@ import { normalizeApiError, type ApiError } from '../../../shared/api/http';
 import { Button, Loading } from '../../../shared/ui';
 import { getPublicActivities, type PublicActivityListItem } from '../api';
 import { ActivityCard } from '../components/ActivityCard';
+import { ActivityStoryCards } from '../components/ActivityStoryCards';
 import { PublicPageLayout } from '../components/PublicPageLayout';
 import { isPastActivity } from '../lib/activitySplit';
 
@@ -71,6 +72,8 @@ export function PastActivitiesPage() {
             ))}
           </ul>
         ) : null}
+
+        <ActivityStoryCards />
       </section>
     </PublicPageLayout>
   );
