@@ -93,8 +93,8 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | 唯一超级管理员 | 全平台仅一个超级管理员账号，初始部署时创建；V1 无创建/停用/更换的产品界面 | PRD §3、FR-AUTH-009 |
 | 参与者账号演进 | 当前为用户名+密码且无找回；目标为手机号验证码登录，存量用户先登录原账号再绑定手机号，保留原 `participant_id` | [account-event-workflow-prd.md](account-event-workflow-prd.md) §3 |
 | 现场编号与配对 | 计划按 `checked_in_at ASC, checkin_id ASC` 分角色编号；管理员开始配对后按两侧队列顺序配对，不自动重排已有组 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §5 |
-| 双问卷完成率 | 现场工作台默认看“有效签到且符合角色”的完成率；活动后同时保留“已审核通过且符合角色”的总体完成率 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §4.3 |
-| 细粒度导出 | 计划支持单活动、单问卷、指定参与者、行筛选、字段/题目选择；姓名/完整手机号/敏感题触发敏感导出门槛 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §7 |
+| 双问卷完成率 | 现场与总体完成率的分子都必须与各自当前分母人群取交集；撤销签到或回退报名后同步移出对应分子，比例不得超过 100% | [account-event-workflow-prd.md](account-event-workflow-prd.md) §4.3 |
+| 细粒度导出 | 计划支持单活动、单问卷、指定参与者、行筛选、字段/题目选择；任一所选报名字段或问卷题目 `is_sensitive=true`，或选择账号层敏感字段时，均由服务端触发敏感导出门槛 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §7 |
 
 ## 开发入口
 

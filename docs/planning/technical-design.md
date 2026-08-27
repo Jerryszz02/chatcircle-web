@@ -289,7 +289,7 @@ V1 指标注册表初始项（口径原文来自 PRD §7.1）：
 | `service_visits` | 有效签到记录数（服务人次；一个账号三场活动计 3 人次） | count |
 | `unique_participants` | 有效签到中的 `participant_id` 去重；同一自然人多账号不合并 | countDistinct |
 | `survey_submissions` | 有效已提交答卷数；作废不计 | count |
-| `survey_completion_rate` | 有效提交人数 ÷ 符合填写资格人数；资格=当前报名已通过（剔除已取消）且角色符合问卷适用范围；开放时间不影响最终分母 | ratio |
+| `survey_completion_rate` | 当前报名仍为 approved 且角色符合者中的有效已提交人数 ÷ 当前报名 approved 且角色符合人数；分子与分母使用同一当前资格集合，答卷作废或报名取消/回退后同步排除；分母为 0 返回 null，比例不得超过 1 | ratio |
 | `partner_organizations` | 状态=active 的机构数（合作伙伴口径；2026-08 后端改版新增） | count |
 
 公开 Outcome 端点（2026-08 后端改版，PRD 外扩展，验收 AC-26）：`GET /api/cc/public/outcome` 面向首页公开成效区块，无需登录、无参数、无手工维护，返回 `{ activity_sessions, service_visits, partner_organizations }` 三个累计值，口径直接复用上表注册表。注意：`activity_sessions` 此处含 archived，与公开活动列表/详情 viewRule 的可见范围（仅 published/closed）是两回事——Outcome 是累计宣传口径，不随活动下架/归档而扣减。服务端三次 count 查询，不加缓存。
