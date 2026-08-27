@@ -345,6 +345,10 @@ Vitest + jsdom + Testing Library，40 个测试文件与源码 colocate，主力
 
 **数据出口**：导出 ZIP → 外部分析 agent 经 `mcp/` MCP server 取数（`export_activity_data` 恒 `include_pii:false`，只回文件路径不回正文）→ 报告经 `upload_report` 回传 `reports` 集合（强制 draft，人工审核发布，钩子记 `report.upload` 审计）。
 
+MCP 是由 WorkBuddy、Kimi、Claude、Codex 等本地客户端启动的 STDIO 进程，Chat Circles 后端 URL
+只是它访问 PocketBase 的地址，不是远程 MCP 端点。不同客户端的完整配置、未备案期间安全接入与 SSH
+隧道、首次验收、云端 agent 限制见 [`mcp/README.md`](../mcp/README.md)。
+
 ## 8. 常见修改食谱
 
 **加一个集合 / 加字段**
