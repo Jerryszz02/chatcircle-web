@@ -1,5 +1,7 @@
 # Chat Circles — 数据库设计（PocketBase 集合设计草案）
 
+> **2026-08-27 范围更新：**当前 `participant_accounts` 仍是用户名账号，当前 schema 也没有活动配对集合。目标手机号字段、现场编号、`activity_pairs` 和细粒度 `export_jobs.scope_json` 见 [account-event-workflow-prd.md](account-event-workflow-prd.md) §9，状态均为`计划中`。本文现有集合表用于解释当前/旧 V1 基线，不得据此否定专项 PRD 的新增范围。
+
 > 本文档将 PRD v0.3 §9 数据模型落地为 PocketBase 集合定义，面向后续实现工程师。阅读本文不需要先读 PRD；涉及 PRD 口径处均注明出处。所有表结构为**设计草案**：字段名、枚举机器码、索引与规则如与实现阶段证据冲突，以实现阶段评审结论为准并回写本文。
 
 ## 1. 文档目的
@@ -22,14 +24,14 @@
 |---|---|
 | 需求基线 | PRD v0.3（评审修订版，2026-08-05），`docs/Chat_Circles_活动与问卷平台_PRD_v0.3.docx`；本文引用其 §9 数据模型、§4 状态模型、§6 功能需求、§10 导出规范、§11 安全审计、§12.3 备份、§14 验收标准、附录 B 命名规范 |
 | 已确认技术决策 | 响应式 Web（React 18 + Vite + TypeScript）+ PocketBase（后端/认证/SQLite）+ Docker；统一入口 `chatcircle.empact.cn`；完整 V1（M0~M5） |
-| 项目现状 | 项目根目录仅有 PRD 文档，无代码、无仓库（GitHub 私有仓库 `chatcircle-web` 待 M0 创建）；本目录规划文档为开发前准备 |
+| 项目现状（2026-08-27） | 默认分支 `fdb7ad8` 已有 PocketBase 迁移、hooks、前端、测试和部署配置；当前仍无 `activity_pairs`，参与者 identity 仍为 `username` |
 | 相关文档 | [README.md](README.md)（项目索引与术语）、technical-design.md（架构决策）、security-privacy.md（审计与隐私细则） |
 
 ## 4. 非目标
 
 - 不定义 PRD 未写死的**报名标准字段具体内容**（字段清单、必填规则、知情同意文案）——仅提供标准字段库 + 自定义字段的表结构能力，内容列入「待确认」（PRD §8.1、§16.2）。
 - 不定义标准问卷模板的完整题目与锁定题清单——结构按 `survey_template_versions` + `locked` 实现，内容待模板确认（PRD §16.2）。
-- 不设计账号找回/多账号合并、统计分析/LLM/自动报告、独立域名 host 映射的表结构——V1 非范围（PRD §2.2、§16.2），仅按 §5.3 预留扩展位。
+- 原 V1 不设计账号找回/多账号合并、统计分析/LLM/自动报告和独立域名 host 映射。2026-08-27 专项升级仅新增手机号绑定冲突的人工处理边界和运营聚合指标，不新增敏感个体画像或 LLM 自动分析。
 - 不提供任何硬删除能力对应的物理删除方案（FR-AUD-001）。
 - 不承诺 PocketBase 规则语法逐字可执行——规则表达式为示意，实现阶段以所选用 PocketBase 版本文档为准。
 
@@ -98,7 +100,7 @@
 
 - 邮箱认证（2026-08 后端改版）：`passwordAuth.identityFields = ['username', 'email']`（用户名/邮箱 + 密码均可登录），并启用 PB 原生 OTP（`duration=300`，邮箱验证码登录）。注册后 `verified=false`，经 PB 内置 request-verification / confirm-verification 完成验证；**仅已验证邮箱可找回密码**（未验证账号请求重置时静默 204，不发邮件不放行，防账号枚举）；OTP 认证成功即证明邮箱所有权，账号同步置 `verified=true`。端点契约与限流见 technical-design §5.4「管理员邮箱认证」。
 - 换邮箱走 PB 内置 requestEmailChange 流程；直连 update 修改 `email` 由 guards.pb.js 禁止（加入禁改清单）。
-- 参与者账号红线不变：`participant_accounts` 不存邮箱/手机号等任何联系方式（见 §5.2.4），本次改版只动 `admin_accounts`。
+- 当前代码基线中 `participant_accounts` 不存邮箱/手机号；2026-08-27 专项升级将新增已验证手机号，迁移与最小暴露规则见 [account-event-workflow-prd.md](account-event-workflow-prd.md) §3、§9。
 - API Rules 要点：管理员只能 view 本机构同事记录与本人记录；create 仅经邀请码注册接口（服务端）；不允许管理员修改 `organization_id`。
 - 机构 `status=disabled` 时由服务端钩子拒绝其全部管理操作（FR-ORG-001）。
 
@@ -110,7 +112,7 @@
 | status | select(active, disabled) | 是 | — | 账号停用为可审计事件（PRD §11.3） |
 | （created） | 系统字段 | — | 索引 | 即 PRD §9.1 的 `created_at`；跨活动账号连续性统计可用 |
 
-- **不存**手机号、邮箱、微信等任何联系方式（FR-AUTH-002）；建议注册/报名链路提示用户勿用真实姓名做用户名（PRD §11.1）。
+- **当前实现**不存手机号、邮箱、微信等联系方式；**目标状态**新增已验证手机号作为主要登录身份，保留 `username` 仅用于存量兼容，见 [account-event-workflow-prd.md](account-event-workflow-prd.md) §3、§9。
 - API Rules 要点：参与者仅能 view/update 本人记录（`@request.auth.id = id`），且不可改 `username`（机构管理员也不得修改参与者凭据，PRD §3.2）；create 仅经报名链路自动注册接口。
 - 无密码重置/找回入口（任何角色，PRD §5.7）。
 

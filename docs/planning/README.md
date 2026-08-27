@@ -6,12 +6,14 @@
 
 ## 项目是什么
 
-**Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。V1 交付范围（PRD §2.1）：
+**Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。当前默认分支已经包含 React + PocketBase 前后端、测试与部署配置；手机号账号、现场配对、单活动实时工作台和细粒度导出属于 2026-08-27 新增的`计划中`目标，不能当作已实现功能。
 
 - 多机构集中管理：Empact 集中式平台，统一数据库，机构间按 `organization_id` 逻辑隔离。
 - 活动全生命周期：活动创建/发布/传播（链接与二维码；另设公开活动广场页 `/activities`，仅展示已发布/已关闭活动）→ 报名与人工审核（角色名额硬限制、误判回退）→ 现场固定二维码签到（含补签/撤销）→ 多份问卷发布与填写 → 基础项目管理看板 → 规范化 ZIP/CSV 数据导出。
 - 聆听者培训体系（2026-08 扩展，PRD 外）：机构级培训创建/发布/关闭、固定二维码培训签到（资格 = 账号存在 approved 聆听者报名，全平台通用）、账号级「培训通过」标记（仅记录与展示，不作报名门槛）。
-- 三级账号权限：超级管理员（全平台仅一个，建站时创建）、机构管理员（一次性邀请码注册，仅限本机构）、参与者（全平台通用账号，仅用户名+密码，无需微信/手机号/邮箱）。
+- 三级账号权限：超级管理员、机构管理员、参与者。参与者当前实现为用户名+密码；目标状态为中国大陆手机号验证码登录/注册，存量账号通过验证码绑定手机号并保留原 `participant_id`。
+- 现场执行升级（计划中）：按签到顺序为倾诉者/聆听者编号和配对，参与者端只展示本人的编号、组号与搭档姓名。
+- 机构效率升级（计划中）：活动创建向导、单场活动实时工作台、参与者结构聚合和可按活动/问卷/参与者/字段选择的细粒度导出。
 
 正式入口域名：`chatcircle.empact.cn`。
 
@@ -35,18 +37,18 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | 机构管理员 | 合作机构工作人员 | 仅所属机构 | 活动管理、报名表与问卷配置、报名审核、签到控制与补签、本机构看板/审计/按权限导出 |
 | 参与者 | 活动参与者 | 仅本人相关记录 | 查看公开活动详情、登录/自动注册、提交报名、查看审核状态、扫码签到、填写被授权问卷、查看本人已提交答案 |
 
-**重要区分**：「倾诉者」与「聆听者」**不是平台权限角色**，而是每条报名记录上的活动内角色（`activity_role`）。同一参与者账号可在不同活动中选择不同角色；管理员审核时可修改该次报名的角色。匿名/假名化承诺主要针对倾诉者（PRD §3.1）。
+**重要区分**：「倾诉者」与「聆听者」**不是平台权限角色**，而是每条报名记录上的活动内角色（`activity_role`）。同一参与者账号可在不同活动中选择不同角色；管理员审核时可修改该次报名的角色。旧 PRD 的匿名/假名化口径已被手机号账号计划调整，最新隐私边界见 [account-event-workflow-prd.md](account-event-workflow-prd.md) §8。
 
 ## 文档生成背景
 
 | 项 | 内容 |
 |---|---|
-| 生成请求 | 正式开发前的文档准备阶段：基于已确认的需求基线与技术决策，为后续实现工程师生成项目规划文档，写清前提、术语、输入输出、约束、步骤与验收方式 |
-| 生成时间 | 2026-08-05 |
-| 最近同步 | 2026-08-25（执行前准备模式）：2026-08 后端改版（管理员邮箱认证 / 内容推文 posts / 公开 Outcome）先更新设计文档、后改代码；本次仅回写五份设计文档为「将要实现」的契约，代码尚未实现；证据：`ChatCircle_后端改版计划.docx`（六条，需求方提供，未入库）、实施计划（步骤 1）；新增待确认 technical-design #18/#19、database-design D-9 |
-| 已检查的项目根目录 | 项目根目录仅含 `docs/`（三份 PRD docx）与 `.DS_Store`；尚无代码、构建配置或 GitHub 仓库（私有仓库 `chatcircle-web` 尚未创建） |
-| 关键证据 | `docs/` 下三份 PRD：`Chat_Circles_活动与问卷平台_PRD_v0.1.docx`、`_v0.2.docx`、`_v0.3.docx`；以 **v0.3（评审修订版，2026-08-05）为需求基线**。2026-08-05 增补：`docs/ChatCircle_Web_UI_Design_Spec_v1.0.docx`（UI 设计规范，仅其纯视觉部分纳入 [ui-design.md](ui-design.md)，业务口径仍以本目录规划文档为准）；`frontend/src/shared/styles/global.css` 与 `shared/ui/` 组件库现状 |
-| 已确认技术决策 | 响应式 Web（React 18 + Vite + TypeScript，手机优先）+ PocketBase（后端/认证/SQLite）+ Docker 部署；完整 V1 范围（M0~M5） |
+| 生成请求 | 归档 2026-08-27 已确认的“手机号账号 + 活动全流程效率 + 实时看板 + 现场配对 + 细粒度导出”重大升级，供新对话直接继续 |
+| 初始生成 | 2026-08-05 |
+| 最近同步 | 2026-08-27（状态同步 + Plan 归档）：新增 [account-event-workflow-prd.md](account-event-workflow-prd.md)，并将现有文档与新目标的冲突显式标注。新增内容均为`计划中`。 |
+| 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb`；Git 分支基于 `origin/main` 的 `fdb7ad8`。当前仓库含 `frontend/`、`backend/`、`e2e/`、`deploy/`、`mcp/` 与 `docs/`。 |
+| 本次关键代码证据 | `participant_accounts` 仍以 `username` 为 identity；`checkins` 有 `checked_in_at` 但无配对集合；指标注册表已有 8 项；导出仍以固定 ZIP/CSV 和全局 `include_pii` 开关为主。以上只证明当前代码形态，不证明生产部署状态。 |
+| 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；新增阿里云短信认证、PocketBase Realtime/SSE、配对数据模型、活动工作台与 XLSX/CSV 细粒度导出。 |
 
 ## 已生成文档
 
@@ -57,6 +59,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | [security-privacy.md](security-privacy.md) | 安全、隐私与审计要求：认证与会话策略、权限边界、审计事件清单、敏感数据处理与隐私表述 |
 | [test-plan.md](test-plan.md) | 测试与 CI 策略：测试分层、AC-01~26 验收映射（AC-24~26 为 2026-08 后端改版续编）、越权自动化测试与 CI 流水线 |
 | [ui-design.md](ui-design.md) | 前端视觉与交互规范：色彩/字体/间距/动效 token、组件规则、响应式与无障碍基线、文案语气、图表样式；仅含纯前端 UI，业务口径以 PRD 与本目录其他文档为准 |
+| [account-event-workflow-prd.md](account-event-workflow-prd.md) | **2026-08-27 专项升级主入口**：手机号账号、机构活动全流程、实时看板、现场编号与配对、参与者端展示、细粒度导出、隐私边界、API 草案、并行任务和验收清单 |
 
 ## 有意跳过的目录文档
 
@@ -65,7 +68,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | 跳过的文档 | 处理方式 | 原因 |
 |---|---|---|
 | project-brief.md | 并入本 README | 项目背景、目标与用户角色已在上文覆盖，单独成篇会重复 |
-| prd.md | 不生成 | 需求基线以 `docs/` 下 PRD v0.3 docx 为唯一权威来源；复制为 Markdown 会产生双源漂移 |
+| prd.md | 不生成通用副本 | 原 V1 需求基线仍以 `docs/` 下 PRD v0.3 docx 为准；2026-08-27 新增范围单独维护在 [account-event-workflow-prd.md](account-event-workflow-prd.md)，避免改写历史 PRD |
 | architecture.md | 并入 [technical-design.md](technical-design.md) | 架构内容与技术实现指引一体，拆分只会制造交叉引用负担 |
 | user-flow.md | 不生成 | 核心业务流程见 PRD §5；状态机与迁移约束见 [database-design.md](database-design.md) |
 | api-design.md | 暂缓 | PocketBase 自定义接口（hooks/routes）契约需在开发阶段随实现确定；现为待确认项，见 [technical-design.md](technical-design.md) |
@@ -88,28 +91,18 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | 机构逻辑隔离 | 所有机构业务数据带 `organization_id`，服务端强制注入权限条件，不能只依赖前端隐藏 | PRD §9.2、§12.2 |
 | 一次性邀请码 | 机构管理员凭超级管理员生成的一次性邀请码自行注册（默认 7 天有效），用后立即失效 | PRD §5.1 |
 | 唯一超级管理员 | 全平台仅一个超级管理员账号，初始部署时创建；V1 无创建/停用/更换的产品界面 | PRD §3、FR-AUTH-009 |
-| 无账号找回 | V1 不提供软件层面找回/重置；参与者忘记凭据可重新注册，去重指标按 `participant_id` 口径并注明 | PRD §5.7 |
+| 参与者账号演进 | 当前为用户名+密码且无找回；目标为手机号验证码登录，存量用户先登录原账号再绑定手机号，保留原 `participant_id` | [account-event-workflow-prd.md](account-event-workflow-prd.md) §3 |
+| 现场编号与配对 | 计划按 `checked_in_at ASC, checkin_id ASC` 分角色编号；管理员开始配对后按两侧队列顺序配对，不自动重排已有组 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §5 |
+| 双问卷完成率 | 现场工作台默认看“有效签到且符合角色”的完成率；活动后同时保留“已审核通过且符合角色”的总体完成率 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §4.3 |
+| 细粒度导出 | 计划支持单活动、单问卷、指定参与者、行筛选、字段/题目选择；姓名/完整手机号/敏感题触发敏感导出门槛 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §7 |
 
-## 从零开始的开发路径
+## 开发入口
 
-以下为开发阶段（M0 技术骨架）将要执行的步骤示意，**当前文档阶段尚未执行**；详细架构与环境要求见 [technical-design.md](technical-design.md)：
-
-```bash
-# 1. 初始化前端（React 18 + Vite + TypeScript，手机优先响应式）
-npm create vite@latest . -- --template react-ts
-
-# 2. 启动 PocketBase（后端/认证/SQLite；开发期本地运行，生产由 Docker 封装）
-./pocketbase serve
-
-# 3. 一键启动完整环境（前后端 + PocketBase + 迁移 + 模板初始化 + 备份任务）
-docker compose up
-```
-
-意图标注：上述命令面向开发阶段；GitHub 私有仓库 `chatcircle-web` 尚未创建，仓库初始化与 CI 接入也属 M0 工作。
+仓库已经完成初始化。当前代码结构、本地启动、测试与部署命令以 [开发者指南](../developer-guide.md) 和各 package 的 `package.json` 为准；planning 文档不复制易漂移的命令。开始本专项升级时，先执行 [account-event-workflow-prd.md](account-event-workflow-prd.md) 的 T0，共享契约合并后再进入两个并行波次。
 
 ## Roadmap
 
-开发阶段与优先级（引用 PRD §15，范围 M0~M5）：
+下表为原 V1 的`历史记录`（引用 PRD §15，范围 M0~M5），不代表 2026-08-27 专项升级的当前任务状态。新任务拆分以 [account-event-workflow-prd.md](account-event-workflow-prd.md) §10 为准。
 
 | 阶段 | 核心交付 | 退出条件 |
 |---|---|---|
@@ -138,15 +131,15 @@ docker compose up
 
 | 事项 | 缺少什么 | 出处/去向 |
 |---|---|---|
-| 具体报名字段、必填规则与知情同意文案 | 字段清单与文案的单独定义 | PRD §16.2；先实现标准字段库 + 自定义字段能力 |
+| 报名标准字段最终 schema | 已确认姓名必填、性别/年龄可用于聚合；仍需在出生年份与年龄段之间定稿并冻结字段代码 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §12 |
 | 标准问卷完整题目与锁定题范围 | 模板内容确认 | PRD §16.2；结构按版本 + `locked` 字段实现 |
-| 参与者账号找回与多账号合并机制 | 后续版本方案 | PRD §5.7、§16.2；V1 不做 |
+| 存量手机号冲突与多账号合并 | 同一手机号已被另一账号绑定时的受审计人工流程 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §3.2、§12 |
 | 长期维护、保修、升级与责任划分 | 运维与商务约定 | PRD §16.2；不阻塞 V1 |
 | 机构独立域名方案 | host → organization 映射的实施计划 | PRD §12.2、§16.2；V1 统一使用 `chatcircle.empact.cn` |
 | 数据治理与法定删除请求处理 | 管理政策 | PRD §16.2；V1 不提供硬删除 |
 | PocketBase 自定义接口契约 | 随开发阶段确定的具体 routes/hooks 设计 | 见 [technical-design.md](technical-design.md) |
 | operations-runbook.md（运维手册） | M5 阶段产物，现阶段无内容来源 | 本索引「有意跳过」表 |
 | License | Empact 对许可条款的决定 | 见上文 License 节 |
-| GitHub 私有仓库 `chatcircle-web` | 仓库尚未创建 | M0 工作 |
+| 阿里云短信认证生产配置 | 实际账号开通、AccessKey 安全下发、费用和测试号码 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §12 |
 | UI 设计稿与规划文档的业务冲突项 | 设计稿中的 Skill 入口、活动列表/推荐、通知中心等不作为实现依据；如需采纳须先回 PRD 评审 | 见 [ui-design.md](ui-design.md)「非目标」 |
 | SMTP 凭据下发与验证/找回邮件模板配置（2026-08 改版） | PB Settings 手工配置的责任人、凭据下发方式、模板文案与前端落地路由对应关系 | 见 [technical-design.md](technical-design.md)「待确认」#18/#19、security-privacy.md §14 |
