@@ -6,7 +6,7 @@
 
 ## 项目是什么
 
-**Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。当前默认分支已经包含 React + PocketBase 前后端、测试与部署配置；手机号账号、现场配对、单活动实时工作台和细粒度导出属于 2026-08-27 新增的`计划中`目标，不能当作已实现功能。
+**Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。当前默认分支已经包含 React + PocketBase 前后端、测试与部署配置；手机号账号、现场配对、单活动实时工作台和细粒度导出仍属于`计划中`功能。T0 只已冻结它们的共享契约与迁移边界，不能当作 T1–T6 已实现。
 
 - 多机构集中管理：Empact 集中式平台，统一数据库，机构间按 `organization_id` 逻辑隔离。
 - 活动全生命周期：活动创建/发布/传播（链接与二维码；另设公开活动广场页 `/activities`，仅展示已发布/已关闭活动）→ 报名与人工审核（角色名额硬限制、误判回退）→ 现场固定二维码签到（含补签/撤销）→ 多份问卷发布与填写 → 基础项目管理看板 → 规范化 ZIP/CSV 数据导出。
@@ -43,18 +43,20 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 
 | 项 | 内容 |
 |---|---|
-| 生成请求 | 归档 2026-08-27 已确认的“手机号账号 + 活动全流程效率 + 实时看板 + 现场配对 + 细粒度导出”重大升级，供新对话直接继续 |
+| 生成请求 | 归档 2026-08-27 专项升级，并于 2026-08-28 实施 T0 共享契约与迁移设计 |
 | 初始生成 | 2026-08-05 |
-| 最近同步 | 2026-08-27（状态同步 + Plan 归档）：新增 [account-event-workflow-prd.md](account-event-workflow-prd.md)，并将现有文档与新目标的冲突显式标注。新增内容均为`计划中`。 |
-| 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb`；Git 分支基于 `origin/main` 的 `fdb7ad8`。当前仓库含 `frontend/`、`backend/`、`e2e/`、`deploy/`、`mcp/` 与 `docs/`。 |
-| 本次关键代码证据 | `participant_accounts` 仍以 `username` 为 identity；`checkins` 有 `checked_in_at` 但无配对集合；指标注册表已有 8 项；导出仍以固定 ZIP/CSV 和全局 `include_pii` 开关为主。以上只证明当前代码形态，不证明生产部署状态。 |
-| 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；新增阿里云短信认证、PocketBase Realtime/SSE、配对数据模型、活动工作台与 XLSX/CSV 细粒度导出。 |
+| 最近同步 | 2026-08-28（T0 `已验证`）：新增 [api-design.md](api-design.md) 和共享类型，冻结手机号、报名标准字段、现场编号/配对、Realtime 失效化、导出 v2 与 v1 兼容顺序。 |
+| 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb-t0-shared-contracts`；`agent/t0-shared-contracts` 从 `origin/main` `57a0aad` 创建。不把本工作分支写成已部署生产状态。 |
+| 本次关键代码证据 | `participant_accounts` 仍以 `username` 为 identity；`checkins` 无现场号，无 `activity_pairs`；导出仍是固定 ZIP/CSV + `include_pii`。PocketBase 0.28.4 隔离探针证明 text 手机号 identity 技术可行，但 T0 因“短信验证码 only”选择服务端验证后签 token。 |
+| 本次验证命令 | 2026-08-28 已通过 `npm test`（43 files / 310 tests）、`npm run typecheck`、`npm run lint`、`npm run build` 与 planning 索引/链接审计。 |
+| 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T1–T6 按 `2026-08-28.t0-v1` 新增阿里云短信认证、PocketBase Realtime/SSE、配对数据模型、活动工作台与 XLSX/CSV 细粒度导出。 |
 
 ## 已生成文档
 
 | 文档 | 用途 |
 |---|---|
 | [technical-design.md](technical-design.md) | 技术架构与实现指引：技术栈、前后端结构、PocketBase 接入方式、关键实现决策、部署与备份要点、决策记录 |
+| [api-design.md](api-design.md) | **T0 契约权威文档**：手机号认证、快照/配对、Realtime 失效化、导出 v2 的请求/响应、权限、幂等、错误与 v1 兼容契约 |
 | [database-design.md](database-design.md) | 数据模型落地：PocketBase 集合设计、字段与关系、机构隔离规则、状态机与事务约束 |
 | [security-privacy.md](security-privacy.md) | 安全、隐私与审计要求：认证与会话策略、权限边界、审计事件清单、敏感数据处理与隐私表述 |
 | [test-plan.md](test-plan.md) | 测试与 CI 策略：测试分层、AC-01~26 验收映射（AC-24~26 为 2026-08 后端改版续编）、越权自动化测试与 CI 流水线 |
@@ -71,7 +73,6 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | prd.md | 不生成通用副本 | 原 V1 需求基线仍以 `docs/` 下 PRD v0.3 docx 为准；2026-08-27 新增范围单独维护在 [account-event-workflow-prd.md](account-event-workflow-prd.md)，避免改写历史 PRD |
 | architecture.md | 并入 [technical-design.md](technical-design.md) | 架构内容与技术实现指引一体，拆分只会制造交叉引用负担 |
 | user-flow.md | 不生成 | 核心业务流程见 PRD §5；状态机与迁移约束见 [database-design.md](database-design.md) |
-| api-design.md | 暂缓 | PocketBase 自定义接口（hooks/routes）契约需在开发阶段随实现确定；现为待确认项，见 [technical-design.md](technical-design.md) |
 | release-plan.md | 拆分合并 | 部署与备份要点并入 [technical-design.md](technical-design.md)；上线 checklist 属 M5 阶段产物 |
 | operations-runbook.md | 暂缓 | 运维手册属 M5「生产交付」阶段产物，现阶段标记为待确认 |
 | decision-log.md | 并入 [technical-design.md](technical-design.md) | 关键决策以表格形式记录在技术设计文档中，避免维护两份决策清单 |
@@ -98,7 +99,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 
 ## 开发入口
 
-仓库已经完成初始化。当前代码结构、本地启动、测试与部署命令以 [开发者指南](../developer-guide.md) 和各 package 的 `package.json` 为准；planning 文档不复制易漂移的命令。开始本专项升级时，先执行 [account-event-workflow-prd.md](account-event-workflow-prd.md) 的 T0，共享契约合并后再进入两个并行波次。
+仓库已经完成初始化。当前代码结构、本地启动、测试与部署命令以 [开发者指南](../developer-guide.md) 和各 package 的 `package.json` 为准；planning 文档不复制易漂移的命令。T0 合并后，Wave 1 必须先读 [api-design.md](api-design.md) 并复用 `frontend/src/shared/api/accountEvent.ts`；不得在 T1/T2/T3 内改名或另造契约。
 
 ## Roadmap
 
@@ -131,13 +132,11 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 
 | 事项 | 缺少什么 | 出处/去向 |
 |---|---|---|
-| 报名标准字段最终 schema | 已确认姓名必填、性别/年龄可用于聚合；仍需在出生年份与年龄段之间定稿并冻结字段代码 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §12 |
 | 标准问卷完整题目与锁定题范围 | 模板内容确认 | PRD §16.2；结构按版本 + `locked` 字段实现 |
 | 存量手机号冲突与多账号合并 | 同一手机号已被另一账号绑定时的受审计人工流程 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §3.2、§12 |
 | 长期维护、保修、升级与责任划分 | 运维与商务约定 | PRD §16.2；不阻塞 V1 |
 | 机构独立域名方案 | host → organization 映射的实施计划 | PRD §12.2、§16.2；V1 统一使用 `chatcircle.empact.cn` |
 | 数据治理与法定删除请求处理 | 管理政策 | PRD §16.2；V1 不提供硬删除 |
-| PocketBase 自定义接口契约 | 随开发阶段确定的具体 routes/hooks 设计 | 见 [technical-design.md](technical-design.md) |
 | operations-runbook.md（运维手册） | M5 阶段产物，现阶段无内容来源 | 本索引「有意跳过」表 |
 | License | Empact 对许可条款的决定 | 见上文 License 节 |
 | 阿里云短信认证生产配置 | 实际账号开通、AccessKey 安全下发、费用和测试号码 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §12 |

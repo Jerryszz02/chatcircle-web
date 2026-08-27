@@ -1,5 +1,6 @@
 /** 类型化 API 层统一出口：import { collectionsForRole, apiPost } from '@/shared/api'; */
 export * from './types';
+export * from './accountEvent';
 export { COLLECTION_NAMES, collections, collectionsForRole } from './collections';
 export type { TypedCollections } from './collections';
 export {
