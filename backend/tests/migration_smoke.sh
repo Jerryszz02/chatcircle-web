@@ -90,11 +90,28 @@ run_migrate() {
 }
 
 # --- 2. 空库 migrate up ---------------------------------------------------------
-info "步骤 1/4：空库 migrate up"
+info "步骤 1/5：空库 migrate up"
 run_migrate "migrate up（空库）成功" "$WORK/up1.log" up
 
-# --- 3. migrate down 全部 → 再 up（往返） ---------------------------------------
-info "步骤 2/4：migrate down ${MIG_COUNT}（全部回滚）→ 再 migrate up"
+# --- 3. 单独回滚 seed 迁移，验证推文与审计成对清理 -------------------------------
+info "步骤 2/5：单独回滚最新 seed 迁移 → 校验无孤儿审计 → 再 migrate up"
+echo y | run_migrate "migrate down 最新 seed 迁移成功" "$WORK/down_seed.log" down 1
+if command -v sqlite3 >/dev/null 2>&1; then
+  SEED_POSTS="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM posts WHERE id IN ('postreview00001','postreview00002');")"
+  check_eq "单独 down 后两条 seed 推文均已删除" "$SEED_POSTS" "0"
+  SEED_AUDITS="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM audit_logs WHERE action='post.create' AND target_type='post' AND target_id IN ('postreview00001','postreview00002');")"
+  check_eq "单独 down 后 seed 审计无孤儿记录" "$SEED_AUDITS" "0"
+else
+  info "未安装 sqlite3，跳过单独 down 后 seed 推文/审计计数检查"
+fi
+run_migrate "单独 down 后再次 migrate up 成功" "$WORK/up_seed.log" up
+if command -v sqlite3 >/dev/null 2>&1; then
+  SEED_AUDITS="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM audit_logs WHERE action='post.create' AND target_type='post' AND target_id IN ('postreview00001','postreview00002') AND actor_id='system' AND actor_role='system';")"
+  check_eq "再次 up 后恰有两条 system seed 审计" "$SEED_AUDITS" "2"
+fi
+
+# --- 4. migrate down 全部 → 再 up（往返） ---------------------------------------
+info "步骤 3/5：migrate down ${MIG_COUNT}（全部回滚）→ 再 migrate up"
 # migrate down 会交互式询问确认（非交互环境默认取消），用 echo y 管道确认
 echo y | run_migrate "migrate down 全部回滚成功" "$WORK/down.log" down "$MIG_COUNT"
 
@@ -109,7 +126,7 @@ fi
 run_migrate "再次 migrate up（down→up 往返）成功" "$WORK/up2.log" up
 
 # --- 4. serve + API 抽查 ---------------------------------------------------------
-info "步骤 3/4：创建超管并启动 serve"
+info "步骤 4/5：创建超管并启动 serve"
 "$PB" superuser create smoke@example.com smoke-pass-123 --dir "$DATA_DIR" > /dev/null 2>&1
 "$PB" serve --dir "$DATA_DIR" --migrationsDir "$MIGRATIONS_DIR" --hooksDir "$HOOKS_DIR" --http "127.0.0.1:$PORT" > "$WORK/serve.log" 2>&1 &
 SERVE_PID=$!
@@ -129,7 +146,7 @@ STOKEN="$(curl -fsS -X POST "$BASE/api/collections/_superusers/auth-with-passwor
   -H 'Content-Type: application/json' -d '{"identity":"smoke@example.com","password":"smoke-pass-123"}' | json_val "d['token']")"
 if [ -n "$STOKEN" ]; then ok "超管认证成功"; else bad "超管认证失败"; exit 1; fi
 
-info "步骤 4/4：API 抽查（集合存在性 / 未认证拒绝 / 规则与唯一索引）"
+info "步骤 5/5：API 抽查（集合存在性 / 未认证拒绝 / 规则与唯一索引）"
 
 # 4.1 24 个业务集合全部存在
 EXPECTED="organizations admin_invites admin_accounts participant_accounts activities activity_approvals registration_field_defs registrations registration_answers checkin_sessions checkins survey_templates survey_template_versions activity_surveys survey_questions submissions answers export_jobs audit_logs trainings training_checkin_sessions training_attendances reports posts"

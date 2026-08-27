@@ -35,14 +35,27 @@ migrate((app) => {
       is_pinned: false,
       status: 'visible',
       published_at: post.publishedAt,
-      // app.save 会触发 posts 审计 hook；数据迁移没有登录态，用固定系统标识归因。
-      created_by: 'systemmigration',
-      updated_by: 'systemmigration',
+      // app.save 会触发 posts 审计 hook；数据迁移没有登录态，按审计契约归因为 system。
+      created_by: 'system',
+      updated_by: 'system',
     });
     app.save(record);
   }
 }, (app) => {
   for (const post of REVIEW_POSTS) {
+    // app.save(record) 同事务生成 post.create 审计；单独回滚本迁移时须同步移除，
+    // 避免留下指向已删除推文的孤儿记录，或在 down/up 后累积重复审计。
+    const audits = app.findRecordsByFilter(
+      'audit_logs',
+      "action = 'post.create' && target_type = 'post' && target_id = {:targetId}",
+      '',
+      50,
+      0,
+      { targetId: post.id },
+    );
+    for (const audit of audits) {
+      app.delete(audit);
+    }
     const record = app.findRecordById('posts', post.id);
     app.delete(record);
   }

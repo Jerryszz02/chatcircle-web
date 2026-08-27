@@ -121,6 +121,16 @@ def run(ctx):
     actions = [i.get('action') for i in (r.get('items') or [])]
     rep.check('PST-19 post.create / post.update 审计均有记录',
               s == 200 and 'post.create' in actions and 'post.update' in actions, r)
+    seed_audits = [i for i in (r.get('items') or [])
+                   if i.get('target_id') in ('postreview00001', 'postreview00002')]
+    rep.check('PST-19a seed 推文审计归因为 system',
+              len(seed_audits) == 2 and
+              all(i.get('actor_id') == 'system' and i.get('actor_role') == 'system'
+                  for i in seed_audits), seed_audits)
+    api_audits = [i for i in (r.get('items') or []) if i.get('target_id') == p_link]
+    rep.check('PST-19b API 推文审计仍归因为 super_admin',
+              len(api_audits) == 1 and api_audits[0].get('actor_id') and
+              api_audits[0].get('actor_role') == 'super_admin', api_audits)
 
     # ---------- 7. 公开读字段收敛 ----------
     s, r = call(base, 'GET', '/api/collections/posts/records/%s' % p_link)
