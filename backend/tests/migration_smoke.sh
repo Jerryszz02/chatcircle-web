@@ -151,6 +151,26 @@ check_eq "未认证 list activities 为空集" "$EMPTY" "0"
 EMPTY="$(curl -fsS "$BASE/api/collections/audit_logs/records" | json_val "d['totalItems']")"
 check_eq "未认证 list audit_logs 为空集" "$EMPTY" "0"
 
+# 数据迁移：原前端写死的两条测试回顾已成为公开 visible 推文
+REVIEW_1="$(curl -fsS "$BASE/api/collections/posts/records/postreview00001")"
+check_eq "测试回顾 1 已迁移为公开推文" \
+  "$(printf '%s' "$REVIEW_1" | json_val "d.get('title')")" \
+  "首场活动回顾｜当 13 位青年遇见 15 位倾听者"
+check_eq "测试回顾 1 状态为 visible" \
+  "$(printf '%s' "$REVIEW_1" | json_val "d.get('status')")" "visible"
+check_eq "测试回顾 1 摘要保持原文" \
+  "$(printf '%s' "$REVIEW_1" | json_val "d.get('summary')")" \
+  "正念开场、一杯饮品、60 分钟一对一对话——回顾 2026 年 6 月 12 日的首场 Chat Circles，看看那个下午发生了什么。"
+REVIEW_2="$(curl -fsS "$BASE/api/collections/posts/records/postreview00002")"
+check_eq "测试回顾 2 已迁移为公开推文" \
+  "$(printf '%s' "$REVIEW_2" | json_val "d.get('title')")" \
+  "倾听者手记｜不给建议，也是一种温柔"
+check_eq "测试回顾 2 状态为 visible" \
+  "$(printf '%s' "$REVIEW_2" | json_val "d.get('status')")" "visible"
+check_eq "测试回顾 2 摘要保持原文" \
+  "$(printf '%s' "$REVIEW_2" | json_val "d.get('summary')")" \
+  "「我学到的最重要的事：把建议咽回去，把耳朵递过去。」一位企业员工倾听者的第一次服务记录。"
+
 # 4.3 造数（超管通道，绕过 API Rules 但受唯一索引约束）
 post() { # post <collection> <json> -> stdout
   curl -s -X POST "$BASE/api/collections/$1/records" -H "Authorization: $STOKEN" -H 'Content-Type: application/json' -d "$2"
