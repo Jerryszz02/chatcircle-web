@@ -277,6 +277,13 @@ body:has(.ccp-root) {
   border-radius: 0;
 }
 
+.ccp-post-cover {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+}
+
 .ccp-photo-past {
   aspect-ratio: 16 / 9;
   border: none;

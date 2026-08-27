@@ -9,12 +9,13 @@ import {
   unstubApi,
 } from '../../../test/mockApi';
 import { pbClients } from '../../../shared/pocketbase';
+import type { PostRecord } from '../../../shared/api/types';
 import { HomePage } from './HomePage';
 
 /**
  * 首页测试（C 端品牌官网落地页，2026-08 UI 重构）。
  * 覆盖：Hero 与 CTA、站点导航、现有活动区块（最近 2 场 + 查看全部）、
- * 往期活动区块（已结束场次最近 2 场 + 查看全部，活动故事并入同一区块）、
+ * 往期活动区块（后台公开推文最近 2 篇 + 查看全部）、
  * Our Impact 首场试点真实数据、右上角角色入口。
  */
 
@@ -52,6 +53,27 @@ function pastActivityItem(overrides: Record<string, unknown> = {}) {
   });
 }
 
+function postItem(overrides: Partial<PostRecord> = {}): PostRecord {
+  return {
+    id: 'post1',
+    created: '2026-08-01 00:00:00.000Z',
+    updated: '2026-08-01 00:00:00.000Z',
+    title: '首场活动回顾',
+    summary: '后台上传的活动回顾摘要。',
+    cover: '',
+    body_md: '# 正文',
+    external_url: 'https://example.com/post1',
+    is_pinned: false,
+    status: 'visible',
+    published_at: '2026-08-01 00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function postsList(items: PostRecord[]) {
+  return { page: 1, perPage: 2, totalItems: items.length, totalPages: 1, items };
+}
+
 function renderHome() {
   return render(
     <MemoryRouter initialEntries={['/']}>
@@ -60,8 +82,11 @@ function renderHome() {
   );
 }
 
-function stubActivities(activities: unknown[] = []) {
-  return stubApi({ 'GET /api/cc/public/activities': { body: { activities } } });
+function stubActivities(activities: unknown[] = [], posts: PostRecord[] = []) {
+  return stubApi({
+    'GET /api/cc/public/activities': { body: { activities } },
+    'GET /api/collections/posts/records': { body: postsList(posts) },
+  });
 }
 
 describe('HomePage 首页', () => {
@@ -107,49 +132,64 @@ describe('HomePage 首页', () => {
     );
   });
 
-  it('已结束活动不在现有活动区展示（closed 或 end_time 已过），归入往期活动区', async () => {
-    stubActivities([
-      pastActivityItem({ id: 'act-closed', title: '六月试点场', status: 'closed' }),
-      // 凯德专场回归：end_time 已过但机构未手动关闭（status 仍是 published）
-      pastActivityItem({ id: 'act-kaide', title: 'Chat Circles · 凯德专场（2026-06-12）' }),
-    ]);
+  it('已结束活动不在首页展示，往期活动区只展示后台公开推文', async () => {
+    stubActivities(
+      [
+        pastActivityItem({ id: 'act-closed', title: '六月试点场', status: 'closed' }),
+        pastActivityItem({ id: 'act-kaide', title: 'Chat Circles · 凯德专场' }),
+      ],
+      [postItem({ title: '后台活动回顾' })],
+    );
     renderHome();
     const upcoming = screen.getByRole('region', { name: '现有活动' });
     expect(await within(upcoming).findByText(/新活动筹备中/)).toBeInTheDocument();
     expect(within(upcoming).queryByText('六月试点场')).not.toBeInTheDocument();
-    expect(within(upcoming).queryByText(/凯德专场/)).not.toBeInTheDocument();
+    expect(within(upcoming).queryByText('Chat Circles · 凯德专场')).not.toBeInTheDocument();
     const past = screen.getByRole('region', { name: '往期活动' });
-    expect(within(past).getByText('六月试点场')).toBeInTheDocument();
-    expect(within(past).getByText(/凯德专场/)).toBeInTheDocument();
+    expect(await within(past).findByText('后台活动回顾')).toBeInTheDocument();
+    expect(within(past).queryByText('六月试点场')).not.toBeInTheDocument();
+    expect(within(past).queryByText('Chat Circles · 凯德专场')).not.toBeInTheDocument();
     expect(within(past).getByRole('link', { name: '查看全部 →' })).toHaveAttribute(
       'href',
       '/activities/past',
     );
   });
 
-  it('现有活动与往期活动区各最多展示 2 场，完整列表进独立页', async () => {
-    stubActivities([
-      activityItem({ id: 'c1', title: '现有场次一' }),
-      activityItem({ id: 'c2', title: '现有场次二' }),
-      activityItem({ id: 'c3', title: '现有场次三' }),
-      pastActivityItem({ id: 'p1', title: '往期场次一' }),
-      pastActivityItem({ id: 'p2', title: '往期场次二' }),
-      pastActivityItem({ id: 'p3', title: '往期场次三' }),
-    ]);
+  it('现有活动与后台推文各最多展示 2 条，完整列表进独立页', async () => {
+    const mock = stubActivities(
+      [
+        activityItem({ id: 'c1', title: '现有场次一' }),
+        activityItem({ id: 'c2', title: '现有场次二' }),
+        activityItem({ id: 'c3', title: '现有场次三' }),
+      ],
+      [
+        postItem({ id: 'post1', title: '后台推文一' }),
+        postItem({ id: 'post2', title: '后台推文二' }),
+        postItem({ id: 'post3', title: '后台推文三' }),
+      ],
+    );
     renderHome();
     const upcoming = screen.getByRole('region', { name: '现有活动' });
     expect(await within(upcoming).findByText('现有场次一')).toBeInTheDocument();
     expect(within(upcoming).getByText('现有场次二')).toBeInTheDocument();
     expect(within(upcoming).queryByText('现有场次三')).not.toBeInTheDocument();
     const past = screen.getByRole('region', { name: '往期活动' });
-    expect(within(past).getByText('往期场次一')).toBeInTheDocument();
-    expect(within(past).getByText('往期场次二')).toBeInTheDocument();
-    expect(within(past).queryByText('往期场次三')).not.toBeInTheDocument();
+    expect(await within(past).findByText('后台推文一')).toBeInTheDocument();
+    expect(within(past).getByText('后台推文二')).toBeInTheDocument();
+    expect(within(past).queryByText('后台推文三')).not.toBeInTheDocument();
+    expect(within(past).getAllByRole('listitem')).toHaveLength(2);
+    const postCall = mock.calls.find((call) => call.url.includes('/api/collections/posts/records'));
+    expect(decodeURIComponent(postCall?.url ?? '')).toContain('perPage=2');
+    expect(
+      mock.calls.some((call) => call.url.includes('/api/cc/public/activities?scope=current')),
+    ).toBe(true);
+    expect(mock.calls.some((call) => call.url.includes('scope=past'))).toBe(false);
   });
 
   it('活动加载失败后重试成功：错误提示与重试按钮被清除', async () => {
     stubApi({
       'GET /api/cc/public/activities': { status: 500, body: { message: '服务器错误', data: {} } },
+      'GET /api/collections/posts/records': { body: postsList([]) },
     });
     renderHome();
     expect(await screen.findByText('服务器错误')).toBeInTheDocument();
@@ -161,15 +201,20 @@ describe('HomePage 首页', () => {
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
   });
 
-  it('往期活动区块合并展示活动故事（同一区块，无独立「活动故事」标题）', async () => {
-    stubActivities();
+  it('往期活动区块展示后台公开推文的封面、摘要与原文链接', async () => {
+    stubActivities([], [postItem({ cover: 'cover.png' })]);
     renderHome();
     expect(screen.getByRole('heading', { name: '往期活动' })).toBeInTheDocument();
-    // 无往期活动时诚实展示空态，不再使用静态占位活动
-    expect(await screen.findByText('暂无往期活动。')).toBeInTheDocument();
-    expect(screen.getByText(/首场活动回顾/)).toBeInTheDocument();
-    expect(screen.getByText(/倾听者手记/)).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: '活动故事' })).not.toBeInTheDocument();
+    expect(await screen.findByText('首场活动回顾')).toBeInTheDocument();
+    expect(screen.getByText('后台上传的活动回顾摘要。')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '首场活动回顾封面' })).toHaveAttribute(
+      'src',
+      expect.stringContaining('/api/files/posts/post1/cover.png'),
+    );
+    expect(screen.getByRole('link', { name: '阅读原文' })).toHaveAttribute(
+      'href',
+      'https://example.com/post1',
+    );
   });
 
   it('Our Impact 展示首场试点真实数据与参与者引言，并标注样本口径', () => {

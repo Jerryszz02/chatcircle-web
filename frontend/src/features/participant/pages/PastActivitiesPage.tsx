@@ -1,30 +1,26 @@
 import { useEffect, useState } from 'react';
 import { normalizeApiError, type ApiError } from '../../../shared/api/http';
+import type { PostRecord } from '../../../shared/api/types';
 import { Button, Loading } from '../../../shared/ui';
-import { getPublicActivities, type PublicActivityListItem } from '../api';
-import { ActivityCard } from '../components/ActivityCard';
-import { ActivityStoryCards } from '../components/ActivityStoryCards';
+import { getPublicPosts } from '../api';
+import { PublicPostCard } from '../components/PublicPostCard';
 import { PublicPageLayout } from '../components/PublicPageLayout';
-import { isPastActivity } from '../lib/activitySplit';
 
 /**
- * 往期活动页（/activities/past，未登录可看）：已结束/已关闭活动的完整列表，
- * 由站点导航与首页「往期活动」区块的「查看全部」进入。
- * 数据经 ?scope=past 服务端过滤（避免列表 100 条上限截断更早的往期），
- * 前端再按同一口径（closed 或 end_time 已过，见 lib/activitySplit.ts）兜底；
- * 列表由后端按 start_time 倒序返回，最新场次在前。
+ * 往期活动页（/activities/past，未登录可看）：后台 visible 推文的完整列表。
+ * 数据直读 posts 集合，服务端 rule 过滤 hidden；置顶优先，再按发布时间倒序。
  */
 export function PastActivitiesPage() {
-  const [activities, setActivities] = useState<PublicActivityListItem[] | null>(null);
+  const [posts, setPosts] = useState<PostRecord[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    getPublicActivities('past')
-      .then((res) => {
+    getPublicPosts()
+      .then((items) => {
         if (cancelled) return;
-        setActivities(res.activities);
+        setPosts(items);
         // 重试成功后清除此前的错误提示与重试按钮
         setError(null);
       })
@@ -36,13 +32,11 @@ export function PastActivitiesPage() {
     };
   }, [tick]);
 
-  const past = (activities ?? []).filter((a) => isPastActivity(a));
-
   return (
     <PublicPageLayout>
       <section>
         <h2 className="ccp-section-title">往期活动</h2>
-        {activities === null && !error ? <Loading /> : null}
+        {posts === null && !error ? <Loading /> : null}
 
         {error ? (
           <>
@@ -53,7 +47,7 @@ export function PastActivitiesPage() {
           </>
         ) : null}
 
-        {activities !== null && past.length === 0 ? (
+        {posts !== null && posts.length === 0 ? (
           <div className="ccp-empty">
             <span className="ccp-empty-chip" aria-hidden="true">
               <svg viewBox="0 0 24 24">
@@ -65,15 +59,13 @@ export function PastActivitiesPage() {
           </div>
         ) : null}
 
-        {past.length > 0 ? (
+        {posts && posts.length > 0 ? (
           <ul className="ccp-card-grid">
-            {past.map((activity) => (
-              <ActivityCard key={activity.id} activity={activity} />
+            {posts.map((post) => (
+              <PublicPostCard key={post.id} post={post} />
             ))}
           </ul>
         ) : null}
-
-        <ActivityStoryCards />
       </section>
     </PublicPageLayout>
   );

@@ -1,47 +1,29 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { PostRecord } from '../../../shared/api/types';
 import { clearAllSessions, stubApi, unstubApi } from '../../../test/mockApi';
 import { PastActivitiesPage } from './PastActivitiesPage';
 
-/**
- * 往期活动页测试（/activities/past，未登录可看）：
- * 只展示已结束/已关闭场次（closed 或 end_time 已过，判定口径见 lib/activitySplit.ts），
- * 未结束的现有活动不出现；覆盖空态与加载失败分支。
- */
-
-/** PocketBase 日期格式（'YYYY-MM-DD HH:mm:ss.sssZ'）。 */
-const pbDateTime = (d: Date) => d.toISOString().replace('T', ' ');
-
-/** 未结束活动：7 天后开始，持续 2 小时。 */
-function activityItem(overrides: Record<string, unknown> = {}) {
-  const start = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+function postItem(overrides: Partial<PostRecord> = {}): PostRecord {
   return {
-    id: 'act1',
-    title: '八月光影茶话会',
-    activity_code: 'CC_SG_202608_01',
-    description: '一场关于光影与倾诉的聚会。',
-    location: '三楼活动室',
-    start_time: pbDateTime(start),
-    end_time: pbDateTime(new Date(start.getTime() + 2 * 60 * 60 * 1000)),
-    status: 'published',
-    capacity_total: 20,
-    registration: { open: true, reason: null, remaining_total: 5 },
+    id: 'post1',
+    created: '2026-08-01 00:00:00.000Z',
+    updated: '2026-08-01 00:00:00.000Z',
+    title: '首场活动回顾',
+    summary: '后台上传的活动回顾摘要。',
+    cover: '',
+    body_md: '# 正文',
+    external_url: 'https://example.com/post1',
+    is_pinned: false,
+    status: 'visible',
+    published_at: '2026-08-01 00:00:00.000Z',
     ...overrides,
   };
 }
 
-/** 已结束活动：14 天前举行；默认仍为 published（机构未手动关闭，同凯德专场场景）。 */
-function pastActivityItem(overrides: Record<string, unknown> = {}) {
-  const start = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-  return activityItem({
-    id: 'act0',
-    title: '六月试点场',
-    start_time: pbDateTime(start),
-    end_time: pbDateTime(new Date(start.getTime() + 2 * 60 * 60 * 1000)),
-    registration: { open: false, reason: 'ended', remaining_total: 0 },
-    ...overrides,
-  });
+function listBody(items: PostRecord[]) {
+  return { page: 1, perPage: 500, totalItems: items.length, totalPages: 1, items };
 }
 
 function renderPage() {
@@ -56,72 +38,51 @@ describe('PastActivitiesPage 往期活动页', () => {
   beforeEach(clearAllSessions);
   afterEach(unstubApi);
 
-  it('展示已结束/已关闭活动：closed 与 end_time 已过（未手动关闭）都算往期', async () => {
+  it('只读取后台公开推文，并按置顶、发布时间约定排序', async () => {
     const mock = stubApi({
-      'GET /api/cc/public/activities': {
-        body: {
-          activities: [
-            activityItem({ id: 'c1', title: '八月光影茶话会' }),
-            // 凯德专场回归：end_time 已过但机构未手动关闭（status 仍是 published）
-            pastActivityItem({ id: 'p1', title: 'Chat Circles · 凯德专场（2026-06-12）' }),
-            pastActivityItem({ id: 'p2', title: '六月试点场', status: 'closed' }),
-          ],
-        },
+      'GET /api/collections/posts/records': {
+        body: listBody([
+          postItem({ id: 'post1', title: '置顶回顾', is_pinned: true }),
+          postItem({ id: 'post2', title: '普通回顾' }),
+        ]),
       },
     });
     renderPage();
-    // 往期页经 ?scope=past 服务端过滤（完整往期列表不被 100 条上限截断）
-    expect(mock.calls.some((c) => c.url.includes('/api/cc/public/activities?scope=past'))).toBe(
-      true,
-    );
-    expect(await screen.findByText(/凯德专场/)).toBeInTheDocument();
-    expect(screen.getByText('六月试点场')).toBeInTheDocument();
-    // closed 场次展示「已关闭」标签，卡片只提供「查看详情」不提供报名入口
-    expect(screen.getByText('已关闭')).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: '立即报名' })).not.toBeInTheDocument();
-    // 未结束的现有活动不出现在往期页
-    expect(screen.queryByText('八月光影茶话会')).not.toBeInTheDocument();
+    expect(await screen.findByText('置顶回顾')).toBeInTheDocument();
+    expect(screen.getByText('普通回顾')).toBeInTheDocument();
+    const listCall = mock.calls.find((call) => call.url.includes('/api/collections/posts/records'));
+    expect(decodeURIComponent(listCall?.url ?? '')).toContain('sort=-is_pinned,-published_at');
+    expect(mock.calls.some((call) => call.url.includes('/api/cc/public/activities'))).toBe(false);
   });
 
-  it('往期活动全部展示（不做首页的 2 场截断）', async () => {
+  it('完整页展示全部后台推文，不做首页的 2 篇截断', async () => {
     stubApi({
-      'GET /api/cc/public/activities': {
-        body: {
-          activities: [
-            pastActivityItem({ id: 'p1', title: '往期场次一' }),
-            pastActivityItem({ id: 'p2', title: '往期场次二' }),
-            pastActivityItem({ id: 'p3', title: '往期场次三' }),
-          ],
-        },
+      'GET /api/collections/posts/records': {
+        body: listBody([
+          postItem({ id: 'post1', title: '后台推文一' }),
+          postItem({ id: 'post2', title: '后台推文二' }),
+          postItem({ id: 'post3', title: '后台推文三' }),
+        ]),
       },
     });
     renderPage();
-    expect(await screen.findByText('往期场次一')).toBeInTheDocument();
-    expect(screen.getByText('往期场次二')).toBeInTheDocument();
-    expect(screen.getByText('往期场次三')).toBeInTheDocument();
+    expect(await screen.findByText('后台推文一')).toBeInTheDocument();
+    expect(screen.getByText('后台推文二')).toBeInTheDocument();
+    expect(screen.getByText('后台推文三')).toBeInTheDocument();
   });
 
-  it('展示首页往期区块中的两篇活动故事', async () => {
-    stubApi({
-      'GET /api/cc/public/activities': { body: { activities: [] } },
-    });
-    renderPage();
-    expect(await screen.findByText(/首场活动回顾/)).toBeInTheDocument();
-    expect(screen.getByText(/倾听者手记/)).toBeInTheDocument();
-  });
-
-  it('无往期活动时展示空态文案', async () => {
-    stubApi({
-      'GET /api/cc/public/activities': { body: { activities: [activityItem()] } },
-    });
+  it('无公开推文时展示空态文案', async () => {
+    stubApi({ 'GET /api/collections/posts/records': { body: listBody([]) } });
     renderPage();
     expect(await screen.findByText('暂无往期活动。')).toBeInTheDocument();
-    expect(screen.queryByText('八月光影茶话会')).not.toBeInTheDocument();
   });
 
   it('加载失败展示错误提示与重试入口', async () => {
     stubApi({
-      'GET /api/cc/public/activities': { status: 500, body: { message: '服务器错误', data: {} } },
+      'GET /api/collections/posts/records': {
+        status: 500,
+        body: { message: '服务器错误', data: {} },
+      },
     });
     renderPage();
     expect(await screen.findByText('服务器错误')).toBeInTheDocument();
