@@ -11,7 +11,8 @@
 //   2) 正文（body_md）与外链（external_url）至少填一个，全空 → 400；
 //   3) external_url 非空时仅允许 http/https（防 javascript: 等协议注入）；
 //   4) status 首次变为 visible 且 published_at 为空时写入当前时间，之后不因隐藏/再可见而改；
-//   5) 创建/更新审计（post.create / post.update）与推文保存在**同一事务**写入
+//   5) 创建/更新审计（post.create / post.update）与推文保存在**同一事务**写入；
+//      API 写入归因 super_admin，内部数据迁移以 created_by/updated_by='system' 归因 system
 //      （同 reports.pb.js：审计写失败抛错即整体回滚）。
 // - Markdown 原文存储，消毒在渲染端（前端责任，见 database-design §5.2.24）。
 // ⚠️ 本文件为「handler 自包含」模式（PocketBase 0.28.4 实测约束，详见 auth.pb.js 头注释）。
@@ -61,8 +62,10 @@ onRecordCreate((e) => {
   // 创建审计（post.create）：与推文保存同事务，失败抛错回滚（同 reports.pb.js）
   const collection = e.app.findCollectionByNameOrId('audit_logs');
   const audit = new Record(collection);
-  audit.set('actor_id', record.get('created_by') || '');
-  audit.set('actor_role', 'super_admin'); // posts 仅超管可写，创建者角色恒定
+  const actorId = String(record.get('created_by') || '');
+  audit.set('actor_id', actorId);
+  // API Rules 只允许超管写；内部迁移显式使用 system，避免伪装为超管操作。
+  audit.set('actor_role', actorId === 'system' ? 'system' : 'super_admin');
   audit.set('action', 'post.create');
   audit.set('target_type', 'post');
   audit.set('target_id', record.id);
@@ -96,8 +99,9 @@ onRecordUpdate((e) => {
   const statusChanged = original && original.id && original.get('status') !== record.get('status');
   const collection = e.app.findCollectionByNameOrId('audit_logs');
   const audit = new Record(collection);
-  audit.set('actor_id', record.get('updated_by') || '');
-  audit.set('actor_role', 'super_admin');
+  const actorId = String(record.get('updated_by') || '');
+  audit.set('actor_id', actorId);
+  audit.set('actor_role', actorId === 'system' ? 'system' : 'super_admin');
   audit.set('action', 'post.update');
   audit.set('target_type', 'post');
   audit.set('target_id', record.id);
