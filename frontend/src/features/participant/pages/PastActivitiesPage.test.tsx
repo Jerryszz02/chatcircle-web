@@ -101,6 +101,15 @@ describe('PastActivitiesPage 往期活动页', () => {
     expect(screen.getByText('往期场次三')).toBeInTheDocument();
   });
 
+  it('展示首页往期区块中的两篇活动故事', async () => {
+    stubApi({
+      'GET /api/cc/public/activities': { body: { activities: [] } },
+    });
+    renderPage();
+    expect(await screen.findByText(/首场活动回顾/)).toBeInTheDocument();
+    expect(screen.getByText(/倾听者手记/)).toBeInTheDocument();
+  });
+
   it('无往期活动时展示空态文案', async () => {
     stubApi({
       'GET /api/cc/public/activities': { body: { activities: [activityItem()] } },
