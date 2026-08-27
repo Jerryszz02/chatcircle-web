@@ -41,6 +41,9 @@ beforeEach(() => {
   stubApi({
     'GET /api/cc/public/activities': (url) =>
       url.includes('/api/cc/public/activities/') ? undefined : { body: { activities: [] } },
+    'GET /api/collections/posts/records': {
+      body: { page: 1, perPage: 500, totalItems: 0, totalPages: 1, items: [] },
+    },
   });
 });
 

@@ -1,20 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { normalizeApiError, type ApiError } from '../../../shared/api/http';
+import type { PostRecord } from '../../../shared/api/types';
 import { Button, Loading } from '../../../shared/ui';
-import { getPublicActivities, type PublicActivityListItem } from '../api';
+import { getPublicActivities, getPublicPosts, type PublicActivityListItem } from '../api';
 import { ActivityCard } from '../components/ActivityCard';
-import { ActivityStoryCards } from '../components/ActivityStoryCards';
 import { PublicPageLayout } from '../components/PublicPageLayout';
-import { isCurrentActivity, isPastActivity } from '../lib/activitySplit';
+import { PublicPostCard } from '../components/PublicPostCard';
+import { isCurrentActivity } from '../lib/activitySplit';
 import heroEventPhoto from '../../../assets/brand/hero-event-photo.jpg';
 
 /**
  * 首页（/，未登录可看）：Chat Circles C 端品牌官网落地页（2026-08 UI 重构）。
  * 区块：Hero（品牌 + 首场活动真实照片）→ 现有活动（公开活动 API 真实数据，最近 2 场 + 查看全部）→
- * 往期活动（已结束场次真实数据，最近 2 场 + 查看全部；活动故事并入同一区块，
- * 故事仍为静态占位，待后端任务对接）→ 我们的影响（首场试点真实数据，诚实标注样本口径）。
- * 除 Hero 外其余图片均为占位块，待品牌素材（文章配图等）到位后替换。
+ * 往期活动（后台公开推文，最近 2 篇 + 查看全部）→
+ * 我们的影响（首场试点真实数据，诚实标注样本口径）。
  * 浏览活动不需要账号；报名活动在对应链路内登录/自动注册（FR-AUTH-001）。
  */
 
@@ -32,16 +32,22 @@ const IMPACT_QUOTE = {
   source: '首场活动倾诉者 · 离场问卷',
 };
 
+/** 首页“现有活动”和“往期活动”各自展示的卡片上限。 */
+const HOME_ACTIVITY_LIMIT = 2;
+
 export function HomePage() {
   // key 随每次导航变化（含重复点击同一锚点链接），用于触发重复滚动
   const { hash, key } = useLocation();
   const [activities, setActivities] = useState<PublicActivityListItem[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [tick, setTick] = useState(0);
+  const [posts, setPosts] = useState<PostRecord[] | null>(null);
+  const [postsError, setPostsError] = useState<ApiError | null>(null);
+  const [postsTick, setPostsTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    getPublicActivities()
+    getPublicActivities('current')
       .then((res) => {
         if (cancelled) return;
         setActivities(res.activities);
@@ -56,15 +62,32 @@ export function HomePage() {
     };
   }, [tick]);
 
+  useEffect(() => {
+    let cancelled = false;
+    getPublicPosts(HOME_ACTIVITY_LIMIT)
+      .then((items) => {
+        if (cancelled) return;
+        setPosts(items);
+        setPostsError(null);
+      })
+      .catch((err) => {
+        if (!cancelled) setPostsError(normalizeApiError(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [postsTick]);
+
   // 锚点直达（如 /#past，兼容旧的外部分享链接）：等现有活动请求落定（数据或错误其一）
   // 再滚动，避免上方布局变化导致错位（同 ActivitiesPage 的锚点处理）；
   // key 入依赖使 hash 不变时的重复点击也能重新滚动。
-  const activitiesSettled = activities !== null || error !== null;
+  const homeDataSettled =
+    (activities !== null || error !== null) && (posts !== null || postsError !== null);
   useEffect(() => {
-    if (!hash || !activitiesSettled) return;
+    if (!hash || !homeDataSettled) return;
     const el = document.getElementById(hash.slice(1));
     el?.scrollIntoView();
-  }, [hash, key, activitiesSettled]);
+  }, [hash, key, homeDataSettled]);
 
   return (
     <PublicPageLayout>
@@ -74,7 +97,11 @@ export function HomePage() {
         error={error}
         onRetry={() => setTick((t) => t + 1)}
       />
-      <PastActivitySection activities={activities} />
+      <PastPostsSection
+        posts={posts}
+        error={postsError}
+        onRetry={() => setPostsTick((t) => t + 1)}
+      />
       <ImpactSection />
     </PublicPageLayout>
   );
@@ -125,7 +152,9 @@ function UpcomingActivitiesSection({
   onRetry: () => void;
 }) {
   // 现有活动：已结束（closed 或 end_time 已过）的不在首页展示；最多 2 张卡片，全部见 /activities
-  const upcoming = (activities ?? []).filter((a) => isCurrentActivity(a)).slice(0, 2);
+  const upcoming = (activities ?? [])
+    .filter((a) => isCurrentActivity(a))
+    .slice(0, HOME_ACTIVITY_LIMIT);
 
   return (
     <section aria-labelledby="home-activities">
@@ -164,12 +193,17 @@ function UpcomingActivitiesSection({
   );
 }
 
-/* ---------- 往期活动：已结束场次真实数据（最多 2 张 + 查看全部）；活动故事并入本区块（静态占位，待后端任务对接） ---------- */
+/* ---------- 往期活动：后台公开推文（最多 2 篇 + 查看全部） ---------- */
 
-function PastActivitySection({ activities }: { activities: PublicActivityListItem[] | null }) {
-  // 往期活动：closed 或 end_time 已过的场次；最多 2 张卡片，全部见 /activities/past
-  const past = (activities ?? []).filter((a) => isPastActivity(a)).slice(0, 2);
-
+function PastPostsSection({
+  posts,
+  error,
+  onRetry,
+}: {
+  posts: PostRecord[] | null;
+  error: ApiError | null;
+  onRetry: () => void;
+}) {
   return (
     <section className="ccp-anchor" id="past" aria-labelledby="home-past">
       <div className="ccp-section-head">
@@ -180,15 +214,23 @@ function PastActivitySection({ activities }: { activities: PublicActivityListIte
           查看全部 →
         </Link>
       </div>
-      {activities !== null && past.length === 0 ? <p className="cc-empty">暂无往期活动。</p> : null}
-      {past.length > 0 ? (
+      {posts === null && !error ? <Loading /> : null}
+      {error ? (
+        <>
+          <p className="cc-empty">{error.message}</p>
+          <Button variant="secondary" onClick={onRetry}>
+            重试
+          </Button>
+        </>
+      ) : null}
+      {posts !== null && posts.length === 0 ? <p className="cc-empty">暂无往期活动。</p> : null}
+      {posts && posts.length > 0 ? (
         <ul className="ccp-card-grid">
-          {past.map((activity) => (
-            <ActivityCard key={activity.id} activity={activity} />
+          {posts.slice(0, HOME_ACTIVITY_LIMIT).map((post) => (
+            <PublicPostCard key={post.id} post={post} />
           ))}
         </ul>
       ) : null}
-      <ActivityStoryCards />
     </section>
   );
 }

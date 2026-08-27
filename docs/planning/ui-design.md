@@ -46,7 +46,7 @@
 
 实现机制：**`global.css` 的 `:root` token 原值不动**（三端共用），在 `participant.css` 顶部以 `.ccp-root` 作用域覆盖 `--cc-brand-*` / `--cc-accent-*` / `--cc-neutral-50`，因此参与者端全部页面（含报名、问卷等功能流程页）自动套用新色板，admin / super 两端视觉保持 V1 不变。注意 toast / modal 经 portal 挂在 body 下，不在 `.ccp-root` 作用域内，保持原中性/状态色。
 
-同步的结构变化：新增站点公共框架 `PublicPageLayout`（吸顶站点导航 `SiteHeader` + 页脚 `SiteFooter`，仅公开页使用；功能流程页仍用 `PageLayout`）；新增 `/about` 项目介绍页；首页改为品牌落地页（Hero + 现有活动 + 往期活动占位（活动故事并入同一区块，不单独成区；站点导航含「往期活动」锚点直达）+ Our Impact 首场试点真实数据）；Empact 仅作为运营方在页脚与 About 页体现。全部图片为占位块，待品牌素材（logo / 活动照片）到位后替换。
+同步的结构变化：新增站点公共框架 `PublicPageLayout`（吸顶站点导航 `SiteHeader` + 页脚 `SiteFooter`，仅公开页使用；功能流程页仍用 `PageLayout`）；新增 `/about` 项目介绍页；首页改为品牌落地页（Hero + 现有活动最近 2 场 + 往期活动公开推文最近 2 篇 + Our Impact 首场试点真实数据）；站点导航含「往期活动」入口，完整公开推文进入 `/activities/past`。往期活动与 `activities` 场次数据完全分离，只展示后台 `posts` 集合中 `status=visible` 的推文；Empact 仅作为运营方在页脚与 About 页体现。
 
 ## 色彩系统
 

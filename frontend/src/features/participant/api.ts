@@ -1,4 +1,5 @@
 import { apiGet, apiPost, ApiError } from '../../shared/api/http';
+import { collectionsForRole } from '../../shared/api/collections';
 import { pbClients } from '../../shared/pocketbase';
 import type {
   ActivityRecord,
@@ -7,6 +8,7 @@ import type {
   CheckinRecord,
   CheckinStatus,
   FieldType,
+  PostRecord,
   RegistrationRecord,
   RegistrationStatus,
   RoleScope,
@@ -16,6 +18,9 @@ import type {
   SurveyStatus,
   TrainingAttendanceRecord,
 } from '../../shared/api/types';
+
+/** 公开推文排序：后台置顶优先，其余按首次发布时间倒序。 */
+const PUBLIC_POSTS_SORT = '-is_pinned,-published_at';
 
 /**
  * 参与者端自定义端点封装（统一端点契约，technical-design §5.5）。
@@ -139,6 +144,19 @@ export function getPublicActivities(scope?: 'current' | 'past'): Promise<PublicA
     pbClients.participant,
     `/api/cc/public/activities${scope ? `?scope=${scope}` : ''}`,
   );
+}
+
+/**
+ * 公开推文列表。匿名 client 直接读取 posts 集合，服务端 rule 只返回 visible 推文。
+ * 首页传 limit=2；完整往期活动页不传 limit，读取全部公开推文。
+ */
+export async function getPublicPosts(limit?: number): Promise<PostRecord[]> {
+  const posts = collectionsForRole('participant').posts;
+  if (limit !== undefined) {
+    const page = await posts.getList(1, limit, { sort: PUBLIC_POSTS_SORT });
+    return page.items;
+  }
+  return posts.getFullList({ sort: PUBLIC_POSTS_SORT });
 }
 
 /** 报名答案项（POST /api/cc/activities/:id/register 的 answers 元素）。 */

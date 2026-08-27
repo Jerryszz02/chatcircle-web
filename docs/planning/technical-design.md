@@ -134,8 +134,9 @@ chatcircle-web/
 
 | 路由 | 页面 | 服务端前置条件 |
 | --- | --- | --- |
-| `/` | 首页：项目介绍落地页（平台介绍、挑战/计划/影响/成效评估/合作伙伴区块）+ 活动/问卷独立页入口 + 管理端登录入口 | 无；未登录可看，不拉取业务数据 |
+| `/` | 首页：品牌介绍 + 现有活动最近 2 场 + 往期活动公开推文最近 2 篇 + Our Impact + 各独立页入口 | 无；未登录可看；活动来自公开 activities 端点，往期内容来自 posts 集合 |
 | `/activities` | 活动与问卷页：活动广场（公开活动列表，点击进详情/报名）+ 问卷入口（登录后显示本人可填问卷，未登录显示扫码指引）；支持 `#activities`/`#surveys` 锚点 | 无；未登录可看，活动数据来自 `GET /api/cc/public/activities` |
+| `/activities/past` | 往期活动：后台公开推文完整列表，置顶优先、其余按发布时间倒序 | 无；未登录可看，仅 `status=visible` 推文（直读 posts 集合，rule 过滤 hidden） |
 | `/a/:activityId` | 公开活动详情 | 活动已发布；未登录可看（FR-ACT-003） |
 | `/a/:activityId/register` | 报名链路（内嵌自动注册/登录） | 报名开放中；登录后提交 |
 | `/login` | 平台通用登录页 | 不提供注册（FR-AUTH-008）；支持 `redirect` 参数，从活动链接跳转登录后回到原目标 |
@@ -144,7 +145,6 @@ chatcircle-web/
 | `/trainings` | 聆听者培训页：流程说明 + 资质标记 + 培训列表 + 我的签到状态 | 参与者会话；培训信息仅 eligible（存在 approved 聆听者报名）下发 |
 | `/training-checkin/:token` | 培训签到二维码的落地页 | 登录 + approved 聆听者报名 + 培训已发布 + 签到开放中 |
 | `/survey/:qrToken` | 问卷填写 / 草稿 / 已提交答案 | 登录 + 报名已通过 + 角色匹配 + 问卷开放中（FR-SUR-006） |
-| `/posts`、`/posts/:postId` | 内容推文公开列表与详情（2026-08 后端改版；前端页面后续实现） | 无；未登录可看，仅 `status=visible` 推文（数据直走 posts 集合 API，rule 天然过滤 hidden） |
 
 机构管理端（`/admin` 前缀，需 `admin_accounts` 会话）：
 
