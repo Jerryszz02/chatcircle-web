@@ -1,12 +1,12 @@
 # 手机号账号与活动现场 API 契约
 
-> 状态：T0 `已验证`（契约已冻结）；T1–T6 业务功能仍为 `计划中`
+> 状态：T0 与 T3 `已验证`；T1/T2/T4/T5/T6 仍为 `计划中`
 >
 > 契约版本：`2026-08-28.t0-v1`
 >
 > 适用范围：[account-event-workflow-prd.md](account-event-workflow-prd.md) 的手机号账号、现场编号/配对、实时工作台与细粒度导出
 >
-> 当前实现差距：默认分支尚无本文的新端点、新集合与迁移；实际可用 API 以 [developer-guide.md](../developer-guide.md) 和 `backend/pb_hooks/` 为准。
+> 当前实现差距：本实现分支已提供 T3 `live-summary`、Realtime topic 守卫和管理端失效化订阅服务，但尚未证明已合并默认分支或部署；T1/T2/T6 的新 schema/端点仍未由本任务实现。实际代码现状以 [developer-guide.md](../developer-guide.md) 和 `backend/pb_hooks/` 为准。
 
 ## 1. 权威边界
 
@@ -84,6 +84,8 @@
 - `recent_checkins.display_name` 只对有权管理员返回，不进入普通聚合图表。
 
 ## 5. Realtime 契约
+
+T3 当前实现位于 `backend/pb_hooks/live.pb.js` 与 `frontend/src/features/admin/lib/activityLive.ts`。管理端严格先建立四类订阅再拉快照，record event 仅防抖触发重拉；SDK 每次重新收到 `PB_CONNECT` 都强制刷新，连接状态轮询只用于离线提示。参与者 topic 的订阅与发送均按 auth id 二次过滤，非法 topic 被拒。
 
 Realtime 不传输第二套指标或配对真相，只用 PocketBase record event 或受控的自定义消息使 HTTP 快照失效：
 

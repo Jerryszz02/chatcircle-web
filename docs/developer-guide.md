@@ -9,7 +9,7 @@
 >
 > 各子目录另有聚焦手册，本文会引用而不是复制它们：`backend/README.md`（后端操作）、`deploy/README.md`（生产部署）、`mcp/README.md`（MCP 数据取送）、`e2e/`（端到端测试）。
 >
-> **T0 边界（2026-08-28）**：`frontend/src/shared/api/accountEvent.ts` 已冻结手机号/配对/快照/细粒度导出的目标契约，但对应 migration、hook 和 UI 仍未实现。实际可用功能仍以本文其他章节与当前代码为准。
+> **T0/T3 边界（2026-08-28）**：`frontend/src/shared/api/accountEvent.ts` 已冻结手机号/配对/快照/细粒度导出的目标契约；当前 T3 分支已实现并验证单活动实时数据服务，其他 T1/T2/T4~T6 仍是目标契约。该结论只代表当前分支，不代表已合并或已部署。
 
 ---
 
@@ -41,8 +41,8 @@
 ├── frontend/            # React SPA。src/features/{participant,admin,superadmin} + src/shared/
 │                        #   详见 frontend 各节；操作手册级内容不在这里，全在本文 §6
 ├── backend/             # PocketBase 后端
-│   ├── pb_migrations/   #   版本化 schema（23 个集合），schema 变更的唯一入口
-│   ├── pb_hooks/        #   服务端业务规则（JSVM *.pb.js）：47 个自定义路由 + 写守卫 + 审计
+│   ├── pb_migrations/   #   版本化 schema（26 个迁移文件 / 24 个业务集合），schema 变更的唯一入口
+│   ├── pb_hooks/        #   服务端业务规则（JSVM *.pb.js）：49 个自定义路由 + Realtime 守卫 + 写守卫 + 审计
 │   ├── tests/           #   L3 集成套件 + 迁移冒烟（CI 必过），仅用 bash/curl/python3 标准库
 │   ├── scripts/         #   种子数据、历史数据补录
 │   ├── pb_data/         #   本地开发数据（SQLite），【不入库】
@@ -89,14 +89,14 @@ Docker 一键启动（生产同构）：`cp .env.example .env` → **先填好 `
 1. **写入收口**。几乎所有业务写操作（报名、审核、签到、问卷、导出、邀请码……）都只走 `pb_hooks` 里的自定义端点（`POST /api/cc/*`），在服务端事务内完成；集合的直连 create/update 被 `guards.pb.js` 等守卫封堵，直连 delete 全部集合关闭。前端集合 API 主要用于**读**。
 2. **读路径分两路**。管理端读集合走 PocketBase 原生 API + API rules（机构隔离靠 rule 里的 `@request.auth.organization_id` 链式反查）；参与者读公开/聚合信息走 hooks 白名单端点（`/api/cc/public/*`、`/api/cc/me/*`），不直连集合。
 3. **机构隔离在服务端强制**。写路径分两种：**自定义端点**内 `organization_id` 一律由 hooks 从登录身份注入，客户端传入的会被忽略；少数放行的**集合直连 create**（活动、培训、机构自定义报名字段）则由前端显式传本机构 `organization_id`（取自登录管理员身份，如 `ActivityForm.tsx`），由 API rules 校验 `@request.auth.organization_id = organization_id`，且 guards 禁止 update 再改它。读路径靠 rules 按身份过滤。跨机构访问返回 **404 而非 403**（不泄露资源存在性）。
-4. **无硬删除**。全部 23 个集合 `deleteRule: null`；停用/归档/作废/撤销一律用 `status` 字段表达（FR-AUD-001）。改代码时不要引入任何删除语义。
+4. **无硬删除**。全部 24 个业务集合 `deleteRule: null`；停用/归档/作废/撤销一律用 `status` 字段表达（FR-AUD-001）。改代码时不要引入任何删除语义。
 5. **pb_hooks 是隔离作用域的 JS，不是 Node 项目**。PocketBase 0.28 JSVM 中各 `*.pb.js` 文件作用域完全隔离，没有 import/全局共享。`pb_hooks/lib/` 下三个文件（http/ratelimit/audit）是**契约标准源，运行时不会被加载**；每个领域文件把所需工具函数**原样内联**在自己闭包里。**改 lib 语义后必须同步所有内联副本**——这是本仓库最大的维护陷阱（文件头部有"勿手工改副本"警告）。
 
 整体请求路径（生产）：浏览器 → Caddy（TLS、安全头、封 `/_/*`）→ PocketBase（`pb_public/` 静态前端 + 集合 API + `/api/cc/*` hooks）→ SQLite。
 
 ## 5. 后端详解
 
-### 5.1 数据模型（23 个集合）
+### 5.1 数据模型（24 个业务集合）
 
 schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域（命名 `<Unix时间戳>_cc_<域名>.js`，按时间戳排序执行）。按域分组：
 
@@ -182,7 +182,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 **培训 `trainings.status`（3 态）**：draft→published→closed；培训签到资格 = 全平台任一 approved listener 报名（否则 `listener_not_approved`）。
 
-### 5.4 自定义端点全集（47 个，统一 `/api/cc/*` 前缀）
+### 5.4 自定义端点全集（49 个，统一 `/api/cc/*` 前缀）
 
 鉴权标记：`anon` 无需登录 / `participant` / `admin`（机构管理员，requireAuth 同时校验账号与所属机构均 active）/ `super` / `admin|super`。
 
@@ -237,13 +237,14 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 | POST `/api/cc/submissions/{id}/void` | admin | 作废（reason 必填+审计） |
 | GET `/api/cc/me/overview` | participant | 「我的」聚合：报名+可填问卷+已提交答卷+listener 资格标记 |
 
-**导出与看板**（`exports.pb.js`、`metrics.pb.js`）
+**导出、看板与单活动实时数据**（`exports.pb.js`、`metrics.pb.js`、`live.pb.js`）
 
 | 端点 | 鉴权 | 说明 |
 |---|---|---|
 | POST `/api/cc/exports` | admin\|super | **同步**生成 ZIP（13 个 CSV），写 export_jobs+审计；限流 per 机构 10 次/h、per 超管 20 次/h |
 | GET `/api/cc/exports/{id}/download` | admin\|super | 鉴权下载（admin 仅本机构 job），记 export.download 审计 |
 | GET `/api/cc/metrics/{metricKey}` | admin\|super | 看板指标，8 个 key 注册表分发（口径注释在文件头，改口径前先读） |
+| GET `/api/cc/activities/{id}/live-summary` | admin\|super | T3 单活动同快照汇总：报名、签到、配对、问卷、匿名人口统计与最近签到；机构管理员仅本机构，跨机构 404 |
 
 **超管**（`super.pb.js`）
 
@@ -263,6 +264,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 - **敏感导出过滤**：普通导出按 `registration_field_defs.is_sensitive` 与 `survey_questions.is_sensitive` 两个标记位排除（**禁止按字段名启发式判断**），participants.csv 不含 username；敏感导出需机构开关 + `confirm:true` 二次确认 + 独立审计动作。CSV 公式注入防护（`= + - @ Tab` 前置单引号）。导出文件落 `pb_data/exports`（0700/0600），文件名随机，下载有路径前缀防护。
 - **名额并发**：报名创建端点只是预检，**硬校验在 transition 到 approved 的事务内**（总名额+角色名额双查）；SQLite busy 类错误重试 2 次后 409。
 - **错误形态**：统一 `{code, message, data:{code}}`；handler 抛 `ccError` 由顶层 catch 转换，事务内抛出即回滚。部分文件（surveys/submissions/exports/super/metrics）混用 `jsonError` 直接 return 形态——改代码时跟随本文件既有风格。
+- **Realtime 只做失效通知**：管理端订阅 registrations/checkins/submissions/activity_pairs 后统一防抖重取 `live-summary`，不从事件 payload 推导指标；参与者只能订阅自己的 `cc.participant.pairing.<participantId>` 主题，且消息发送前再次按当前认证清洗。
 - **配置**：hooks 内**没有任何环境变量**，阈值都是代码内常量（登录 5 次/10min、邀请码默认 7 天、签到 token 24 位……）。运行时持久状态只有 `$app.store()` 和 `pb_data/exports`。
 
 ### 5.6 迁移编写约定
@@ -277,9 +279,9 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 ### 5.7 后端测试体系（`backend/tests/`）
 
-- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 14 个 suite（416 断言）：越权矩阵 AC-03、名额并发 AC-08、状态机 AC-07、签到 AC-09/20、培训、问卷资格、导出 AC-16/17、限流 AC-21、备份告警 AC-23、无硬删除 AC-18、安全加固回归（必须排最后）等。
-- `migration_smoke.sh`：up→全量 down→sqlite3 直查 23 集合清零→再 up，随后 serve 抽查 40+ 项。
-- **两条强制规则**：① authguard 对内置 auth-with-password 按 IP 限 20 次/10min，一轮全量恰好用 21 次（预算余量为 0）——新增套件**不得再增加内置认证调用**，管理员登录态用 impersonate，参与者走 `/api/cc/auth/participant`；② 新增带 `organization_id` 的接口，**必须同 PR 在 `suite_acl.py` 补越权用例**。
+- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 18 个 suite（501 断言）：越权矩阵 AC-03、名额并发 AC-08、状态机 AC-07、签到 AC-09/20、培训、问卷资格、导出 AC-16/17、T3 实时汇总与 Realtime ACL、限流 AC-21、备份告警 AC-23、无硬删除 AC-18、安全加固回归（必须是最后一个使用内置认证的 suite）等。
+- `migration_smoke.sh`：up→全量 down→sqlite3 直查 24 个业务集合清零→再 up，随后 serve 抽查 58 项。
+- **两条强制规则**：① authguard 对内置 auth-with-password 按 IP 限 25 次/10min，一轮全量当前使用 22 次（余量 3）——新增套件仍应避免消耗这项预算，管理员登录态用 impersonate，参与者走 `/api/cc/auth/participant`；② 新增带 `organization_id` 的接口，**必须同 PR 补机构越权用例**（通用端点放 `suite_acl.py`，领域聚合端点可放对应 suite）。
 
 ## 6. 前端详解（`frontend/`）
 
@@ -296,7 +298,7 @@ src/
 │   ├── pocketbase.ts      #   3 个按角色隔离的 PB client 单例（见 §6.3）
 │   ├── auth.ts / session.ts / guards.tsx
 │   ├── api/               #   types.ts（当前 record 类型+枚举，与 pb_migrations 手工同步）
-│   │                      #   accountEvent.ts（T0 目标契约，未实现不等于当前 schema）
+│   │                      #   accountEvent.ts（T0 冻结契约；T3 汇总响应已实现，其余仍是目标）
 │   │                      #   collections.ts（类型化 RecordService 封装）、http.ts（自定义端点 fetch 包装）
 │   ├── ui/                #   无样式结构组件（Button/Card/Modal/Toast/Loading/PageLayout/ForbiddenPage…）
 │   ├── styles/global.css  #   设计 token + .cc-* 共享类（见 §6.6）
@@ -306,7 +308,7 @@ src/
 ├── features/{participant,admin,superadmin}/
 │   ├── pages.tsx          #   barrel，同时负责 import 本端 CSS
 │   ├── pages/  components/  lib/   # 页面 / 本端组件 / 纯函数领域逻辑（测试主要打 lib）
-│   └── api.ts(或 lib/api.ts)       # 自定义端点封装，文件头有与 pb_hooks 逐条核对过的契约注释——改端点必读
+│   └── api.ts(或 lib/api.ts)       # 自定义端点封装；admin/lib/activityLive.ts 负责 T3 Realtime 失效订阅与重取
 └── test/                  # vitest setup + mockApi.ts（fetch stub 工具）
 ```
 
@@ -320,7 +322,7 @@ src/
 
 ### 6.4 数据获取与错误处理约定
 
-无请求库，两种模式：集合数据用 `collectionsForRole(role).xxx.getList(...)` 直接调 SDK；业务动作用各 feature 的 api 模块封装走 `shared/api/http.ts` 的 `apiGet/apiPost`（错误规范化为 `ApiError{status, code, details}`，业务错误码从 `details.code` 读）。页面级统一手写 `useState(data/error/loading) + useEffect(cancelled 标志) + useCallback(reload)`。导出下载是特例：原生 fetch + Authorization + blob。
+无请求库，两种模式：集合数据用 `collectionsForRole(role).xxx.getList(...)` 直接调 SDK；业务动作用各 feature 的 api 模块封装走 `shared/api/http.ts` 的 `apiGet/apiPost`（错误规范化为 `ApiError{status, code, details}`，业务错误码从 `details.code` 读）。页面级统一手写 `useState(data/error/loading) + useEffect(cancelled 标志) + useCallback(reload)`。导出下载是特例：原生 fetch + Authorization + blob。T3 的 `features/admin/lib/activityLive.ts` 先建立 Realtime 订阅再首取快照，事件仅触发防抖重取，并在断线/重连时更新连接状态与刷新快照。
 
 ### 6.5 路由清单
 
@@ -361,7 +363,7 @@ MCP 是由 WorkBuddy、Kimi、Claude、Codex 等本地客户端启动的 STDIO �
 4. 集合若带 `organization_id`：**同 PR 在 `suite_acl.py` 补越权用例**（强制）。
 
 **加一个业务端点（写操作）**
-1. 若属于手机号/现场配对/活动快照/细粒度导出，先对照 `docs/planning/api-design.md` 与 `shared/api/accountEvent.ts`，禁止在 feature 内改机器名或重定义同义类型。
+1. 若属于手机号/现场配对/活动快照/细粒度导出，先对照 `docs/planning/api-design.md` 与 `shared/api/accountEvent.ts`，禁止在 feature 内改机器名或重定义同义类型；T3 快照还必须保持“Realtime 只失效、服务端重算”的边界。
 2. 在对应域的 `pb_hooks/*.pb.js` 加 `routerAdd`：用本文件内联的 `requireAuth`/`ccError`/`writeAudit` 等工具；机构资源一律服务端注入 organization_id，跨机构 404；写操作放事务内并写审计。
 3. 需要封堵直连写时同步 `guards.pb.js`。
 4. 集成测试：对应 suite 补断言；新机构资源必须同 PR 补 `suite_acl.py`；注意 auth 预算（§5.7）。
@@ -383,7 +385,7 @@ MCP 是由 WorkBuddy、Kimi、Claude、Codex 等本地客户端启动的 STDIO �
 
 | 层 | 位置 | 运行 | 覆盖 |
 |---|---|---|---|
-| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | lib 纯逻辑、页面行为、路由守卫 |
+| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 44 files / 313 tests：lib 纯逻辑、页面行为、路由守卫与 T3 Realtime 失效化 |
 | 后端集成 + 迁移冒烟 | `backend/tests/` | `bash backend/tests/run_integration.sh`、`migration_smoke.sh` | 越权矩阵、状态机、并发名额、导出、限流、无硬删除……（AC-01~23 映射见 docs/planning/test-plan.md） |
 | E2E 主链路 | `e2e/` | `cd e2e && npm test`（环境全自动自举，与本地库隔离） | 报名→审核→签到→问卷→导出、培训链路（移动 viewport，少而精） |
 
@@ -407,9 +409,10 @@ CI（`.github/workflows/ci.yml`，push 到 main 与全部 PR 触发，三 job �
 5. 敏感数据导出只看 `is_sensitive` 标记位，禁止字段名启发式。
 6. 审计与业务写同事务；metadata 不含密码/完整敏感答案。
 7. hooks 无环境变量、无跨文件共享；改 `lib/` 契约必须同步全部内联副本。
-8. 集成测试的认证预算余量为 0（§5.7）；`suite_hardening.py` 必须排最后。
-9. 环境差异走环境变量：`.env.example` 入库，真实 `.env` 与 secrets 不入库。
-10. 需求口径以 PRD v0.3 为基线；业务口径变更先回 `docs/planning/` 评审，再改代码。
+8. 集成测试的内置认证预算仅余 3 次（§5.7）；`suite_hardening.py` 必须是 runner 中最后一个使用内置认证的 suite。
+9. Realtime payload 不承载权威指标；事件只使快照失效，最终数值必须重新读取服务端同快照汇总。
+10. 环境差异走环境变量：`.env.example` 入库，真实 `.env` 与 secrets 不入库。
+11. 需求口径以 PRD v0.3 为基线；业务口径变更先回 `docs/planning/` 评审，再改代码。
 
 ---
 

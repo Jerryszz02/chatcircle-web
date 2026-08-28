@@ -6,14 +6,14 @@
 
 ## 项目是什么
 
-**Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。当前默认分支已经包含 React + PocketBase 前后端、测试与部署配置；手机号账号、现场配对、单活动实时工作台和细粒度导出仍属于`计划中`功能。T0 只已冻结它们的共享契约与迁移边界，不能当作 T1–T6 已实现。
+**Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。2026-08-28 审计时，默认分支 `origin/main@54de5e8` 已包含 React + PocketBase 前后端与 T0 冻结契约；本实现分支另已验证 T3 单活动实时数据服务，但尚未证明已合并或部署。手机号账号、现场配对业务、工作台 UI 和细粒度导出仍属于`计划中`功能。
 
 - 多机构集中管理：Empact 集中式平台，统一数据库，机构间按 `organization_id` 逻辑隔离。
 - 活动全生命周期：活动创建/发布/传播（链接与二维码；另设公开活动广场页 `/activities`，仅展示已发布/已关闭活动）→ 报名与人工审核（角色名额硬限制、误判回退）→ 现场固定二维码签到（含补签/撤销）→ 多份问卷发布与填写 → 基础项目管理看板 → 规范化 ZIP/CSV 数据导出。
 - 聆听者培训体系（2026-08 扩展，PRD 外）：机构级培训创建/发布/关闭、固定二维码培训签到（资格 = 账号存在 approved 聆听者报名，全平台通用）、账号级「培训通过」标记（仅记录与展示，不作报名门槛）。
 - 三级账号权限：超级管理员、机构管理员、参与者。参与者当前实现为用户名+密码；目标状态为中国大陆手机号验证码登录/注册，存量账号通过验证码绑定手机号并保留原 `participant_id`。
 - 现场执行升级（计划中）：按签到顺序为倾诉者/聆听者编号和配对，参与者端只展示本人的编号、组号与搭档姓名。
-- 机构效率升级（计划中）：活动创建向导、单场活动实时工作台、参与者结构聚合和可按活动/问卷/参与者/字段选择的细粒度导出。
+- 机构效率升级：T3 单活动事务快照、参与者结构抑制和 Realtime 失效化服务已在本分支`已验证`；活动创建向导、工作台 UI 和细粒度导出仍`计划中`。
 
 正式入口域名：`chatcircle.empact.cn`。
 
@@ -45,11 +45,11 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 |---|---|
 | 生成请求 | 归档 2026-08-27 专项升级，并于 2026-08-28 实施 T0 共享契约与迁移设计 |
 | 初始生成 | 2026-08-05 |
-| 最近同步 | 2026-08-28（T0 `已验证`）：新增 [api-design.md](api-design.md) 和共享类型，冻结手机号、报名标准字段、现场编号/配对、Realtime 失效化、导出 v2 与 v1 兼容顺序。 |
-| 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb-t0-shared-contracts`；`agent/t0-shared-contracts` 从 `origin/main` `57a0aad` 创建。不把本工作分支写成已部署生产状态。 |
-| 本次关键代码证据 | `participant_accounts` 仍以 `username` 为 identity；`checkins` 无现场号，无 `activity_pairs`；导出仍是固定 ZIP/CSV + `include_pii`。PocketBase 0.28.4 隔离探针证明 text 手机号 identity 技术可行，但 T0 因“短信验证码 only”选择服务端验证后签 token。 |
-| 本次验证命令 | 2026-08-28 已通过 `npm test`（43 files / 311 tests）、`npm run typecheck`、`npm run lint`、`npm run build` 与 planning 索引/链接审计。 |
-| 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T1–T6 按 `2026-08-28.t0-v1` 新增阿里云短信认证、PocketBase Realtime/SSE、配对数据模型、活动工作台与 XLSX/CSV 细粒度导出。 |
+| 最近同步 | 2026-08-28（T3 `已验证`）：实现单活动快照、双问卷完成率、小样本抑制、Realtime topic 权限、管理端订阅防抖与重连刷新；T0 冻结契约不变。 |
+| 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb-t3-realtime-data-service`；`agent/t3-realtime-data-service` 从 `origin/main@54de5e8` 创建。不把本工作分支写成默认分支或已部署生产状态。 |
+| 本次关键代码证据 | `backend/pb_hooks/live.pb.js` 提供同事务 `live-summary` 与 Realtime 双向权限守卫；`frontend/src/features/admin/lib/activityLive.ts` 只用事件失效化 HTTP 快照。T1/T2 schema 未在本任务重复实现；缺少 `activity_pairs` 时快照兼容返回空配对指标。 |
+| 本次验证命令 | 2026-08-28 已通过 `bash backend/tests/migration_smoke.sh`（58/58）、`bash backend/tests/run_integration.sh`（501/501）、`npm test -- --run`（44 files / 313 tests）、lint、typecheck、build、全部 hook `node --check` 与 planning 文档审计。 |
+| 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T3 已按 `2026-08-28.t0-v1` 落地快照与 Realtime 失效化，其余任务继续复用同一契约。 |
 
 ## 已生成文档
 
@@ -99,7 +99,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 
 ## 开发入口
 
-仓库已经完成初始化。当前代码结构、本地启动、测试与部署命令以 [开发者指南](../developer-guide.md) 和各 package 的 `package.json` 为准；planning 文档不复制易漂移的命令。T0 合并后，Wave 1 必须先读 [api-design.md](api-design.md) 并复用 `frontend/src/shared/api/accountEvent.ts`；不得在 T1/T2/T3 内改名或另造契约。
+仓库已经完成初始化。当前代码结构、本地启动、测试与部署命令以 [开发者指南](../developer-guide.md) 和各 package 的 `package.json` 为准；planning 文档不复制易漂移的命令。后续 T1/T2/T4~T6 必须先读 [api-design.md](api-design.md) 并复用 `frontend/src/shared/api/accountEvent.ts`；不得改名或另造契约，T4/T5 应直接消费 T3 已提供的快照/订阅服务。
 
 ## Roadmap
 
