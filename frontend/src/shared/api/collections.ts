@@ -1,6 +1,7 @@
 import type PocketBase from 'pocketbase';
 import type { RecordService } from 'pocketbase';
 import { pbForRole, type Role } from '../pocketbase';
+import type { ActivityPairRecord } from './accountEvent';
 import type {
   ActivityApprovalRecord,
   ActivityRecord,
@@ -53,6 +54,7 @@ export const COLLECTION_NAMES = {
   registrationAnswers: 'registration_answers',
   checkinSessions: 'checkin_sessions',
   checkins: 'checkins',
+  activityPairs: 'activity_pairs',
   surveyTemplates: 'survey_templates',
   surveyTemplateVersions: 'survey_template_versions',
   activitySurveys: 'activity_surveys',
@@ -80,6 +82,7 @@ export interface TypedCollections {
   registrationAnswers: RecordService<RegistrationAnswerRecord>;
   checkinSessions: RecordService<CheckinSessionRecord>;
   checkins: RecordService<CheckinRecord>;
+  activityPairs: RecordService<ActivityPairRecord>;
   surveyTemplates: RecordService<SurveyTemplateRecord>;
   surveyTemplateVersions: RecordService<SurveyTemplateVersionRecord>;
   activitySurveys: RecordService<ActivitySurveyRecord>;
@@ -116,6 +119,7 @@ export function collections(client: PocketBase): TypedCollections {
     ),
     checkinSessions: client.collection<CheckinSessionRecord>(COLLECTION_NAMES.checkinSessions),
     checkins: client.collection<CheckinRecord>(COLLECTION_NAMES.checkins),
+    activityPairs: client.collection<ActivityPairRecord>(COLLECTION_NAMES.activityPairs),
     surveyTemplates: client.collection<SurveyTemplateRecord>(COLLECTION_NAMES.surveyTemplates),
     surveyTemplateVersions: client.collection<SurveyTemplateVersionRecord>(
       COLLECTION_NAMES.surveyTemplateVersions,

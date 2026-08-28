@@ -6,14 +6,14 @@
 
 ## 项目是什么
 
-**Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。2026-08-28 审计时，默认分支 `origin/main@54de5e8` 已包含 React + PocketBase 前后端与 T0 冻结契约；本实现分支另已验证 T3 单活动实时数据服务，但尚未证明已合并或部署。手机号账号、现场配对业务、工作台 UI 和细粒度导出仍属于`计划中`功能。
+**Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。当前默认分支已经包含 React + PocketBase 前后端、测试、部署配置、T0 冻结契约与 T3 单活动实时数据服务；本 T2 分支已实现并验证现场编号与配对后端，但尚未合并或部署。手机号账号、工作台 UI、参与者配对 UI 和细粒度导出仍属于`计划中`功能。
 
 - 多机构集中管理：Empact 集中式平台，统一数据库，机构间按 `organization_id` 逻辑隔离。
 - 活动全生命周期：活动创建/发布/传播（链接与二维码；另设公开活动广场页 `/activities`，仅展示已发布/已关闭活动）→ 报名与人工审核（角色名额硬限制、误判回退）→ 现场固定二维码签到（含补签/撤销）→ 多份问卷发布与填写 → 基础项目管理看板 → 规范化 ZIP/CSV 数据导出。
 - 聆听者培训体系（2026-08 扩展，PRD 外）：机构级培训创建/发布/关闭、固定二维码培训签到（资格 = 账号存在 approved 聆听者报名，全平台通用）、账号级「培训通过」标记（仅记录与展示，不作报名门槛）。
 - 三级账号权限：超级管理员、机构管理员、参与者。参与者当前实现为用户名+密码；目标状态为中国大陆手机号验证码登录/注册，存量账号通过验证码绑定手机号并保留原 `participant_id`。
-- 现场执行升级（计划中）：按签到顺序为倾诉者/聆听者编号和配对，参与者端只展示本人的编号、组号与搭档姓名。
-- 机构效率升级：T3 单活动事务快照、参与者结构抑制和 Realtime 失效化服务已在本分支`已验证`；活动创建向导、工作台 UI 和细粒度导出仍`计划中`。
+- 现场执行升级：T2 后端在本分支`已验证`，包含签到编号、队列配对、迟到补配、释放/调整、现场锁定、本人最小快照与审计；管理员/参与者 UI 和 Realtime 仍`计划中`（T4/T5）。
+- 机构效率升级：T3 单活动事务快照、参与者结构抑制和 Realtime 失效化服务已在默认分支`已验证`；活动创建向导、工作台 UI 和细粒度导出仍`计划中`。
 
 正式入口域名：`chatcircle.empact.cn`。
 
@@ -45,11 +45,11 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 |---|---|
 | 生成请求 | 归档 2026-08-27 专项升级，并于 2026-08-28 实施 T0 共享契约与迁移设计 |
 | 初始生成 | 2026-08-05 |
-| 最近同步 | 2026-08-29（T3 review 修复后`已验证`）：人口统计改为互补桶联合抑制；管理端订阅补齐 `activities` 与 `activity_surveys`，活动现场字段和问卷清单变化也会刷新快照；T0 契约版本不变。 |
-| 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb-t3-realtime-data-service`；`agent/t3-realtime-data-service` 从 `origin/main@54de5e8` 创建。不把本工作分支写成默认分支或已部署生产状态。 |
-| 本次关键代码证据 | `backend/pb_hooks/live.pb.js` 提供同事务 `live-summary`、互补桶联合抑制与 Realtime 双向权限守卫；`frontend/src/features/admin/lib/activityLive.ts` 用六类依赖事件失效化 HTTP 快照。T1/T2 schema 未在本任务重复实现；缺少 `activity_pairs` 时快照兼容返回空配对指标。 |
-| 本次验证命令 | 2026-08-29 review 修复已通过 `bash backend/tests/run_integration.sh`（501/501）、`npm test -- --run`（44 files / 313 tests）、lint、typecheck、build、全部 hook `node --check` 与 planning 文档审计；无 schema 变更，首版分支迁移冒烟最近一次为 58/58。 |
-| 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T3 已按 `2026-08-28.t0-v1` 落地快照与 Realtime 失效化，其余任务继续复用同一契约。 |
+| 最近同步 | 2026-08-29（T2/T3 `已验证`）：T2 落地现场编号、`activity_pairs`、配对/锁定端点、释放/调整与审计；T3 落地事务快照、互补桶联合抑制与 Realtime 失效化；T0 契约版本不变。 |
+| 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb-t2-pairing-backend`；`agent/t2-pairing-backend` 已同步 `origin/main@5d67520`。本分支尚未合并或部署。 |
+| 本次关键代码证据 | `pairings.pb.js` 与 `1787880000_cc_activity_pairings.js` 提供 T2 现场编号、配对、释放、调整与锁定；默认分支的 `live.pb.js` 与 `activityLive.ts` 提供 T3 快照和 Realtime 失效化。 |
+| 本次验证命令 | T2 review 修复已通过迁移冒烟、后端完整集成（506/506）、前端 lint/typecheck/test/build 与 planning 文档审计；与 T3 合并后的最终结果以本 PR CI 为准。 |
+| 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T2/T3 均复用 `2026-08-28.t0-v1`，T1/T4–T6 继续按冻结契约实现。 |
 
 ## 已生成文档
 

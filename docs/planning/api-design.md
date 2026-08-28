@@ -1,12 +1,12 @@
 # 手机号账号与活动现场 API 契约
 
-> 状态：T0 与 T3 `已验证`；T1/T2/T4/T5/T6 仍为 `计划中`
+> 状态：T0 契约与 T3 实时数据服务已在默认分支验证；T2 现场编号与配对后端在 `agent/t2-pairing-backend` `已验证`，尚未合并或部署；T1/T4–T6 仍为`计划中`
 >
 > 契约版本：`2026-08-28.t0-v1`
 >
 > 适用范围：[account-event-workflow-prd.md](account-event-workflow-prd.md) 的手机号账号、现场编号/配对、实时工作台与细粒度导出
 >
-> 当前实现差距：本实现分支已提供 T3 `live-summary`、Realtime topic 守卫和管理端失效化订阅服务，但尚未证明已合并默认分支或部署；T1/T2/T6 的新 schema/端点仍未由本任务实现。实际代码现状以 [developer-guide.md](../developer-guide.md) 和 `backend/pb_hooks/` 为准。
+> 当前实现差距：默认分支已提供 T3 `live-summary`、Realtime topic 守卫和管理端失效化订阅；本 T2 分支已有 §4 的配对/锁定端点、现场 schema 与本人最小快照。§3 手机号、T4/T5 UI 和 §6 导出 v2 尚未实现。实际可用 API 以 [developer-guide.md](../developer-guide.md) 和 `backend/pb_hooks/` 为准。
 
 ## 1. 权威边界
 

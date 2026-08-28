@@ -6,7 +6,7 @@ Chat Circles 后端为单个 PocketBase 实例：认证、业务 API、collectio
 
 | 路径 | 内容 |
 | --- | --- |
-| `pb_migrations/` | 全部 schema 变更（集合、字段、索引、API rules），版本化管理。**schema 只能经迁移变更**，禁止在生产环境用 admin UI 手工改结构。当前含 24 个业务集合的 25 个 JS 迁移（按依赖顺序，`1785888000+` 时间戳前缀；`1785889260` 追加 reports 报告集合，`1785889320` 追加 `registration_field_defs.role_scope` 与培训体系三集合；2026-08 改版：`1785889380` 新增 posts 内容推文集合，`1785889440` admin_accounts 邮箱化——identityFields 加 email + 启用 OTP），对应 database-design §5.2。 |
+| `pb_migrations/` | 全部 schema 变更（集合、字段、索引、API rules），版本化管理。**schema 只能经迁移变更**，禁止在生产环境用 admin UI 手工改结构。当前含 25 个业务集合的 27 个 JS 迁移；T2 迁移 `1787880000_cc_activity_pairings.js` 增加现场字段与 `activity_pairs`。 |
 | `pb_hooks/` | 全部服务端业务规则（JS），按领域分文件（`auth.pb.js`、`registrations.pb.js` 等）。**0.28.4 JSVM 各 hooks 文件作用域完全隔离**，共享函数以 `lib/` 为契约标准源、在 handler 内内联（勿手工改副本）。 |
 | `tests/` | 服务端测试：`integration/` 集成测试套件（L3，CI 必过）+ `migration_smoke.sh` 迁移冒烟，见下文「测试」。 |
 | `scripts/` | 开发辅助脚本：`seed_demo.sh` 演示种子数据注入，见下文「演示种子数据」。 |
@@ -62,7 +62,7 @@ bash backend/scripts/seed_demo.sh
 bash backend/tests/run_integration.sh
 ```
 
-一键自举临时 PocketBase 实例（临时数据目录 → 全部迁移 → 测试超管 → 模板 SQL fixture → 显式三目录参数 serve），执行 `tests/integration/` 下全部套件（共 486 项断言）：主链路（含公开活动 scope 过滤与已结束活动报名截止）、越权矩阵（AC-03，含 posts 越权写）、名额硬校验与并发审核（AC-08）、状态迁移矩阵（AC-07）、签到唯一/幂等/补签撤销（AC-09/10/20）、聆听者培训体系、问卷四条件与答卷生命周期（AC-11/12）、导出敏感过滤与开关（AC-16/17）、登录限流与邀请码（AC-21/02）、管理员邮箱认证（AC-24：注册必填邮箱/找回门控/邮件端点限流/OTP 可用性）、内容推文 posts（AC-25：超管专属写/校验/可见性/置顶/审计）、公开 Outcome（AC-26：增量口径断言）、备份告警（AC-23）、无硬删除（AC-18）、reports 报告集合。输出逐条 PASS/FAIL 与汇总，任一失败退出码为 1。仅依赖 python3 标准库；端口可用 `CC_IT_PORT` 覆盖（默认 8097），`CC_IT_KEEP=1` 保留临时目录调试。详见 `tests/README.md`。
+一键自举临时 PocketBase 实例，执行 `tests/integration/` 下全部套件（504 项断言），覆盖既有主链路、越权、状态机、签到/问卷/导出/培训等回归，以及 T2 现场编号、并发开始/调整、迟到补配、锁定前后释放、本人最小权限与审计。任一失败退出码为 1；详见 `tests/README.md`。
 
 ### 迁移冒烟验证
 
@@ -70,7 +70,7 @@ bash backend/tests/run_integration.sh
 bash backend/tests/migration_smoke.sh
 ```
 
-脚本使用临时数据目录（不污染 `pb_data/`）：空库 `migrate up` → 全部 `migrate down` → 再 `migrate up` 往返，随后启动 serve 抽查 24 个集合存在性、未认证访问拒绝、公开活动 viewRule、`registrations` 参与者×活动唯一索引、参与者/管理员/超管三类身份隔离与无硬删除。全部检查通过时退出码为 0。
+脚本使用临时数据目录（不污染 `pb_data/`）：空库 `migrate up` → T2/seed 局部回滚 → 全部 `migrate down` → 再 `migrate up` 往返，随后启动 serve 抽查 25 个集合存在性、访问规则、唯一索引、三类身份隔离与无硬删除。全部检查通过时退出码为 0。
 
 ## 邮件（SMTP）配置（2026-08 改版）
 

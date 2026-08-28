@@ -9,7 +9,7 @@
 >
 > 各子目录另有聚焦手册，本文会引用而不是复制它们：`backend/README.md`（后端操作）、`deploy/README.md`（生产部署）、`mcp/README.md`（MCP 数据取送）、`e2e/`（端到端测试）。
 >
-> **T0/T3 边界（2026-08-28）**：`frontend/src/shared/api/accountEvent.ts` 已冻结手机号/配对/快照/细粒度导出的目标契约；当前 T3 分支已实现并验证单活动实时数据服务，其他 T1/T2/T4~T6 仍是目标契约。该结论只代表当前分支，不代表已合并或已部署。
+> **专项升级边界（2026-08-29）**：`frontend/src/shared/api/accountEvent.ts` 已冻结手机号/配对/快照/细粒度导出的目标契约；T2 现场编号与配对后端、T3 单活动实时数据服务均已实现并验证，T1/T4~T6 仍是目标契约。本 T2 分支尚未合并或部署。
 
 ---
 
@@ -41,8 +41,8 @@
 ├── frontend/            # React SPA。src/features/{participant,admin,superadmin} + src/shared/
 │                        #   详见 frontend 各节；操作手册级内容不在这里，全在本文 §6
 ├── backend/             # PocketBase 后端
-│   ├── pb_migrations/   #   版本化 schema（26 个迁移文件 / 24 个业务集合），schema 变更的唯一入口
-│   ├── pb_hooks/        #   服务端业务规则（JSVM *.pb.js）：49 个自定义路由 + Realtime 守卫 + 写守卫 + 审计
+│   ├── pb_migrations/   #   版本化 schema（27 个迁移文件 / 25 个业务集合），schema 变更的唯一入口
+│   ├── pb_hooks/        #   服务端业务规则（JSVM *.pb.js）：53 个自定义路由 + Realtime 守卫 + 写守卫 + 审计
 │   ├── tests/           #   L3 集成套件 + 迁移冒烟（CI 必过），仅用 bash/curl/python3 标准库
 │   ├── scripts/         #   种子数据、历史数据补录
 │   ├── pb_data/         #   本地开发数据（SQLite），【不入库】
@@ -89,14 +89,14 @@ Docker 一键启动（生产同构）：`cp .env.example .env` → **先填好 `
 1. **写入收口**。几乎所有业务写操作（报名、审核、签到、问卷、导出、邀请码……）都只走 `pb_hooks` 里的自定义端点（`POST /api/cc/*`），在服务端事务内完成；集合的直连 create/update 被 `guards.pb.js` 等守卫封堵，直连 delete 全部集合关闭。前端集合 API 主要用于**读**。
 2. **读路径分两路**。管理端读集合走 PocketBase 原生 API + API rules（机构隔离靠 rule 里的 `@request.auth.organization_id` 链式反查）；参与者读公开/聚合信息走 hooks 白名单端点（`/api/cc/public/*`、`/api/cc/me/*`），不直连集合。
 3. **机构隔离在服务端强制**。写路径分两种：**自定义端点**内 `organization_id` 一律由 hooks 从登录身份注入，客户端传入的会被忽略；少数放行的**集合直连 create**（活动、培训、机构自定义报名字段）则由前端显式传本机构 `organization_id`（取自登录管理员身份，如 `ActivityForm.tsx`），由 API rules 校验 `@request.auth.organization_id = organization_id`，且 guards 禁止 update 再改它。读路径靠 rules 按身份过滤。跨机构访问返回 **404 而非 403**（不泄露资源存在性）。
-4. **无硬删除**。全部 24 个业务集合 `deleteRule: null`；停用/归档/作废/撤销一律用 `status` 字段表达（FR-AUD-001）。改代码时不要引入任何删除语义。
+4. **无硬删除**。全部 25 个业务集合 `deleteRule: null`；停用/归档/作废/撤销/释放一律用状态字段表达（FR-AUD-001）。改代码时不要引入任何删除语义。
 5. **pb_hooks 是隔离作用域的 JS，不是 Node 项目**。PocketBase 0.28 JSVM 中各 `*.pb.js` 文件作用域完全隔离，没有 import/全局共享。`pb_hooks/lib/` 下三个文件（http/ratelimit/audit）是**契约标准源，运行时不会被加载**；每个领域文件把所需工具函数**原样内联**在自己闭包里。**改 lib 语义后必须同步所有内联副本**——这是本仓库最大的维护陷阱（文件头部有"勿手工改副本"警告）。
 
 整体请求路径（生产）：浏览器 → Caddy（TLS、安全头、封 `/_/*`）→ PocketBase（`pb_public/` 静态前端 + 集合 API + `/api/cc/*` hooks）→ SQLite。
 
 ## 5. 后端详解
 
-### 5.1 数据模型（24 个业务集合）
+### 5.1 数据模型（25 个业务集合）
 
 schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域（命名 `<Unix时间戳>_cc_<域名>.js`，按时间戳排序执行）。按域分组：
 
@@ -113,7 +113,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 | 集合 | 用途与关键字段 |
 |---|---|
-| `activities` | 活动：`activity_code`（唯一可读代码）、`status`（7 态，见 §5.3）、`capacity_total/speaker/listener`（total 须正偶数，分角色名额恒为对半派生）、`registration_open`+报名起止时间、`checkin_qr_token`（唯一，**服务端创建时强制生成**，见下）、`form_config_json`（活动级报名字段覆盖） |
+| `activities` | 活动：除生命周期、名额、报名与签到 token 外，T2 增加 `pairing_started_at/by`、`onsite_locked_at/by` 与两侧下一个现场序号计数器；现场内部字段只能由服务端事务修改 |
 | `activity_approvals` | 发布审核历史，只追加不可变：`action`(submit/approve/reject)、`reason`（驳回必填） |
 | `registration_field_defs` | 报名字段定义库：`organization_id=''` 表平台标准字段（仅超管维护），非空为机构自定义；`field_code`、`field_type`(text/number/single_choice/multi_choice/date)、`is_sensitive`（**导出过滤的唯一依据**）、`role_scope`(both/speaker/listener，分角色报名表单)；复合唯一 (organization_id, field_code) |
 | `registrations` | 报名：`activity_role`(speaker/listener)、`status`（4 态）；复合唯一 (activity_id, participant_id)＝一人一活动一报名；**无冗余 organization_id**，经 `activity_id.organization_id` 反查隔离 |
@@ -124,7 +124,8 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 | 集合 | 用途与关键字段 |
 |---|---|
 | `checkin_sessions` | 签到开放窗口："未开放"不建行，每次开放新建一行、关闭置 `closed`；"同时至多一条 open"由 hooks 事务保证（SQLite 无法部分唯一） |
-| `checkins` | 签到记录："未签到"不建行，撤销保留原行：`registration_id`（前置=报名 approved）、`source`(self_scan/manual)、`status`(valid/revoked)、`reason`（补签/撤销必填）。**特意不建全量唯一索引**（撤销行要保留），"每人每活动一条 valid"由 hooks 事务查重保证；实际参与人数口径 = `status='valid'` 计数 |
+| `checkins` | 签到记录：撤销保留原行；T2 在创建 valid 签到的同一事务中写 `onsite_role/onsite_sequence/numbered_at` 并递增活动角色计数器，撤销后号码不复用、存量签到不补号 |
+| `activity_pairs` | T2 配对记录：活动内单调递增 `pair_sequence`，双方 registration/checkin，`active/released/completed` 状态与调整/释放留痕；参与者不能直读，写入全部走配对 hooks |
 
 **问卷**
 
@@ -182,7 +183,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 **培训 `trainings.status`（3 态）**：draft→published→closed；培训签到资格 = 全平台任一 approved listener 报名（否则 `listener_not_approved`）。
 
-### 5.4 自定义端点全集（49 个，统一 `/api/cc/*` 前缀）
+### 5.4 自定义端点全集（53 个，统一 `/api/cc/*` 前缀）
 
 鉴权标记：`anon` 无需登录 / `participant` / `admin`（机构管理员，requireAuth 同时校验账号与所属机构均 active）/ `super` / `admin|super`。
 
@@ -224,6 +225,15 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 | POST `/api/cc/training-checkin/self` | participant | 培训自助签到（资格=全平台任一 approved listener 报名） |
 | POST `/api/cc/training-checkins/manual`、`GET /api/cc/trainings/{id}/checkin/manual-candidates`、`POST /api/cc/training-checkins/{id}/revoke` | admin | 培训补签/候选人/撤销 |
 | GET `/api/cc/me/trainings` | participant | 培训页聚合：{eligible, trained, trainings[]}，不下发 qr token |
+
+**现场编号与配对**（`pairings.pb.js`）
+
+| 端点 | 鉴权 | 说明 |
+|---|---|---|
+| POST `/api/cc/activities/{id}/pairings/start` | admin\|super | 首次记录开始事实并按两侧现场序号批量配对；重复调用只补等待队列，不重排旧组 |
+| POST `/api/cc/activities/{id}/pairings/reassign` | admin\|super | 原子释放涉及的 active pair 并建立指定新组；reason 必填，同一目标重复调用幂等 |
+| GET `/api/cc/activities/{id}/my-pairing` | participant | 只返本人现场号/组号/搭档现场号与该场 `FULL_NAME`，不暴露 pair record 或手机号 |
+| POST `/api/cc/activities/{id}/onsite/lock` | admin\|super | 幂等锁定“活动已开始”事实；锁定后撤销只释放，后续改组须人工调整 |
 
 **问卷与答卷**（`surveys.pb.js`、`submissions.pb.js`）
 

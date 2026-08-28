@@ -458,34 +458,47 @@ routerAdd('POST', '/api/cc/checkins/manual', (e) => {
     return e.json(200, { checkin: checkin, existing: true });
   }
 
+  const isBusyErr = (err) => !!err && /busy|locked|snapshot/i.test(String((err && err.message) || err));
   let created = false;
-  $app.runInTransaction((txApp) => {
-    checkin = ccOne(
-      txApp, 'checkins',
-      "activity_id = {:a} && participant_id = {:p} && status = 'valid'",
-      { a: activity.id, p: participantId },
-    );
-    if (checkin) return;
-    const collection = txApp.findCollectionByNameOrId('checkins');
-    checkin = new Record(collection);
-    checkin.set('activity_id', activity.id);
-    checkin.set('participant_id', participantId);
-    checkin.set('registration_id', registration.id);
-    checkin.set('source', 'manual');
-    checkin.set('status', 'valid');
-    checkin.set('checked_in_at', ccNow());
-    checkin.set('operator_id', admin.id);
-    checkin.set('reason', reason);
-    txApp.save(checkin);
-    created = true;
-    // 审计：补签（FR-CHK-005、AC-10），原因必填
-    writeAudit(txApp, {
-      actorId: admin.id, actorRole: 'admin', organizationId: orgId,
-      action: 'checkin.manual', targetType: 'checkin', targetId: checkin.id,
-      result: 'success', reason: reason,
-      metadata: { activity_id: activity.id, participant_id: participantId },
-    });
-  });
+  let attempts = 0;
+  for (;;) {
+    try {
+      created = false;
+      $app.runInTransaction((txApp) => {
+        checkin = ccOne(
+          txApp, 'checkins',
+          "activity_id = {:a} && participant_id = {:p} && status = 'valid'",
+          { a: activity.id, p: participantId },
+        );
+        if (checkin) return;
+        const collection = txApp.findCollectionByNameOrId('checkins');
+        checkin = new Record(collection);
+        checkin.set('activity_id', activity.id);
+        checkin.set('participant_id', participantId);
+        checkin.set('registration_id', registration.id);
+        checkin.set('source', 'manual');
+        checkin.set('status', 'valid');
+        checkin.set('checked_in_at', ccNow());
+        checkin.set('operator_id', admin.id);
+        checkin.set('reason', reason);
+        txApp.save(checkin);
+        created = true;
+        // 审计：补签（FR-CHK-005、AC-10），原因必填
+        writeAudit(txApp, {
+          actorId: admin.id, actorRole: 'admin', organizationId: orgId,
+          action: 'checkin.manual', targetType: 'checkin', targetId: checkin.id,
+          result: 'success', reason: reason,
+          metadata: { activity_id: activity.id, participant_id: participantId },
+        });
+      });
+      break;
+    } catch (err) {
+      if (err && err.__ccError === true) throw err;
+      if (isBusyErr(err) && attempts < 2) { attempts++; continue; }
+      if (isBusyErr(err)) ccError(409, 'CONFLICT', '补签操作冲突，请稍后重试');
+      throw err;
+    }
+  }
 
   return e.json(200, { checkin: checkin, existing: !created });
   } catch (err) {
@@ -644,29 +657,46 @@ routerAdd('POST', '/api/cc/checkins/{id}/revoke', (e) => {
     return e.json(200, { checkin: checkin, already_revoked: true });
   }
 
+  const isBusyErr = (err) => !!err && /busy|locked|snapshot/i.test(String((err && err.message) || err));
   let fresh = null;
-  $app.runInTransaction((txApp) => {
-    fresh = txApp.findRecordById('checkins', checkinId);
-    if (fresh.get('status') === 'revoked') return; // 并发撤销幂等
-    fresh.set('status', 'revoked');
-    fresh.set('revoked_at', ccNow());
-    fresh.set('operator_id', admin.id);
-    fresh.set('reason', reason);
-    txApp.save(fresh);
-    // 审计：撤销签到（FR-CHK-005、AC-10）
-    writeAudit(txApp, {
-      actorId: admin.id, actorRole: 'admin', organizationId: orgId,
-      action: 'checkin.revoke', targetType: 'checkin', targetId: checkinId,
-      result: 'success', reason: reason,
-      metadata: {
-        activity_id: fresh.get('activity_id'),
-        participant_id: fresh.get('participant_id'),
-        source: fresh.get('source'),
-      },
-    });
-  });
+  let alreadyRevoked = false;
+  let attempts = 0;
+  for (;;) {
+    try {
+      alreadyRevoked = false;
+      $app.runInTransaction((txApp) => {
+        fresh = txApp.findRecordById('checkins', checkinId);
+        if (fresh.get('status') === 'revoked') {
+          alreadyRevoked = true;
+          return;
+        }
+        fresh.set('status', 'revoked');
+        fresh.set('revoked_at', ccNow());
+        fresh.set('operator_id', admin.id);
+        fresh.set('reason', reason);
+        txApp.save(fresh);
+        // 审计：撤销签到（FR-CHK-005、AC-10）
+        writeAudit(txApp, {
+          actorId: admin.id, actorRole: 'admin', organizationId: orgId,
+          action: 'checkin.revoke', targetType: 'checkin', targetId: checkinId,
+          result: 'success', reason: reason,
+          metadata: {
+            activity_id: fresh.get('activity_id'),
+            participant_id: fresh.get('participant_id'),
+            source: fresh.get('source'),
+          },
+        });
+      });
+      break;
+    } catch (err) {
+      if (err && err.__ccError === true) throw err;
+      if (isBusyErr(err) && attempts < 2) { attempts++; continue; }
+      if (isBusyErr(err)) ccError(409, 'CONFLICT', '撤销签到冲突，请稍后重试');
+      throw err;
+    }
+  }
 
-  return e.json(200, { checkin: fresh, already_revoked: false });
+  return e.json(200, { checkin: fresh, already_revoked: alreadyRevoked });
   } catch (err) {
     // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
     if (err && err.__ccError === true) {
@@ -675,4 +705,3 @@ routerAdd('POST', '/api/cc/checkins/{id}/revoke', (e) => {
     throw err;
   }
 });
-
