@@ -6,12 +6,12 @@
 
 ## 项目是什么
 
-**Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。2026-08-28 审计时，默认分支 `origin/main@54de5e8` 已包含 React + PocketBase 前后端与 T0 冻结契约；本实现分支另已验证 T3 单活动实时数据服务，但尚未证明已合并或部署。手机号账号、现场配对业务、工作台 UI 和细粒度导出仍属于`计划中`功能。
+**Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。2026-08-29 审计时，默认分支 `origin/main@5d67520` 已包含 T0 冻结契约和 T3 单活动实时数据服务；当前 T1 功能分支另已实现并验证手机号账号。现场配对、工作台 UI 和细粒度导出仍属于`计划中`功能，功能分支状态不代表已部署生产。
 
 - 多机构集中管理：Empact 集中式平台，统一数据库，机构间按 `organization_id` 逻辑隔离。
 - 活动全生命周期：活动创建/发布/传播（链接与二维码；另设公开活动广场页 `/activities`，仅展示已发布/已关闭活动）→ 报名与人工审核（角色名额硬限制、误判回退）→ 现场固定二维码签到（含补签/撤销）→ 多份问卷发布与填写 → 基础项目管理看板 → 规范化 ZIP/CSV 数据导出。
 - 聆听者培训体系（2026-08 扩展，PRD 外）：机构级培训创建/发布/关闭、固定二维码培训签到（资格 = 账号存在 approved 聆听者报名，全平台通用）、账号级「培训通过」标记（仅记录与展示，不作报名门槛）。
-- 三级账号权限：超级管理员、机构管理员、参与者。参与者当前实现为用户名+密码；目标状态为中国大陆手机号验证码登录/注册，存量账号通过验证码绑定手机号并保留原 `participant_id`。
+- 三级账号权限：超级管理员、机构管理员、参与者。T1 已实现中国大陆手机号验证码登录/注册；存量用户名账号保留迁移入口，绑定后沿用原 `participant_id` 与历史记录。
 - 现场执行升级（计划中）：按签到顺序为倾诉者/聆听者编号和配对，参与者端只展示本人的编号、组号与搭档姓名。
 - 机构效率升级：T3 单活动事务快照、参与者结构抑制和 Realtime 失效化服务已在本分支`已验证`；活动创建向导、工作台 UI 和细粒度导出仍`计划中`。
 
@@ -43,13 +43,13 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 
 | 项 | 内容 |
 |---|---|
-| 生成请求 | 归档 2026-08-27 专项升级，并于 2026-08-28 实施 T0 共享契约与迁移设计 |
+| 生成请求 | 归档 2026-08-27 专项升级，并于 2026-08-28 实施 T0 共享契约和 T1 手机号账号 |
 | 初始生成 | 2026-08-05 |
-| 最近同步 | 2026-08-29（T3 review 修复后`已验证`）：人口统计改为互补桶联合抑制；管理端订阅补齐 `activities` 与 `activity_surveys`，活动现场字段和问卷清单变化也会刷新快照；T0 契约版本不变。 |
-| 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb-t3-realtime-data-service`；`agent/t3-realtime-data-service` 从 `origin/main@54de5e8` 创建。不把本工作分支写成默认分支或已部署生产状态。 |
-| 本次关键代码证据 | `backend/pb_hooks/live.pb.js` 提供同事务 `live-summary`、互补桶联合抑制与 Realtime 双向权限守卫；`frontend/src/features/admin/lib/activityLive.ts` 用六类依赖事件失效化 HTTP 快照。T1/T2 schema 未在本任务重复实现；缺少 `activity_pairs` 时快照兼容返回空配对指标。 |
-| 本次验证命令 | 2026-08-29 review 修复已通过 `bash backend/tests/run_integration.sh`（501/501）、`npm test -- --run`（44 files / 313 tests）、lint、typecheck、build、全部 hook `node --check` 与 planning 文档审计；无 schema 变更，首版分支迁移冒烟最近一次为 58/58。 |
-| 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T3 已按 `2026-08-28.t0-v1` 落地快照与 Realtime 失效化，其余任务继续复用同一契约。 |
+| 最近同步 | 2026-08-29（T1/T3 `已验证`）：手机号 schema、Dypnsapi 验证码、登录/注册、存量绑定、双验证码换绑、隐私与限流已落地；实时快照采用互补桶联合抑制，并覆盖六类依赖事件失效化。 |
+| 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb-t1-phone-auth`；`agent/t1-phone-auth` 已变基到 `origin/main@5d67520`。不把本工作分支写成已部署生产状态。 |
+| 本次关键代码证据 | `1787895000_cc_participant_phone_auth.js` 增加手机号字段与内部 challenge 集合；`phoneauth.pb.js` 实现四个冻结端点；`live.pb.js` 提供事务快照与 Realtime 守卫；参与者 UI 以手机号为主入口并保留存量迁移。T2/T6 schema 与业务仍不存在。 |
+| 本次验证命令 | T1 首版已通过前端 318 项、后端集成 503 项、迁移 59 项和 Playwright 3/3；变基与 review 修复后按当前组合代码重新验证并回写最终结果。 |
+| 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T1/T3 已按 `2026-08-28.t0-v1` 落地，T2/T4/T5/T6 继续复用同一契约。 |
 
 ## 已生成文档
 
@@ -92,7 +92,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | 机构逻辑隔离 | 所有机构业务数据带 `organization_id`，服务端强制注入权限条件，不能只依赖前端隐藏 | PRD §9.2、§12.2 |
 | 一次性邀请码 | 机构管理员凭超级管理员生成的一次性邀请码自行注册（默认 7 天有效），用后立即失效 | PRD §5.1 |
 | 唯一超级管理员 | 全平台仅一个超级管理员账号，初始部署时创建；V1 无创建/停用/更换的产品界面 | PRD §3、FR-AUTH-009 |
-| 参与者账号演进 | 当前为用户名+密码且无找回；目标为手机号验证码登录，存量用户先登录原账号再绑定手机号，保留原 `participant_id` | [account-event-workflow-prd.md](account-event-workflow-prd.md) §3 |
+| 参与者账号演进 | T1 已验证手机号验证码登录/注册；存量用户先登录原账号再绑定手机号，保留原 `participant_id`；冲突只标记 `merge_required`，不自动覆盖 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §3 |
 | 现场编号与配对 | 在线签到按数据库角色计数器的原子自增顺序产生不可变编号；不按客户端时间/预生成 ID 推断并发先后，存量签到不补号；管理员开始配对后按两侧现场序号配对，不自动重排已有组 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §5 |
 | 双问卷完成率 | 现场与总体完成率的分子都必须与各自当前分母人群取交集；撤销签到或回退报名后同步移出对应分子，比例不得超过 100% | [account-event-workflow-prd.md](account-event-workflow-prd.md) §4.3 |
 | 细粒度导出 | 计划支持单活动、单问卷、指定参与者、行筛选、字段/题目选择；任一所选报名字段或问卷题目 `is_sensitive=true`，或选择账号层敏感字段时，均由服务端触发敏感导出门槛 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §7 |

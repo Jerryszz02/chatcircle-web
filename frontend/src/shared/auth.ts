@@ -1,6 +1,7 @@
 import type PocketBase from 'pocketbase';
 import type { AuthModel } from 'pocketbase';
 import { apiPost } from './api/http';
+import type { BindPhoneResponse, ParticipantPhoneAuthResponse } from './api/accountEvent';
 import { pbClients, pbForRole, ROLE_COLLECTIONS, type Role } from './pocketbase';
 
 /**
@@ -74,6 +75,12 @@ function makeRoleAuth(role: Role, login: RoleAuth['login']): RoleAuth {
   };
 }
 
+function clearOtherRoleSessions(role: Role): void {
+  for (const other of Object.keys(pbClients) as Role[]) {
+    if (other !== role) pbClients[other].authStore.clear();
+  }
+}
+
 /** 参与者：报名链路内自动注册/登录（不存在即注册，存在则验密码，FR-AUTH-001/005）。 */
 export const participantAuth: RoleAuth = makeRoleAuth('participant', async (username, password) => {
   const res = await apiPost<ParticipantAuthResponse>(
@@ -87,6 +94,30 @@ export const participantAuth: RoleAuth = makeRoleAuth('participant', async (user
   pbClients.participant.authStore.save(res.token, res.record);
   return res.record;
 });
+
+/**
+ * 手机号验证码认证成功后接管参与者会话。响应是 T0 白名单账号形状，不含内部
+ * username/password/phone_e164/phone_lookup_hash。
+ */
+export function saveParticipantPhoneAuth(response: ParticipantPhoneAuthResponse): AuthModel {
+  clearOtherRoleSessions('participant');
+  const record = response.record as AuthModel;
+  pbClients.participant.authStore.save(response.token, record);
+  return record;
+}
+
+/** 绑定/换绑成功后把公开手机号状态合并进当前持久化会话，刷新后仍可展示掩码。 */
+export function updateParticipantPhoneSession(response: BindPhoneResponse): void {
+  const current = pbClients.participant.authStore.model;
+  const token = pbClients.participant.authStore.token;
+  if (!current || !token || current.id !== response.participant_id) return;
+  pbClients.participant.authStore.save(token, {
+    ...current,
+    phone_masked: response.phone_masked,
+    phone_verified_at: response.phone_verified_at,
+    phone_migration_status: response.phone_migration_status,
+  } as AuthModel);
+}
 
 /** 机构管理员：用户名 + 密码登录（邀请码注册见 api 层 auth/registerAdmin）。
  *  用户名存储统一小写（后端 auth.pb.js 注册时小写归一化），登录输入同样小写化再提交。 */

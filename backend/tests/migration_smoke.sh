@@ -54,10 +54,10 @@ if [ ! -x "$PB" ]; then
     Linux_aarch64) PLAT="linux_arm64" ;;
     *) echo "不支持的平台：$(uname -s)_$(uname -m)，请手工下载 PocketBase $PB_VERSION 到 backend/"; exit 1 ;;
   esac
-  TMP_ZIP="$(mktemp /tmp/pb_dl_XXXXXX.zip)"
-  curl -fsSL -o "$TMP_ZIP" "https://github.com/pocketbase/pocketbase/releases/download/v$PB_VERSION/pocketbase_${PB_VERSION}_${PLAT}.zip"
-  unzip -o -q "$TMP_ZIP" pocketbase -d "$BACKEND_DIR"
-  rm -f "$TMP_ZIP"
+  DOWNLOAD_DIR="$(mktemp -d /tmp/cc_pb_download_XXXXXX)"
+  curl -fsSL -o "$DOWNLOAD_DIR/pocketbase.zip" "https://github.com/pocketbase/pocketbase/releases/download/v$PB_VERSION/pocketbase_${PB_VERSION}_${PLAT}.zip"
+  unzip -o -q "$DOWNLOAD_DIR/pocketbase.zip" pocketbase -d "$BACKEND_DIR"
+  rm -rf "$DOWNLOAD_DIR"
 fi
 
 # --- 1. 临时数据目录 + 退出清理 ------------------------------------------------
@@ -93,9 +93,14 @@ run_migrate() {
 info "步骤 1/5：空库 migrate up"
 run_migrate "migrate up（空库）成功" "$WORK/up1.log" up
 
-# --- 3. 单独回滚 seed 迁移，验证推文与审计成对清理 -------------------------------
-info "步骤 2/5：单独回滚最新 seed 迁移 → 校验无孤儿审计 → 再 migrate up"
-echo y | run_migrate "migrate down 最新 seed 迁移成功" "$WORK/down_seed.log" down 1
+# --- 3. 回滚到 seed 迁移，验证推文与审计成对清理 -------------------------------
+# seed 之后允许继续追加业务迁移；按文件名前缀计算需回滚的层数，不能假设 seed 永远最新。
+SEED_TS="1787802274"
+AFTER_SEED_COUNT="$(find "$MIGRATIONS_DIR" -maxdepth 1 -name '*.js' -print \
+  | awk -F/ -v seed="$SEED_TS" '{name=$NF; split(name, parts, "_"); if (parts[1] > seed) n++} END {print n+0}')"
+SEED_ROLLBACK_COUNT=$((AFTER_SEED_COUNT + 1))
+info "步骤 2/5：回滚 seed（含其后 ${AFTER_SEED_COUNT} 个迁移）→ 校验无孤儿审计 → 再 migrate up"
+echo y | run_migrate "migrate down 至 seed 迁移成功" "$WORK/down_seed.log" down "$SEED_ROLLBACK_COUNT"
 if command -v sqlite3 >/dev/null 2>&1; then
   SEED_POSTS="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM posts WHERE id IN ('postreview00001','postreview00002');")"
   check_eq "单独 down 后两条 seed 推文均已删除" "$SEED_POSTS" "0"
@@ -116,9 +121,9 @@ info "步骤 3/5：migrate down ${MIG_COUNT}（全部回滚）→ 再 migrate up
 echo y | run_migrate "migrate down 全部回滚成功" "$WORK/down.log" down "$MIG_COUNT"
 
 if command -v sqlite3 >/dev/null 2>&1; then
-  # 回滚后 24 个业务集合应全部不存在（PocketBase 系统集合与本版本默认 users 集合不受影响）
-  LEFT="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM _collections WHERE name IN ('organizations','admin_invites','admin_accounts','participant_accounts','activities','activity_approvals','registration_field_defs','registrations','registration_answers','checkin_sessions','checkins','survey_templates','survey_template_versions','activity_surveys','survey_questions','submissions','answers','export_jobs','audit_logs','trainings','training_checkin_sessions','training_attendances','reports','posts');")"
-  check_eq "down 后 24 个业务集合全部不存在" "$LEFT" "0"
+  # 回滚后 25 个业务/内部集合应全部不存在（PocketBase 系统集合不受影响）
+  LEFT="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM _collections WHERE name IN ('organizations','admin_invites','admin_accounts','participant_accounts','participant_phone_challenges','activities','activity_approvals','registration_field_defs','registrations','registration_answers','checkin_sessions','checkins','survey_templates','survey_template_versions','activity_surveys','survey_questions','submissions','answers','export_jobs','audit_logs','trainings','training_checkin_sessions','training_attendances','reports','posts');")"
+  check_eq "down 后 25 个业务/内部集合全部不存在" "$LEFT" "0"
 else
   info "未安装 sqlite3，跳过 down 后集合计数检查"
 fi
@@ -148,8 +153,8 @@ if [ -n "$STOKEN" ]; then ok "超管认证成功"; else bad "超管认证失败"
 
 info "步骤 5/5：API 抽查（集合存在性 / 未认证拒绝 / 规则与唯一索引）"
 
-# 4.1 24 个业务集合全部存在
-EXPECTED="organizations admin_invites admin_accounts participant_accounts activities activity_approvals registration_field_defs registrations registration_answers checkin_sessions checkins survey_templates survey_template_versions activity_surveys survey_questions submissions answers export_jobs audit_logs trainings training_checkin_sessions training_attendances reports posts"
+# 4.1 25 个业务/内部集合全部存在
+EXPECTED="organizations admin_invites admin_accounts participant_accounts participant_phone_challenges activities activity_approvals registration_field_defs registrations registration_answers checkin_sessions checkins survey_templates survey_template_versions activity_surveys survey_questions submissions answers export_jobs audit_logs trainings training_checkin_sessions training_attendances reports posts"
 NAMES="$(curl -fsS "$BASE/api/collections?perPage=100" -H "Authorization: $STOKEN" | json_val "' '.join(sorted(c['name'] for c in d['items']))")"
 for name in $EXPECTED; do
   case " $NAMES " in

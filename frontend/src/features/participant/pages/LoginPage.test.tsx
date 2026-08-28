@@ -13,7 +13,7 @@ import { pbClients } from '../../../shared/pocketbase';
 
 /**
  * 通用登录页测试（FR-AUTH-008、FR-PAR-004、AC-22 前端侧）。
- * 覆盖：不提供注册入口、登录后进入「我的」中心、redirect 回跳、
+ * 覆盖：手机号主入口、存量账号迁移、登录后进入「我的」中心、redirect 回跳、
  * 已登录访问直达目标页。
  */
 
@@ -34,12 +34,12 @@ describe('LoginPage 平台通用登录', () => {
   beforeEach(clearAllSessions);
   afterEach(unstubApi);
 
-  it('不提供注册入口（FR-AUTH-008）', () => {
+  it('默认提供手机号登录/注册，并保留原账号迁移入口', () => {
     stubApi({});
     renderLogin('/login');
     expect(screen.getByRole('heading', { name: '平台通用登录' })).toBeInTheDocument();
-    expect(screen.getByText(/本页不提供注册/)).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /注册/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /^手机号/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '使用原用户名账号迁移' })).toBeInTheDocument();
     // 顶部提供返回首页入口
     expect(screen.getByRole('link', { name: '返回首页' })).toHaveAttribute('href', '/');
   });
@@ -49,14 +49,15 @@ describe('LoginPage 平台通用登录', () => {
       'POST /api/cc/auth/participant': {
         body: {
           token: makeTestToken(),
-          record: { id: 'p1', username: 'test_user', collectionName: 'participant_accounts' },
+          record: { id: 'p1', username: 'test_user', collectionName: 'participant_accounts', phone_migration_status: 'phone_bound' },
         },
       },
     });
     renderLogin('/login');
+    fireEvent.click(screen.getByRole('button', { name: '使用原用户名账号迁移' }));
     fireEvent.change(screen.getByLabelText(/用户名/), { target: { value: 'test_user' } });
     fireEvent.change(screen.getByLabelText(/密码/), { target: { value: 'password123' } });
-    fireEvent.click(screen.getByRole('button', { name: '登录' }));
+    fireEvent.click(screen.getByRole('button', { name: '登录原账号' }));
     expect(await screen.findByText('ME_PAGE')).toBeInTheDocument();
   });
 
@@ -65,14 +66,15 @@ describe('LoginPage 平台通用登录', () => {
       'POST /api/cc/auth/participant': {
         body: {
           token: makeTestToken(),
-          record: { id: 'p1', username: 'test_user', collectionName: 'participant_accounts' },
+          record: { id: 'p1', username: 'test_user', collectionName: 'participant_accounts', phone_migration_status: 'phone_bound' },
         },
       },
     });
     renderLogin(`/login?redirect=${encodeURIComponent('/a/act1')}`);
+    fireEvent.click(screen.getByRole('button', { name: '使用原用户名账号迁移' }));
     fireEvent.change(screen.getByLabelText(/用户名/), { target: { value: 'test_user' } });
     fireEvent.change(screen.getByLabelText(/密码/), { target: { value: 'password123' } });
-    fireEvent.click(screen.getByRole('button', { name: '登录' }));
+    fireEvent.click(screen.getByRole('button', { name: '登录原账号' }));
     expect(await screen.findByText('ACTIVITY_PAGE')).toBeInTheDocument();
   });
 
@@ -92,7 +94,7 @@ describe('LoginPage 平台通用登录', () => {
     } as never);
     renderLogin('/login');
     expect(await screen.findByText('HOME_PAGE')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '登录' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /^手机号/ })).not.toBeInTheDocument();
   });
 
   it('redirect 为站外地址：忽略并落到「我的」中心（防开放重定向）', async () => {

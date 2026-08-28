@@ -27,11 +27,13 @@ async function newAdminPage(browser: Browser): Promise<Page> {
 }
 
 /** 参与者经通用登录页登录（FR-AUTH-008），登录后落「我的」中心。 */
-async function participantLogin(page: Page, username: string, password: string) {
+async function participantLogin(page: Page, phone: string) {
   await page.goto(`${webUrl}/login`);
-  await page.getByLabel('用户名').fill(username);
-  await page.getByLabel('密码').fill(password);
-  await page.getByRole('button', { name: '登录' }).click();
+  await page.getByRole('textbox', { name: /^手机号/ }).fill(phone);
+  await page.getByRole('checkbox').check();
+  await page.getByRole('button', { name: '获取验证码' }).click();
+  await page.getByRole('textbox', { name: /^验证码/ }).fill(fixture.phoneCode);
+  await page.getByRole('button', { name: '登录 / 注册' }).click();
   await page.waitForURL('**/me');
 }
 
@@ -75,7 +77,7 @@ test.describe.serial('培训链路', () => {
 
     // ---------- 3. 参与者登录 → 扫码落地页自助签到；重复扫码幂等（AC-20 培训镜像） ----------
     await test.step('参与者自助签到（重复扫码幂等）', async () => {
-      await participantLogin(page, fixture.listenerUsername, fixture.listenerPassword);
+      await participantLogin(page, fixture.listenerPhone);
       await page.goto(`${webUrl}/training-checkin/${fixture.trainingCheckinToken}`);
       await expect(page.getByText('签到成功')).toBeVisible();
       await page.goto(`${webUrl}/training-checkin/${fixture.trainingCheckinToken}`);
@@ -124,7 +126,7 @@ test.describe.serial('培训链路', () => {
 
   test('无聆听者资格的参与者：扫码引导文案 + 培训页空态（listener_not_approved）', async ({ page }) => {
     // outsider 仅有 approved 倾诉者报名（倾诉者资格不视为聆听者资格）
-    await participantLogin(page, fixture.outsiderUsername, fixture.outsiderPassword);
+    await participantLogin(page, fixture.outsiderPhone);
 
     await test.step('扫码落地页显示引导文案', async () => {
       await page.goto(`${webUrl}/training-checkin/${fixture.trainingCheckinToken}`);

@@ -8,14 +8,14 @@ import { pbClients } from '../../../shared/pocketbase';
 import type { RegistrationRecord } from '../../../shared/api/types';
 import { Button, Card, Loading, PageLayout } from '../../../shared/ui';
 import { registerForActivity } from '../api';
-import { ParticipantAuthForm } from '../components/ParticipantAuthForm';
+import { ParticipantAccessPanel } from '../components/ParticipantAccessPanel';
 import { RegistrationForm } from '../components/RegistrationForm';
 import { registrationClosedReasonCopy, registrationStatusMeta } from '../lib/status';
 import { usePublicActivity } from '../lib/usePublicActivity';
 
 /**
  * 报名链路（/a/:activityId/register）：
- * 点击报名 → 用户名密码单框自动识别登录/注册（错误密码提示不建号，AC-06）
+ * 点击报名 → 手机号验证码自动识别登录/注册
  * → 登录后报名表单（FR-REG-001/002）→ 提交成功页回访指引（FR-PAR-003）。
  * 同一参与者同一活动仅一条报名（FR-REG-003）：已报名则直接展示当前状态。
  */
@@ -52,8 +52,8 @@ function RegistrationStatusView({
       {justSubmitted ? (
         <Card title="请保存好您的凭据">
           <ul className="cc-guide-list">
-            <li>用户名和密码是您查看审核结果、现场签到与填写问卷的唯一凭据，请截图或抄写保存；平台不提供找回。</li>
-            <li>审核结果不会通过短信或微信通知，请在活动开始前使用用户名和密码登录「我的」中心查看。</li>
+            <li>手机号是您的登录凭据，之后使用短信验证码登录即可查看审核结果、现场签到与填写问卷。</li>
+            <li>审核结果目前不会主动通过短信或微信通知，请在活动开始前登录「我的」中心查看。</li>
           </ul>
         </Card>
       ) : null}
@@ -150,14 +150,10 @@ export function RegisterPage() {
       {!loading && data && registrationOpen && !submitted && !authed ? (
         <>
           <Card title={`报名：${data.activity.title}`}>
-            <ParticipantAuthForm
-              showPrivacyNotice
-              intro="输入用户名和密码：新用户名将自动注册并登录，已有用户名请输入对应密码登录。"
-              onSuccess={() => setAuthVersion((v) => v + 1)}
-            />
+            <ParticipantAccessPanel onSuccess={() => setAuthVersion((v) => v + 1)} />
           </Card>
           <p className="cc-hint">
-            报名需要先登录；平台不会向您的手机或微信发送任何消息。
+            报名需要先登录；验证码仅用于本次身份验证。
           </p>
         </>
       ) : null}

@@ -117,6 +117,8 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
     record.set('username', username);
     record.set('password', password);
     record.set('status', 'active');
+    // T1 兼容迁移入口创建的账号必须明确标记为待绑定，避免空状态绕过绑定提示。
+    record.set('phone_migration_status', 'legacy_unbound');
     try {
       $app.save(record);
       created = true;
@@ -300,4 +302,3 @@ routerAdd('POST', '/api/cc/auth/admin-register', (e) => {
     throw err;
   }
 });
-
