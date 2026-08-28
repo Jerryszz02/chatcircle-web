@@ -87,12 +87,12 @@ V1 只有两级数据分级，判断依据是字段上的 `is_sensitive` 标记�
 
 以下规则全部是服务端责任，前端只做展示层隐藏，不得作为权限控制（PRD §11.2、§12.2、§13）：
 
-- **机构隔离服务端强制**：管理员身份的所有列表、详情、统计、导出查询，由后端根据登录身份注入 `organization_id` 过滤条件；客户端传入的机构 ID、筛选、URL 或 API 参数中的越权值一律忽略并返回无权限（FR-ORG-006）。所有机构业务表必须带 `organization_id` 或可经 `activity_id → activities.organization_id` 等路径可靠反查。
+- **机构隔离服务端强制**：管理员身份的所有列表、详情、统计、导出查询，由后端根据登录身份注入 `organization_id` 过滤条件；客户端传入的机构 ID、筛选、URL 或 API 参数中的越权值一律忽略，跨机构资源与不存在资源统一返回 `404 not_found`（FR-ORG-006）。所有机构业务表必须带 `organization_id` 或可经 `activity_id → activities.organization_id` 等路径可靠反查。
 - **超级管理员接口单独鉴权**：超管接口不复用机构管理员的权限规则，独立鉴权；机构管理员令牌调用超管接口必须拒绝。
 - **参与者无法进管理后台**：参与者令牌不具备任何管理端 API 权限；管理端路由与 API 按账号类型（集合）区分鉴权。
 - **参与者账号是全平台表**：`participant_accounts` 不绑定 `organization_id`，参与者数据访问按「仅本人」过滤（`participant_id = 当前登录账号`），与机构隔离是两条独立规则，不要混用。
 - **手机号查找与唯一性**：服务端对 E.164 号码计算 `HMAC-SHA256(CC_PHONE_HASH_KEY, phone_e164)`，以 `phone_lookup_hash` 的非空唯一索引查找/防重。禁止使用无密钥普通 hash（大陆手机号空间可枚举），禁止信任客户端上传的 hash。
-- **配对最小暴露**：`activity_pairs` 的 list/view rule 只允许本机构管理员、超管和配对当事人；参与者对外只经 `my-pairing` 获取本人编号、组号、搭档编号与该场 `FULL_NAME`，不返回搭档手机号或全场名单。Realtime event 只触发重拉该白名单快照。
+- **配对最小暴露**：`activity_pairs` 的 list/view/realtime 对参与者全部关闭，只允许本机构管理员和超管直接读取。参与者只经 `my-pairing` 获取本人编号、组号、搭档编号与该场 `FULL_NAME`，不返回搭档手机号或全场名单；配对变化通过与 auth id 绑定的自定义 topic 发送不含 pair record/关联 ID/姓名/操作者/原因的失效化消息，再重拉白名单快照。
 - **培训信息按资格可见**（2026-08 培训体系）：`trainings` 集合对参与者/匿名不可直读（无公开列表/详情）；参与者培训信息仅经白名单端点 `GET /api/cc/me/trainings` 下发，账号须存在 approved 聆听者报名（eligible），未 eligible 时列表恒空；响应不下发 `checkin_qr_token`。
 - **培训签到资格口径**：自助签到与管理员补签均校验「存在 approved 聆听者报名」（账号级、全平台任一活动通用），不满足返回 `listener_not_approved`；补签候选人名单为该资格全集按参与者去重（候选人跨机构可见属设计口径——培训资格本身全平台通用，且只暴露 participant_id + username）；培训签到二维码 token 由服务端生成（同活动 `checkin_qr_token` 加固口径）。
 - **无凭据重置入口（参与者）**：包括超级管理员在内，任何角色均无重置**参与者**凭据的产品入口（PRD §3.2）；参与者账号 V1 不实现账号找回/密码重置。管理员邮箱找回是 2026-08 后端改版为 `admin_accounts` 新增的能力（仅已验证邮箱放行），不影响参与者红线。

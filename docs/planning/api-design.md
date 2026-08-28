@@ -26,7 +26,7 @@
 | admin | 仅所属机构的活动快照、现场锁定、配对和导出 |
 | super | 任意机构的活动快照、配对与导出；不因角色而放宽审计和二次确认 |
 
-服务端从 auth record 与 activity relation 注入 `organization_id`，忽略客户端试图扩大范围的参数。跨机构请求返回 `403 scope_forbidden`；参与者访问他人配对时按不可枚举原则返回 `404 not_found`。
+服务端从 auth record 与 activity relation 注入 `organization_id`，忽略客户端试图扩大范围的参数。管理员访问其他机构的活动、配对、快照、现场锁定或导出资源，与不存在的资源统一返回 `404 not_found`；参与者访问他人配对同样返回 `404 not_found`，禁止用 `403` 暴露资源存在性。
 
 ### 2.2 响应、时间与错误
 
@@ -48,7 +48,7 @@
 3. 阿里云验证成功后，hook 按 hash 查找/创建 record，检查 `status=active`，再调用 PocketBase record token 签发能力返回会话。
 4. `username` 和当前 username+密码通道在存量迁移期保留；新手机号账号由服务端生成不向用户展示的高熵唯一 username 和随机密码。
 
-普通 auth 响应中的手机号相关字段只返回 `phone_masked` 与绑定状态，不返回 `phone_e164` 或 `phone_lookup_hash`；完整号码只在本人主动查看/换绑和有权敏感导出流程中按需返回。
+手机号 auth 响应使用 `ParticipantPhoneAuthRecord`，不返回内部 `username/password`；手机号相关字段只返回 `phone_masked` 与绑定状态，不返回 `phone_e164` 或 `phone_lookup_hash`。完整号码只在本人主动查看/换绑和有权敏感导出流程中按需返回。
 
 ### 3.2 端点
 
@@ -85,14 +85,16 @@
 
 ## 5. Realtime 契约
 
-Realtime 不传输第二套指标或配对真相，只用 PocketBase record event 使 HTTP 快照失效：
+Realtime 不传输第二套指标或配对真相，只用 PocketBase record event 或受控的自定义消息使 HTTP 快照失效：
 
 | 消费者 | 订阅源 | 收到事件后 |
 | --- | --- | --- |
 | 活动工作台 | `registrations`、`checkins`、`submissions`、`activity_pairs`，按 activity 过滤 | 防抖后重拉 `live-summary` |
-| 参与者配对卡 | 本人 `checkins`、本人相关 `activity_pairs` | 重拉 `my-pairing`，不直接渲染 event.record |
+| 参与者配对卡 | 本人 `checkins`、`cc.participant.pairing.{participantId}` 自定义 topic | 重拉 `my-pairing`；禁止订阅 `activity_pairs` |
 
 客户端顺序必须是“先订阅，再拉快照”，避免初始快照与订阅之间的丢事件窗口。SSE 断开时显示离线状态；恢复时无条件重拉快照。collection list/view rule 仍是最终授权层，客户端 filter 不是权限边界。
+
+配对事务提交成功后，服务端通过 PocketBase 官方支持的 [custom realtime message](https://pocketbase.io/docs/js-realtime/) 向双方 topic 各发送一次 `{contract_version, activity_id, changed_at}`，不得包含 pair record、双方 registration/checkin id、姓名、操作者或调整原因。`onRealtimeSubscribeRequest` 必须拒绝 topic 中 participantId 与当前 auth id 不一致的订阅；发送端还要按连接的 auth record 二次过滤，覆盖多标签页/多设备连接。
 
 ## 6. 细粒度导出 v2
 

@@ -48,7 +48,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | 最近同步 | 2026-08-28（T0 `已验证`）：新增 [api-design.md](api-design.md) 和共享类型，冻结手机号、报名标准字段、现场编号/配对、Realtime 失效化、导出 v2 与 v1 兼容顺序。 |
 | 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb-t0-shared-contracts`；`agent/t0-shared-contracts` 从 `origin/main` `57a0aad` 创建。不把本工作分支写成已部署生产状态。 |
 | 本次关键代码证据 | `participant_accounts` 仍以 `username` 为 identity；`checkins` 无现场号，无 `activity_pairs`；导出仍是固定 ZIP/CSV + `include_pii`。PocketBase 0.28.4 隔离探针证明 text 手机号 identity 技术可行，但 T0 因“短信验证码 only”选择服务端验证后签 token。 |
-| 本次验证命令 | 2026-08-28 已通过 `npm test`（43 files / 310 tests）、`npm run typecheck`、`npm run lint`、`npm run build` 与 planning 索引/链接审计。 |
+| 本次验证命令 | 2026-08-28 已通过 `npm test`（43 files / 311 tests）、`npm run typecheck`、`npm run lint`、`npm run build` 与 planning 索引/链接审计。 |
 | 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T1–T6 按 `2026-08-28.t0-v1` 新增阿里云短信认证、PocketBase Realtime/SSE、配对数据模型、活动工作台与 XLSX/CSV 细粒度导出。 |
 
 ## 已生成文档
@@ -93,7 +93,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | 一次性邀请码 | 机构管理员凭超级管理员生成的一次性邀请码自行注册（默认 7 天有效），用后立即失效 | PRD §5.1 |
 | 唯一超级管理员 | 全平台仅一个超级管理员账号，初始部署时创建；V1 无创建/停用/更换的产品界面 | PRD §3、FR-AUTH-009 |
 | 参与者账号演进 | 当前为用户名+密码且无找回；目标为手机号验证码登录，存量用户先登录原账号再绑定手机号，保留原 `participant_id` | [account-event-workflow-prd.md](account-event-workflow-prd.md) §3 |
-| 现场编号与配对 | 计划按 `checked_in_at ASC, checkin_id ASC` 分角色编号；管理员开始配对后按两侧队列顺序配对，不自动重排已有组 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §5 |
+| 现场编号与配对 | 在线签到按数据库角色计数器的原子自增顺序产生不可变编号；不按客户端时间/预生成 ID 推断并发先后，存量签到不补号；管理员开始配对后按两侧现场序号配对，不自动重排已有组 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §5 |
 | 双问卷完成率 | 现场与总体完成率的分子都必须与各自当前分母人群取交集；撤销签到或回退报名后同步移出对应分子，比例不得超过 100% | [account-event-workflow-prd.md](account-event-workflow-prd.md) §4.3 |
 | 细粒度导出 | 计划支持单活动、单问卷、指定参与者、行筛选、字段/题目选择；任一所选报名字段或问卷题目 `is_sensitive=true`，或选择账号层敏感字段时，均由服务端触发敏感导出门槛 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §7 |
 

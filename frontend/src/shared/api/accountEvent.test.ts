@@ -4,7 +4,9 @@ import {
   ACTIVITY_LIVE_REALTIME_SOURCES,
   PARTICIPANT_PAIRING_REALTIME_SOURCES,
   STANDARD_REGISTRATION_FIELDS,
+  participantPairingRealtimeTopic,
 } from './accountEvent';
+import type { ParticipantPhoneAuthResponse } from './accountEvent';
 
 describe('account-event T0 共享契约', () => {
   it('冻结标准报名字段的代码、必填性与敏感性', () => {
@@ -49,6 +51,18 @@ describe('account-event T0 共享契约', () => {
       'submissions',
       'activity_pairs',
     ]);
-    expect(PARTICIPANT_PAIRING_REALTIME_SOURCES).toEqual(['checkins', 'activity_pairs']);
+    expect(PARTICIPANT_PAIRING_REALTIME_SOURCES).toEqual(['checkins', 'cc.participant.pairing']);
+    expect(participantPairingRealtimeTopic('participant/1')).toBe(
+      'cc.participant.pairing.participant%2F1',
+    );
+  });
+
+  it('手机号 auth record 不暴露内部 username', () => {
+    type AuthRecordHasUsername = 'username' extends keyof ParticipantPhoneAuthResponse['record']
+      ? true
+      : false;
+    const authRecordHasUsername: AuthRecordHasUsername = false;
+
+    expect(authRecordHasUsername).toBe(false);
   });
 });

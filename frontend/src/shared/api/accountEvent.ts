@@ -1,8 +1,8 @@
 import type {
+  ActiveStatus,
   ActivityRole,
   BaseRecord,
   CheckinRecord,
-  ParticipantAccountRecord,
   RegistrationStatus,
 } from './types';
 
@@ -41,8 +41,10 @@ export interface ParticipantPhonePublicFields {
   phone_migration_status: PhoneMigrationStatus;
 }
 
-export type TargetParticipantAccountRecord = ParticipantAccountRecord &
-  ParticipantPhonePublicFields;
+/** 手机号认证响应中的公开账号形状；内部 username/password 永不下发。 */
+export interface ParticipantPhoneAuthRecord extends BaseRecord, ParticipantPhonePublicFields {
+  status: ActiveStatus;
+}
 
 export interface RequestPhoneCodeInput {
   /** API 接收 11 位大陆手机号或 +86 E.164，服务端统一归一化。 */
@@ -71,7 +73,7 @@ export interface VerifyPhoneCodeInput {
 export interface ParticipantPhoneAuthResponse {
   contract_version: typeof ACCOUNT_EVENT_CONTRACT_VERSION;
   token: string;
-  record: TargetParticipantAccountRecord;
+  record: ParticipantPhoneAuthRecord;
   created: boolean;
 }
 
@@ -209,6 +211,12 @@ export interface ActivityOnsiteStateFields {
   pairing_started_by?: string;
   onsite_locked_at?: string;
   onsite_locked_by?: string;
+}
+
+/** activities 的服务端现场持久化字段；两个计数器不得进入客户端快照。 */
+export interface ActivityOnsitePersistenceFields extends ActivityOnsiteStateFields {
+  next_speaker_sequence: number;
+  next_listener_sequence: number;
 }
 
 export interface RoleCounts {
@@ -409,7 +417,7 @@ export interface ExportPreviewResponse {
   sensitive_reasons: SensitiveExportReason[];
   permission: {
     allowed: boolean;
-    code?: 'scope_forbidden' | 'sensitive_export_disabled';
+    code?: 'not_found' | 'sensitive_export_disabled';
   };
 }
 
@@ -456,4 +464,14 @@ export const ACTIVITY_LIVE_REALTIME_SOURCES = [
   'activity_pairs',
 ] as const;
 
-export const PARTICIPANT_PAIRING_REALTIME_SOURCES = ['checkins', 'activity_pairs'] as const;
+/** participant 不得订阅 activity_pairs；自定义 topic 只发送无敏感字段的失效化消息。 */
+export const PARTICIPANT_PAIRING_REALTIME_SOURCES = ['checkins', 'cc.participant.pairing'] as const;
+
+export const participantPairingRealtimeTopic = (participantId: string) =>
+  `cc.participant.pairing.${encodeURIComponent(participantId)}`;
+
+export interface ParticipantPairingInvalidationMessage {
+  contract_version: typeof ACCOUNT_EVENT_CONTRACT_VERSION;
+  activity_id: string;
+  changed_at: string;
+}

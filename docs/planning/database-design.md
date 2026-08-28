@@ -572,6 +572,7 @@
 | --- | --- | --- |
 | `pairing_started_at` / `pairing_started_by` | date / text | 首次“开始配对”的服务端事实；非空时迟到签到可触发队首补配 |
 | `onsite_locked_at` / `onsite_locked_by` | date / text | “活动已开始”的系统判定；只能由幂等 lock 端点首次写入 |
+| `next_speaker_sequence` / `next_listener_sequence` | number / number | required，默认 1；服务端编号事务专用计数器，不进入客户端快照或导出 |
 
 `checkins` 追加：
 
@@ -581,7 +582,7 @@
 | `onsite_sequence` | number | 活动+角色内从 1 递增；对 `>0` 的值建 `(activity_id, onsite_role, onsite_sequence)` 唯一索引 |
 | `numbered_at` | date | 号码发出时间 |
 
-分配号码与 valid 签到在同一事务中完成：按 `checked_in_at ASC, checkin_id ASC` 确定队列，事务内读取该活动+角色已发最大序号后 `+1`。撤销签到保留三个字段，故序号不复用。
+在线分配号码与 valid 签到在同一事务中完成。服务端按报名角色原子读取并递增 `next_speaker_sequence` 或 `next_listener_sequence`，把递增前的值写入 `onsite_sequence`；编号顺序定义为数据库成功执行对应计数器自增的顺序，与写事务提交顺序一致。事务/唯一索引冲突时重试整个事务，不读取 `max(onsite_sequence)`，也不用 `checked_in_at` 或预生成 `checkin_id` 推断并发先后。撤销签到保留三个字段且不回退计数器，故序号不复用；存量签到不补号。
 
 ### 6.4 activity_pairs（新 base collection）
 
@@ -598,7 +599,7 @@
 | `completed_at` | date | completed 时写 |
 | `created` / `updated` | autodate | 显式声明 |
 
-list/view rule：admin 仅本机构，super 全局，participant 仅其中一个 registration 属于本人；create/update/delete 对 collection API 全关，只经 hooks。单个 active pair 内双方不得相同；同一参与者同活动至多一个 active pair。后一约束横跨两个 relation 列，由事务内检查 + 相关复合索引保障，不声称单一 SQL unique 能完整表达。
+list/view rule：admin 仅本机构，super 全局，participant 全部关闭；create/update/delete 对 collection API 全关，只经 hooks。参与者只经 `my-pairing` 白名单快照与受控自定义 Realtime topic 获取最小信息，不得读取或订阅 pair record。单个 active pair 内双方不得相同；同一参与者同活动至多一个 active pair。后一约束横跨两个 relation 列，由事务内检查 + 相关复合索引保障，不声称单一 SQL unique 能完整表达。
 
 ### 6.5 export_jobs.scope_json v2
 
@@ -608,7 +609,7 @@ list/view rule：admin 仅本机构，super 全局，participant 仅其中一个
 
 ### 6.6 迁移、回填与回滚顺序
 
-1. **M1 additive**：手机号/现场字段 required=false，新活动状态字段可空，创建 `activity_pairs`，将三个标准字段以 disabled 数据注册。
+1. **M1 additive**：手机号/现场字段 required=false，新活动状态字段可空、两个角色计数器 required 且默认 1，创建 `activity_pairs`，将三个标准字段以 disabled 数据注册。
 2. **M2 backfill**：在同一 migration 或可重入后台任务中把全部存量账号标记 `legacy_unbound`；不为历史签到伪造现场号，不为历史报名伪造姓名。
 3. **M3 server dual compatibility**：先部署验证码/hashing、配对事务、快照、v1→v2 导出归一化；新字段仍未全局强制。
 4. **M4 clients and activation**：再部署新前端和 Realtime；端到端验收后启用标准字段和手机号主入口。
