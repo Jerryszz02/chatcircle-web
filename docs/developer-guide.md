@@ -8,6 +8,8 @@
 > **这份文档不是什么**：它不是设计文档。`docs/planning/` 下的文档（技术设计、数据库设计、测试计划、安全隐私、UI 设计）是开发前编写的**设计与需求基线**，描述"当初打算怎么建"；本文描述**代码现状**——"系统现在实际是怎么实现的、怎么改"。两边不一致时以代码为准，并请顺手修正本文。需求口径的权威来源仍是 `docs/` 下的 PRD v0.3 docx。
 >
 > 各子目录另有聚焦手册，本文会引用而不是复制它们：`backend/README.md`（后端操作）、`deploy/README.md`（生产部署）、`mcp/README.md`（MCP 数据取送）、`e2e/`（端到端测试）。
+>
+> **T0 边界（2026-08-28）**：`frontend/src/shared/api/accountEvent.ts` 已冻结手机号/配对/快照/细粒度导出的目标契约，但对应 migration、hook 和 UI 仍未实现。实际可用功能仍以本文其他章节与当前代码为准。
 
 ---
 
@@ -293,7 +295,8 @@ src/
 ├── shared/                # 跨三端共享层
 │   ├── pocketbase.ts      #   3 个按角色隔离的 PB client 单例（见 §6.3）
 │   ├── auth.ts / session.ts / guards.tsx
-│   ├── api/               #   types.ts（record 类型+状态枚举，与 pb_migrations 手工同步）
+│   ├── api/               #   types.ts（当前 record 类型+枚举，与 pb_migrations 手工同步）
+│   │                      #   accountEvent.ts（T0 目标契约，未实现不等于当前 schema）
 │   │                      #   collections.ts（类型化 RecordService 封装）、http.ts（自定义端点 fetch 包装）
 │   ├── ui/                #   无样式结构组件（Button/Card/Modal/Toast/Loading/PageLayout/ForbiddenPage…）
 │   ├── styles/global.css  #   设计 token + .cc-* 共享类（见 §6.6）
@@ -358,10 +361,11 @@ MCP 是由 WorkBuddy、Kimi、Claude、Codex 等本地客户端启动的 STDIO �
 4. 集合若带 `organization_id`：**同 PR 在 `suite_acl.py` 补越权用例**（强制）。
 
 **加一个业务端点（写操作）**
-1. 在对应域的 `pb_hooks/*.pb.js` 加 `routerAdd`：用本文件内联的 `requireAuth`/`ccError`/`writeAudit` 等工具；机构资源一律服务端注入 organization_id，跨机构 404；写操作放事务内并写审计。
-2. 需要封堵直连写时同步 `guards.pb.js`。
-3. 集成测试：对应 suite 补断言；注意 auth 预算（§5.7）。
-4. 前端：在对应 feature 的 `api.ts` 加封装并更新文件头契约注释。
+1. 若属于手机号/现场配对/活动快照/细粒度导出，先对照 `docs/planning/api-design.md` 与 `shared/api/accountEvent.ts`，禁止在 feature 内改机器名或重定义同义类型。
+2. 在对应域的 `pb_hooks/*.pb.js` 加 `routerAdd`：用本文件内联的 `requireAuth`/`ccError`/`writeAudit` 等工具；机构资源一律服务端注入 organization_id，跨机构 404；写操作放事务内并写审计。
+3. 需要封堵直连写时同步 `guards.pb.js`。
+4. 集成测试：对应 suite 补断言；新机构资源必须同 PR 补 `suite_acl.py`；注意 auth 预算（§5.7）。
+5. 前端：在对应 feature 的 `api.ts` 加封装，直接 import 共享请求/响应类型，并更新文件头契约注释。
 
 **改报名字段**：字段是**数据**不是代码——平台标准字段由超管维护 `registration_field_defs`（`organization_id=''`），机构自定义字段机构自己加；`role_scope` 控制按角色展示/校验，`is_sensitive` 控制导出过滤。前端分角色渲染逻辑在 `features/participant/lib/registrationForm.ts`。
 

@@ -2,7 +2,9 @@
 
 > 状态：`计划中`
 >
-> 最近更新：2026-08-27
+> T0 状态：`2026-08-28 已验证`（共享契约与迁移边界已冻结，业务功能未实现）
+>
+> 最近更新：2026-08-28
 >
 > 适用项目：Chat Circles 现有 React + PocketBase 网站
 >
@@ -118,7 +120,7 @@
 ### 5.1 编号
 
 - 有效签到成功后立即按角色分配不可变的现场序号：倾诉者 `S01, S02...`，聆听者 `L01, L02...`。
-- 排序键为 `checked_in_at ASC, checkin_id ASC`；第二排序键解决同一时间戳的稳定性问题。
+- 在线签到以数据库事务实际成功分配现场号的顺序递增编号；该顺序与对应角色计数器的原子自增顺序一致，不声称用客户端时间或预生成 ID 决定并发先后。存量签到不补发现场号。
 - 编号只在单场活动内唯一。撤销签到不复用已经发出的编号，以免现场口头编号发生变化。
 
 ### 5.2 配对
@@ -203,15 +205,16 @@
 
 ## 9. 目标数据与 API 契约
 
-以下是实现前需要在 T0 冻结的目标契约，字段名可以在代码评审时按现有命名规范微调，但语义不得改变。
+T0 已将目标契约冻结为 `2026-08-28.t0-v1`。机器名与共享 TypeScript 类型以 `frontend/src/shared/api/accountEvent.ts` 为准，权限、请求/响应、Realtime 和 v1 兼容语义见 [api-design.md](api-design.md)，数据库约束与迁移顺序见 [database-design.md](database-design.md) 「6. T0 冻结契约」。未来改机器名必须走契约版本变更，不得在并行任务内自行微调。
 
 ### 9.1 数据变更
 
-- `participant_accounts`：新增规范化手机号、手机号哈希/唯一索引、验证时间、绑定来源和迁移状态；不在日志或普通列表中返回完整手机号。是否直接使用 PocketBase auth identity 字段，需在 T0 用 PocketBase 0.28.4 实测后确定。
-- `registration_field_defs`：冻结平台标准字段 `FULL_NAME`、`GENDER`、`AGE_RANGE` 或 `BIRTH_YEAR` 的类型、敏感等级和分析用途；`FULL_NAME` 每场报名必填且只用于联系与配对展示。
-- `checkins`：新增角色现场序号或等价的独立编号记录，保证活动内角色序号稳定唯一。
-- 新增 `activity_pairs`：活动、配对组号、倾诉者/聆听者 registration 与 checkin、状态 `active/released/completed`、配对时间、操作者、调整原因；同一参与者每场活动至多一个 active 配对。
-- `export_jobs.scope_json`：扩展活动、问卷、参与者、行筛选、字段/题目选择和格式；保留旧导出请求的兼容解析。
+- `participant_accounts`：追加 `phone_e164`、`phone_lookup_hash`、`phone_verified_at`、`phone_binding_source`、`phone_migration_status`。精确查找/唯一索引使用带部署 secret 的 HMAC-SHA256 hash。PocketBase 0.28.4 已实测可将 text 手机号加入 password identity，但因产品只提供短信验证码，T0 决定不这样做；验证成功后由 hook 签发 token，username identity 仅保留给存量迁移。
+- `registration_field_defs`：冻结 `FULL_NAME`(text，必填，敏感，只用于联系/配对)、`GENDER`(single_choice，选填，仅聚合)、`AGE_RANGE`(single_choice，选填，仅聚合)。不收集 `BIRTH_YEAR` 或完整生日，聚合分组低于 5 人时抑制展示。
+- `activities`：追加 `pairing_started_at/by` 与 `onsite_locked_at/by`，分别作为迟到自动补配和活动开始后高风险调整的服务端事实。
+- `checkins`：追加 `onsite_role`、`onsite_sequence`、`numbered_at`；号码发出后即使撤销签到也不复用。
+- 新增 `activity_pairs`：活动、`pair_sequence`、双方 registration/checkin、状态 `active/released/completed`、配对/释放/完成时间、操作者与原因；同一参与者每场活动至多一个 active 配对。
+- `export_jobs.scope_json`：冻结 `schema_version:2` 的范围、数据域、问卷、参与者/行筛选、系统列、报名字段、问卷题目、格式与时区。旧 `{scope, include_pii, confirm}` 请求由服务端归一化为 v2 后执行，至少保留一个发布窗口。
 
 ### 9.2 端点建议
 
@@ -220,10 +223,12 @@
 | `POST /api/cc/auth/participant/request-code` | 请求手机号验证码；防枚举、限流 |
 | `POST /api/cc/auth/participant/verify-code` | 验证并登录/注册手机号账号 |
 | `POST /api/cc/auth/participant/bind-phone` | 存量用户名账号绑定已验证手机号 |
+| `POST /api/cc/auth/participant/change-phone` | 已登录账号换绑新号；无法验证旧号时转人工支持 |
 | `GET /api/cc/activities/:activityId/live-summary` | 单场活动工作台快照 |
 | `POST /api/cc/activities/:activityId/pairings/start` | 幂等批量配对 |
 | `POST /api/cc/activities/:activityId/pairings/reassign` | 手工调整，原因必填 |
 | `GET /api/cc/activities/:activityId/my-pairing` | 本人现场编号和配对状态 |
+| `POST /api/cc/activities/:activityId/onsite/lock` | 幂等锁定现场安排，作为“活动已开始”的系统判定 |
 | `POST /api/cc/exports/preview` | 返回范围、预计行数、`requires_sensitive_export`、触发该门槛的字段/题目代码与权限检查结果 |
 | `POST /api/cc/exports` | 按所选范围/字段/格式创建导出任务 |
 
@@ -235,7 +240,7 @@
 
 | 任务 | 内容 | 依赖 |
 | --- | --- | --- |
-| T0 共享契约与迁移设计 | 冻结手机号、报名标准字段、配对、实时事件、导出 schema/API、权限与共享类型；输出迁移顺序和兼容方案 | 无，必须先合并 |
+| T0 共享契约与迁移设计 | `已验证`：契约 `2026-08-28.t0-v1`、共享类型、API/权限/Realtime、迁移顺序与 v1 兼容方案已冻结；不包含 T1–T6 功能实现 | 无，必须先合并 |
 | T1 手机号账号 | 阿里云验证码、手机号登录/注册、存量账号绑定、换绑、隐私文案、限流与测试 | T0 |
 | T2 配对后端 | 签到编号、队列、批量配对、迟到补配、释放/调整、审计、并发与幂等测试 | T0 |
 | T3 实时数据服务 | 单活动快照、报名/签到/问卷/配对指标、Realtime 订阅与重连 | T0 |
@@ -274,7 +279,7 @@ T0 由主任务维护共享契约和迁移边界；并行任务不得各自发�
 | --- | --- | --- |
 | 阿里云短信认证账号、AccessKey、费用与测试号码 | 由部署负责人在测试环境先开通；密钥不进入仓库或对话 | T1 联调与上线 |
 | 存量手机号已被其他账号占用时如何人工合并 | 不自动覆盖；后台仅提供受审计的人工处理方案后再开放 | T1 完整迁移 |
-| 年龄字段使用出生年份还是年龄段 | 优先年龄段；若需要动态计算年龄再收出生年份，不收完整生日 | T0 字段冻结 |
+| 年龄字段使用出生年份还是年龄段 | `已确认`：使用 `AGE_RANGE`，不收 `BIRTH_YEAR` 或完整生日 | T0 已解决 |
 | “活动已开始”的系统判定 | 默认以管理员点击“锁定现场安排”为准，不直接用活动开始时间，避免时间配置误差 | T2/T4 |
 | 参与者是否必须显式同意必要通知 | 默认作为履行活动服务所必需的处理说明，不与营销同意合并；最终由隐私合规负责人确认 | T1 上线文案 |
 | 普通活动通知短信何时启用 | 本期不启用；取得主体资质并审核签名/模板后单独立项 | 不阻塞本期 |
@@ -293,5 +298,5 @@ T0 由主任务维护共享契约和迁移边界；并行任务不得各自发�
 可在新对话中直接粘贴：
 
 ```text
-请先完整阅读 docs/planning/account-event-workflow-prd.md 和 docs/planning/README.md，并检查当前 origin/main 的代码现状。不要直接并行开发，先执行 T0：冻结手机号账号、报名标准字段、现场编号与配对、实时事件、细粒度导出的 schema/API/权限契约和兼容迁移方案。所有新增能力仍是“计划中”，实现时按一个任务一个 Worktree、一个 agent/<task-name> 分支、一个独立 PR 推进，并同步相关 planning 与 developer guide。
+请先完整阅读 docs/planning/account-event-workflow-prd.md、docs/planning/api-design.md 和 docs/planning/README.md，并检查当前 origin/main 的代码现状。T0 契约已冻结，后续任务必须复用 frontend/src/shared/api/accountEvent.ts，不得自创同义字段或端点。请按 T1/T2/T3 的依赖顺序选择一个任务，以一个 Worktree、一个 agent/<task-name> 分支、一个独立 PR 推进，并同步相关 planning 与 developer guide。
 ```

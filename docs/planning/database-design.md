@@ -1,6 +1,6 @@
 # Chat Circles — 数据库设计（PocketBase 集合设计草案）
 
-> **2026-08-27 范围更新：**当前 `participant_accounts` 仍是用户名账号，当前 schema 也没有活动配对集合。目标手机号字段、现场编号、`activity_pairs` 和细粒度 `export_jobs.scope_json` 见 [account-event-workflow-prd.md](account-event-workflow-prd.md) §9，状态均为`计划中`。本文现有集合表用于解释当前/旧 V1 基线，不得据此否定专项 PRD 的新增范围。
+> **2026-08-28 T0 更新：**当前 `participant_accounts` 仍是用户名账号，当前 schema 也没有活动配对集合。目标手机号字段、标准报名字段、现场编号、`activity_pairs` 和细粒度 `export_jobs.scope_json` 已在 §6 冻结，但业务 schema/hook 仍为`计划中`。本文 §5.2 的集合表仍用于解释当前/旧 V1 基线。
 
 > 本文档将 PRD v0.3 §9 数据模型落地为 PocketBase 集合定义，面向后续实现工程师。阅读本文不需要先读 PRD；涉及 PRD 口径处均注明出处。所有表结构为**设计草案**：字段名、枚举机器码、索引与规则如与实现阶段证据冲突，以实现阶段评审结论为准并回写本文。
 
@@ -24,12 +24,13 @@
 |---|---|
 | 需求基线 | PRD v0.3（评审修订版，2026-08-05），`docs/Chat_Circles_活动与问卷平台_PRD_v0.3.docx`；本文引用其 §9 数据模型、§4 状态模型、§6 功能需求、§10 导出规范、§11 安全审计、§12.3 备份、§14 验收标准、附录 B 命名规范 |
 | 已确认技术决策 | 响应式 Web（React 18 + Vite + TypeScript）+ PocketBase（后端/认证/SQLite）+ Docker；统一入口 `chatcircle.empact.cn`；完整 V1（M0~M5） |
-| 项目现状（2026-08-27） | 默认分支 `fdb7ad8` 已有 PocketBase 迁移、hooks、前端、测试和部署配置；当前仍无 `activity_pairs`，参与者 identity 仍为 `username` |
-| 相关文档 | [README.md](README.md)（项目索引与术语）、technical-design.md（架构决策）、security-privacy.md（审计与隐私细则） |
+| 项目现状（2026-08-28） | `origin/main` `57a0aad` 已有 PocketBase 迁移、hooks、前端、测试和部署配置；当前仍无 `activity_pairs`，参与者 identity 仍为 `username` |
+| T0 证据 | PocketBase 0.28.4 隔离临时库实测已确认自定义 text identity 可登录且唯一索引生效；为保持“只有短信验证码”的产品语义，目标方案不把手机号加入 password identity |
+| 相关文档 | [README.md](README.md)（项目索引与术语）、[api-design.md](api-design.md)（T0 端点/权限/兼容契约）、technical-design.md（架构决策）、security-privacy.md（审计与隐私细则） |
 
 ## 4. 非目标
 
-- 不定义 PRD 未写死的**报名标准字段具体内容**（字段清单、必填规则、知情同意文案）——仅提供标准字段库 + 自定义字段的表结构能力，内容列入「待确认」（PRD §8.1、§16.2）。
+- T0 已定义 `FULL_NAME/GENDER/AGE_RANGE` 三个标准字段；本文不定义额外标准字段或自定义字段内容。知情文案见专项 PRD §8，最终法律意见仍不属于本设计。
 - 不定义标准问卷模板的完整题目与锁定题清单——结构按 `survey_template_versions` + `locked` 实现，内容待模板确认（PRD §16.2）。
 - 原 V1 不设计账号找回/多账号合并、统计分析/LLM/自动报告和独立域名 host 映射。2026-08-27 专项升级仅新增手机号绑定冲突的人工处理边界和运营聚合指标，不新增敏感个体画像或 LLM 自动分析。
 - 不提供任何硬删除能力对应的物理删除方案（FR-AUD-001）。
@@ -537,7 +538,86 @@
 
 备份任务实现与恢复演练属部署侧内容，详见 technical-design.md；本文只约束数据侧口径。
 
-## 6. 验收标准
+## 6. T0 冻结的目标契约（计划中 schema）
+
+本节是后续 T1/T2/T3/T6 的数据库门禁，不表示当前迁移已存在。机器名与前端共享类型以 `frontend/src/shared/api/accountEvent.ts` 为准。
+
+### 6.1 participant_accounts 追加字段
+
+| 字段 | 类型 | 迁移期必填 | 约束/语义 |
+| --- | --- | --- | --- |
+| `phone_e164` | text | 否 | 仅 `+86` + 11 位大陆手机号；普通 auth 响应隐藏，只在本人主动查看/换绑和有权敏感导出时按需暴露 |
+| `phone_lookup_hash` | text | 否 | HMAC-SHA256(secret, `phone_e164`)；非空值唯一索引；服务端唯一写入且所有客户端响应隐藏 |
+| `phone_verified_at` | date | 否 | 最近一次当前绑定号码验证成功时间 |
+| `phone_binding_source` | select | 否 | `sms_signup | legacy_bind | manual_merge` |
+| `phone_migration_status` | select | 是（回填） | `legacy_unbound | phone_bound | merge_required`；存量行先回填 `legacy_unbound` |
+
+`passwordAuth.identityFields` 保持 `['username']`。新账号仍需满足 PocketBase auth 集合的 username/password 内部约束，但由服务端生成高熵不可猜值，不作为用户登录凭据展示。`phone_lookup_hash` 的 secret 只在部署环境注入；轮换密钥需专门双 hash/回填迁移，不得直接替换导致旧账号无法查找。
+
+### 6.2 标准报名字段
+
+| `field_code` | 类型 | 必填 | `is_sensitive` | 用途 |
+| --- | --- | --- | --- | --- |
+| `FULL_NAME` | text | 是 | true | 审核、现场联系、向本人搭档展示；不进入普通指标 |
+| `GENDER` | single_choice | 否 | false | 仅阈值为 5 的聚合统计 |
+| `AGE_RANGE` | single_choice | 否 | false | 仅阈值为 5 的聚合统计；不新增 `BIRTH_YEAR`/生日 |
+
+三者均为 `source_type=standard`、`role_scope=both`。迁移首次注册时先置 `status=disabled`，待新报名 UI 和服务端校验同时上线再原子启用；禁止单独把 `FULL_NAME.required_default=true` 推到旧活动而阻断报名。选项机器值见共享契约文件。
+
+### 6.3 activities / checkins 追加字段
+
+`activities` 追加：
+
+| 字段 | 类型 | 语义 |
+| --- | --- | --- |
+| `pairing_started_at` / `pairing_started_by` | date / text | 首次“开始配对”的服务端事实；非空时迟到签到可触发队首补配 |
+| `onsite_locked_at` / `onsite_locked_by` | date / text | “活动已开始”的系统判定；只能由幂等 lock 端点首次写入 |
+| `next_speaker_sequence` / `next_listener_sequence` | number / number | required，默认 1；服务端编号事务专用计数器，不进入客户端快照或导出 |
+
+`checkins` 追加：
+
+| 字段 | 类型 | 语义 |
+| --- | --- | --- |
+| `onsite_role` | select(speaker, listener) | 编号时的报名角色快照；编号后不随报名角色变更 |
+| `onsite_sequence` | number | 活动+角色内从 1 递增；对 `>0` 的值建 `(activity_id, onsite_role, onsite_sequence)` 唯一索引 |
+| `numbered_at` | date | 号码发出时间 |
+
+在线分配号码与 valid 签到在同一事务中完成。服务端按报名角色原子读取并递增 `next_speaker_sequence` 或 `next_listener_sequence`，把递增前的值写入 `onsite_sequence`；编号顺序定义为数据库成功执行对应计数器自增的顺序，与写事务提交顺序一致。事务/唯一索引冲突时重试整个事务，不读取 `max(onsite_sequence)`，也不用 `checked_in_at` 或预生成 `checkin_id` 推断并发先后。撤销签到保留三个字段且不回退计数器，故序号不复用；存量签到不补号。
+
+### 6.4 activity_pairs（新 base collection）
+
+| 字段 | 类型 | 约束/语义 |
+| --- | --- | --- |
+| `activity_id` | relation(activities) | required；机构隔离从 activity 反查 |
+| `pair_sequence` | number | required；`(activity_id, pair_sequence)` 唯一；释放后不复用 |
+| `speaker_registration_id` / `listener_registration_id` | relation(registrations) | required；两条报名必须同活动且角色分别匹配 |
+| `speaker_checkin_id` / `listener_checkin_id` | relation(checkins) | required；必须是对应报名的 valid 签到 |
+| `status` | select(active, released, completed) | required；只能经配对 hooks 迁移 |
+| `paired_at` / `paired_by` | date / text | required；自动补配的 actor 为触发操作者或 system |
+| `adjustment_reason` | text | 手工调整新建的 pair 必填 |
+| `released_at/by/reason` | date / text / text | 释放时写；锁定后 reason 必填 |
+| `completed_at` | date | completed 时写 |
+| `created` / `updated` | autodate | 显式声明 |
+
+list/view rule：admin 仅本机构，super 全局，participant 全部关闭；create/update/delete 对 collection API 全关，只经 hooks。参与者只经 `my-pairing` 白名单快照与受控自定义 Realtime topic 获取最小信息，不得读取或订阅 pair record。单个 active pair 内双方不得相同；同一参与者同活动至多一个 active pair。后一约束横跨两个 relation 列，由事务内检查 + 相关复合索引保障，不声称单一 SQL unique 能完整表达。
+
+### 6.5 export_jobs.scope_json v2
+
+`scope_json` 存入 `StoredExportSelectionV2` 归一化快照：`schema_version=2`、`source_schema_version`、scope、datasets、survey_ids、filters、columns、format、timezone；v2 请求写 `source_schema_version=2`，旧请求写 `source_schema_version=1`。`include_pii` 暂保留作查询/兼容列，但由服务端根据字段定义和账号列策略派生，不信任客户端 `include_pii`。
+
+建议新增对 JSON 中常用顶层口径的冗余列只在实测查询瓶颈后评审；T0 不为未证实性能问题增加第二份可漂移状态。
+
+### 6.6 迁移、回填与回滚顺序
+
+1. **M1 additive**：手机号/现场字段 required=false，新活动状态字段可空、两个角色计数器 required 且默认 1，创建 `activity_pairs`，将三个标准字段以 disabled 数据注册。
+2. **M2 backfill**：在同一 migration 或可重入后台任务中把全部存量账号标记 `legacy_unbound`；不为历史签到伪造现场号，不为历史报名伪造姓名。
+3. **M3 server dual compatibility**：先部署验证码/hashing、配对事务、快照、v1→v2 导出归一化；新字段仍未全局强制。
+4. **M4 clients and activation**：再部署新前端和 Realtime；端到端验收后启用标准字段和手机号主入口。
+5. **M5 cleanup**：观察至少一个发布窗口后另建 PR 评估旧 username 入口/v1 parser；保留历史字段与数据，无硬删除。
+
+down 迁移只允许在新字段/集合尚无业务数据时回滚 schema。一旦已绑定手机号或已生成配对，生产回滚应是停用新入口/回切双读，不删数据列或集合。
+
+## 7. 验收标准
 
 本设计落地的验收映射（完整 AC 清单与测试分层见 test-plan.md）：
 
@@ -556,16 +636,15 @@
 | AC-20 幂等提交 | 复合唯一索引 + 服务端查重 | 重试/重复点击无重复正式记录 |
 | AC-23 备份告警 | `audit_logs` 系统事件 | 模拟失败后有审计记录与后台告警 |
 
-## 7. 待确认
+## 8. 待确认
 
 | 编号 | 事项 | 缺少什么证据 | 当前处理 |
 |---|---|---|---|
-| D-1 | 报名标准字段的具体内容（`field_code`、类型、必填、敏感标记）与知情同意文案 | PRD §8.1/§16.2 明确「本 PRD 不写死，另行定义」，尚无字段清单文件 | 仅实现标准字段库 + 自定义字段能力（`registration_field_defs`）；`field_type` 题型集为草案 |
 | D-2 | 标准问卷完整题目与哪些题 `locked` | 模板内容未经确认（PRD §16.2） | 结构按版本 + `locked` 实现；题目内容不入库草案 |
 | D-3 | 活动级报名字段「启用/必填」配置的存储位置 | PRD §9.1 未给出对应集合 | 草案暂放 `activities.form_config_json`；若配置复杂度上升，评审后可拆关联表 |
 | D-4 | 全部枚举机器码（活动/报名/签到/问卷/答卷/邀请码状态值） | PRD 只定义中文状态名，无英文机器码约定 | 本文值为草案建议；首个迁移落地后冻结，只增不改 |
 | D-5 | 已归档（archived）活动的公开详情页是否仍可访问 | PRD §4.3 仅述「只读为主、可导出、不进入默认活动列表」，未明确公开入口 | 草案 viewRule 暂不含 `archived`；确认后调整 |
 | D-6 | `audit_logs.action` 动作代码全集与 `metadata` 结构约定 | PRD §11.3/FR-AUD-004 给出事件类别，未给代码表 | 由 security-privacy.md 细化；首版实现时随代码冻结 |
 | D-7 | 二级业务表（`registrations` 等）是否冗余 `organization_id` 字段 | PRD §9.2 允许「带有或可可靠反查」两种实现，未指定 | 本文按「冗余」建议（规则简单、可索引）；实现评审可改纯反查 |
-| D-8 | 参与者多账号合并机制的表结构预留 | PRD §16.2 列入后续版本，无方案 | 仅保持 `participant_id` 稳定口径，不加合并字段 |
+| D-8 | 参与者多账号的人工合并数据模型 | 已确认冲突时不自动覆盖，但尚无可审计的合并流程与关系转移方案 | 自动绑定停止并标记 `merge_required`；保持原 `participant_id`，人工模型另行评审 |
 | D-9 | posts 封面图体积上限与图片规格 | 2026-08 后端改版计划只定「封面图可空、单图、image/*」，体积上限无依据 | 迁移暂定 maxSize=5MB；确认后调整迁移与本文 |
