@@ -76,7 +76,8 @@ onRecordCreate((e) => {
   // 先保存签到，relation(activity_pairs.*_checkin_id) 才能在同一事务内引用它。
   e.next();
 
-  if (String(activity.get('pairing_started_at') || '') === '') return;
+  if ((activity.get('status') !== 'published' && activity.get('status') !== 'closed') ||
+      String(activity.get('pairing_started_at') || '') === '') return;
 
   const now = new Date().toISOString().replace('T', ' ').slice(0, 23) + 'Z';
   const actorId = record.get('operator_id') || record.get('participant_id') || 'system';
@@ -152,6 +153,13 @@ onRecordUpdate((e) => {
   const original = e.record.original();
   const isRevocation = original && original.id && original.get('status') === 'valid' &&
     e.record.get('status') === 'revoked';
+  let activity = null;
+  if (isRevocation) {
+    activity = e.app.findRecordById('activities', e.record.get('activity_id'));
+    if (activity.get('status') !== 'published' && activity.get('status') !== 'closed') {
+      throw new ApiError(400, '活动已终结，不能撤销历史签到');
+    }
+  }
   e.next();
   if (!isRevocation) return;
 
@@ -174,7 +182,6 @@ onRecordUpdate((e) => {
     }
     return out;
   };
-  const activity = app.findRecordById('activities', record.get('activity_id'));
   const now = new Date().toISOString().replace('T', ' ').slice(0, 23) + 'Z';
   const actorId = record.get('operator_id') || 'system';
   const actorRole = record.get('operator_id') ? 'admin' : 'system';

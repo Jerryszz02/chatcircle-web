@@ -247,15 +247,33 @@ def run(ctx):
               s == 200 and reassigned_mine.get('state') == 'reassigned'
               and reassigned_mine.get('pair_code') == 'P05', reassigned_mine)
 
-    # 已归档/已下架活动是终态历史，不得再释放并重建配对。
+    # 留一名已通过但未签到的 listener，用于验证归档后的补签不会触发自动配对。
+    finalized_participant, finalized_token, _ = fx.create_participant(base, 'pair_finalized_l')
+    finalized_registration = fx.register(base, finalized_token, act, 'listener', [
+        {'field_def_id': fields['nickname'], 'value': 'pair_finalized_l'},
+        {'field_def_id': full_name_id, 'value': '终态补签聆听者'},
+    ])
+    fx.transition(base, AT1, finalized_registration, 'approved')
+
+    # 已归档/已下架活动是终态历史，不得再补配、释放或手工重建配对。
     close_status, _ = call(base, 'POST', '/api/cc/activities/%s/close' % act, {}, AT1)
     archive_status, _ = call(base, 'POST', '/api/cc/activities/%s/archive' % act, {}, AT1)
     s, finalized = call(base, 'POST', '/api/cc/activities/%s/pairings/reassign' % act,
                         reassign_body, AT1)
-    rep.check('PAIR-12 已归档活动拒绝改组且不改写历史配对',
+    before_finalized_pairs = _pairings(base, AT1, act, 'active')
+    manual_status, manual_finalized = call(base, 'POST', '/api/cc/checkins/manual', {
+        'activity_id': act, 'participant_id': finalized_participant, 'reason': '归档后补录'}, AT1)
+    revoke_status, revoke_finalized = call(
+        base, 'POST', '/api/cc/checkins/%s/revoke' % before_finalized_pairs[0]['speaker_checkin_id'],
+        {'reason': '归档后撤销'}, AT1)
+    after_finalized_pairs = _pairings(base, AT1, act, 'active')
+    rep.check('PAIR-12 已归档活动不再自动补配，并拒绝改组/撤销历史签到',
               close_status == 200 and archive_status == 200 and s == 400
               and biz_code(finalized) == 'pairing_unavailable'
-              and len(_pairings(base, AT1, act, 'active')) == 3, finalized)
+              and manual_status == 200 and revoke_status == 400
+              and [row['id'] for row in before_finalized_pairs]
+              == [row['id'] for row in after_finalized_pairs],
+              [finalized, manual_finalized, revoke_finalized, after_finalized_pairs])
 
     # 权限：其他机构统一 404；参与者不能管理或直读 pair 集合，只能读本人快照。
     s, cross = call(base, 'POST', '/api/cc/activities/%s/pairings/start' % act, {}, OTHER_AT)
