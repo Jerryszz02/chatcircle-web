@@ -695,12 +695,47 @@ routerAdd('GET', '/api/cc/activities/{id}/my-pairing', (e) => {
       return rows.length ? rows[0] : null;
     };
     const jsonValue = (value, fallback) => {
-      try {
-        const parsed = JSON.parse(String(value == null ? '' : value));
-        return parsed == null ? fallback : parsed;
-      } catch (_) {
-        return fallback;
+      if (value === null || value === undefined || value === '') return fallback;
+      if (typeof value === 'string') {
+        try { return JSON.parse(value); } catch (_) { return value; }
       }
+      if (Array.isArray(value) && (value.length === 0 || typeof value[0] === 'number')) {
+        let decoded = '';
+        let index = 0;
+        while (index < value.length) {
+          const byte = value[index];
+          if (byte < 0x80) {
+            decoded += String.fromCharCode(byte);
+            index += 1;
+          } else if (byte < 0xe0) {
+            decoded += String.fromCharCode(
+              ((byte & 0x1f) << 6) | (value[index + 1] & 0x3f),
+            );
+            index += 2;
+          } else if (byte < 0xf0) {
+            decoded += String.fromCharCode(
+              ((byte & 0x0f) << 12) |
+                ((value[index + 1] & 0x3f) << 6) |
+                (value[index + 2] & 0x3f),
+            );
+            index += 3;
+          } else {
+            let codePoint =
+              ((byte & 0x07) << 18) |
+              ((value[index + 1] & 0x3f) << 12) |
+              ((value[index + 2] & 0x3f) << 6) |
+              (value[index + 3] & 0x3f);
+            codePoint -= 0x10000;
+            decoded += String.fromCharCode(
+              0xd800 + (codePoint >> 10),
+              0xdc00 + (codePoint & 0x3ff),
+            );
+            index += 4;
+          }
+        }
+        try { return JSON.parse(decoded); } catch (_) { return decoded; }
+      }
+      return value;
     };
     const auth = e.auth;
     if (!auth) ccError(401, 'unauthorized', '请先登录');
