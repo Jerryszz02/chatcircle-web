@@ -1,6 +1,6 @@
 # Chat Circles — 数据库设计（PocketBase 集合设计草案）
 
-> **2026-08-28 T0 更新：**当前 `participant_accounts` 仍是用户名账号，当前 schema 也没有活动配对集合。目标手机号字段、标准报名字段、现场编号、`activity_pairs` 和细粒度 `export_jobs.scope_json` 已在 §6 冻结，但业务 schema/hook 仍为`计划中`。本文 §5.2 的集合表仍用于解释当前/旧 V1 基线。
+> **2026-08-28 T3 更新：**当前 `participant_accounts` 仍是用户名账号，schema 也没有活动配对集合；T3 只新增兼容当前 schema 的事务快照与 Realtime 守卫，不重复 T1/T2/T6 的迁移。§6 的目标 schema 仍为`计划中`。
 
 > 本文档将 PRD v0.3 §9 数据模型落地为 PocketBase 集合定义，面向后续实现工程师。阅读本文不需要先读 PRD；涉及 PRD 口径处均注明出处。所有表结构为**设计草案**：字段名、枚举机器码、索引与规则如与实现阶段证据冲突，以实现阶段评审结论为准并回写本文。
 
@@ -24,7 +24,7 @@
 |---|---|
 | 需求基线 | PRD v0.3（评审修订版，2026-08-05），`docs/Chat_Circles_活动与问卷平台_PRD_v0.3.docx`；本文引用其 §9 数据模型、§4 状态模型、§6 功能需求、§10 导出规范、§11 安全审计、§12.3 备份、§14 验收标准、附录 B 命名规范 |
 | 已确认技术决策 | 响应式 Web（React 18 + Vite + TypeScript）+ PocketBase（后端/认证/SQLite）+ Docker；统一入口 `chatcircle.empact.cn`；完整 V1（M0~M5） |
-| 项目现状（2026-08-28） | `origin/main` `57a0aad` 已有 PocketBase 迁移、hooks、前端、测试和部署配置；当前仍无 `activity_pairs`，参与者 identity 仍为 `username` |
+| 项目现状（2026-08-28） | `origin/main@54de5e8` 已有 PocketBase 迁移、hooks、前端、测试、部署配置与 T0 冻结契约；当前 T3 分支仍无 `activity_pairs`，参与者 identity 仍为 `username` |
 | T0 证据 | PocketBase 0.28.4 隔离临时库实测已确认自定义 text identity 可登录且唯一索引生效；为保持“只有短信验证码”的产品语义，目标方案不把手机号加入 password identity |
 | 相关文档 | [README.md](README.md)（项目索引与术语）、[api-design.md](api-design.md)（T0 端点/权限/兼容契约）、technical-design.md（架构决策）、security-privacy.md（审计与隐私细则） |
 

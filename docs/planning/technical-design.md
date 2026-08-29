@@ -1,6 +1,6 @@
 # Chat Circles 技术设计文档（V1）
 
-> **2026-08-28 T0 更新：**参与者手机号账号、阿里云短信认证、单活动实时工作台、现场编号/配对和细粒度导出的**业务功能**均仍为`计划中`；其 T0 共享契约与迁移边界已冻结为 `2026-08-28.t0-v1`，见 [api-design.md](api-design.md) 和 [database-design.md](database-design.md) §6。本文中旧 V1 描述只说明当前实现或历史基线。
+> **2026-08-29 T3 更新：**单活动实时数据服务已在本实现分支`已验证`，包括事务快照、双完成率、互补桶联合抑制，以及覆盖活动/问卷清单在内的 Realtime 失效化/重连；工作台 UI、手机号、现场配对业务与细粒度导出仍`计划中`。T0 契约继续以 `2026-08-28.t0-v1` 为准。
 
 ## 文档目的
 
@@ -102,6 +102,7 @@ chatcircle-web/
 │   │   ├── surveys.pb.js           # 问卷资格校验、草稿/提交/作废
 │   │   ├── exports.pb.js           # 导出任务、范围校验、文件下载鉴权
 │   │   ├── metrics.pb.js           # 看板聚合查询
+│   │   ├── live.pb.js              # T3 单活动事务快照 + Realtime topic 最小权限守卫
 │   │   └── lib/                    # 共享函数的「契约标准源」（jsonError/requireAuth/writeAudit 等）：
 │   │                               #   PocketBase 0.28 JSVM 各 hooks 文件作用域完全隔离（无跨文件
 │   │                               #   共享、无 ES module），各 handler 自包含、将所需函数原样内联使用
@@ -117,7 +118,7 @@ chatcircle-web/
 
 - **schema 只能经由 `pb_migrations` 变更**，禁止在生产环境手工用 admin UI 改结构（PRD §13"数据库结构通过迁移版本化"；标准模板版本不可变）。
 - **业务规则只能写在 `pb_hooks` / collection API rules**。前端可以做同样的校验以改善体验，但不得成为唯一防线。
-- 当前集合 record 类型、状态枚举、`metric_key` 放 `src/shared/`，与 `pb_migrations` 手工同步。T0 目标契约单独放 `frontend/src/shared/api/accountEvent.ts`，只表示后续实现必须复用的机器名/类型，不表示 migration/hook 已落地。
+- 当前集合 record 类型、状态枚举、`metric_key` 放 `src/shared/`，与 `pb_migrations` 手工同步。T0 冻结契约单独放 `frontend/src/shared/api/accountEvent.ts`；其中 T3 汇总响应已由本分支落地，其余类型仍只表示后续实现必须复用的机器名/类型，不表示对应 migration/hook 已存在。
 - 手机号、配对、快照、Realtime 和导出 v2 的端点、权限、幂等、错误与 v1 兼容契约不在本文重复，统一见 [api-design.md](api-design.md)。
 - hooks 文件名仅为建议切分，实现时可调整，但"按领域分文件 + 共享逻辑以 `lib/` 为契约标准源"的边界不变。注意（0.28 JSVM 实测）：`lib/` 不能跨文件引用——各 hooks 文件作用域隔离，handler 只能使用自身闭包内标识符与 JSVM 内建全局，共享函数须在 handler 内内联（与 `lib/` 同源，勿手工改副本）。
 

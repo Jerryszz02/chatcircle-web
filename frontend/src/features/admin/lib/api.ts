@@ -1,9 +1,5 @@
-import type {
-  ActivityRole,
-  ExportScope,
-  RegistrationStatus,
-  RoleScope,
-} from '../../../shared/api/types';
+import { ACCOUNT_EVENT_ENDPOINTS, type ActivityLiveSummaryResponse } from '../../../shared/api/accountEvent';
+import type { ActivityRole, ExportScope, RegistrationStatus, RoleScope } from '../../../shared/api/types';
 import type { MetricKey } from '../../../shared/metrics/registry';
 import type { MetricCardData } from '../../../shared/metrics/MetricRenderer';
 import { ApiError, apiGet, apiPost } from '../../../shared/api/http';
@@ -22,6 +18,13 @@ import type { AdminActivityAction, AdminSurveyAction } from './rules';
 
 function adminClient() {
   return adminAuth.client;
+}
+
+/** T3 单活动实时工作台快照；Realtime 只负责失效化，所有指标均以本响应为准。 */
+export function fetchActivityLiveSummary(
+  activityId: string,
+): Promise<ActivityLiveSummaryResponse> {
+  return apiGet(adminClient(), ACCOUNT_EVENT_ENDPOINTS.activityLiveSummary(activityId));
 }
 
 /** 报名状态迁移：审核通过/拒绝/取消/回退（回退与取消 reason 必填）；审核时可同时改角色。 */
