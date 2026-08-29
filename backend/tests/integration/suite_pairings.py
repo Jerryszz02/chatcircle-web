@@ -74,7 +74,7 @@ def run(ctx):
     qr = fx.checkin_token(base, AT1, act)
 
     members = []
-    for role, prefix, count in (('speaker', 'ps', 4), ('listener', 'pl', 3)):
+    for role, prefix, count in (('speaker', 'ps', 5), ('listener', 'pl', 3)):
         for index in range(1, count + 1):
             username = 'pair_%s%d' % (prefix, index)
             participant_id, token, _ = fx.create_participant(base, username)
@@ -168,10 +168,14 @@ def run(ctx):
                       {'reason': '锁定前签到撤销'}, AT1)
     active = _pairings(base, AT1, act, 'active')
     released = _pairings(base, AT1, act, 'released')
-    rep.check('PAIR-07 锁定前撤销释放旧组、搭档回队且组号不复用',
+    _, auto_reassigned = call(base, 'GET', '/api/cc/activities/%s/my-pairing' % act,
+                              token=listeners[0]['token'])
+    rep.check('PAIR-07 锁定前撤销释放旧组、搭档回队且本人看到已调整',
               s == 200 and any(row['id'] == first_pair['id'] for row in released)
-              and [row.get('pair_sequence') for row in active] == [2, 3, 4],
-              [revoked, active, released])
+              and [row.get('pair_sequence') for row in active] == [2, 3, 4]
+              and auto_reassigned.get('state') == 'reassigned'
+              and auto_reassigned.get('pair_code') == 'P04',
+              [revoked, active, released, auto_reassigned])
 
     lock_barrier = threading.Barrier(3)
 
@@ -198,11 +202,16 @@ def run(ctx):
     p04 = next(row for row in active if row.get('pair_sequence') == 4)
     call(base, 'POST', '/api/cc/checkins/%s/revoke' % p04['speaker_checkin_id'],
          {'reason': '锁定后现场调整'}, AT1)
+    late_status, late_speaker = fx.self_checkin(base, qr, speakers[4]['token'])
+    repeat_status, locked_start = call(
+        base, 'POST', '/api/cc/activities/%s/pairings/start' % act, {}, AT2)
     active_after_locked_revoke = _pairings(base, AT1, act, 'active')
-    rep.check('PAIR-09 撤销后重签号码不复用，锁定后不自动调整',
+    rep.check('PAIR-09 撤销后重签号码不复用，锁定后迟到/重复开始均不自动调整',
               s == 200 and new_speaker_checkin.get('onsite_sequence') == 5
+              and late_status == 200 and (late_speaker.get('checkin') or {}).get('onsite_sequence') == 6
+              and repeat_status == 200 and locked_start.get('created_pairs') == 0
               and [row.get('pair_sequence') for row in active_after_locked_revoke] == [2, 3],
-              [resign, active_after_locked_revoke])
+              [resign, late_speaker, locked_start, active_after_locked_revoke])
 
     # 两管理员对同一目标并发调整：一个建立 P05，另一个读到同一 active pair，终态仍唯一。
     released_p04 = next(row for row in _pairings(base, AT1, act, 'released')

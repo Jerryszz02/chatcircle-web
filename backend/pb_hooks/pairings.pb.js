@@ -84,21 +84,31 @@ onRecordCreate((e) => {
   const activePairs = queryAll(
     app, 'activity_pairs', "activity_id = {:a} && status = 'active'", 'id', { a: activity.id },
   );
-  const used = {};
+  const unavailable = {};
   for (const pair of activePairs) {
-    used[pair.get('speaker_checkin_id')] = true;
-    used[pair.get('listener_checkin_id')] = true;
+    unavailable[pair.get('speaker_checkin_id')] = true;
+    unavailable[pair.get('listener_checkin_id')] = true;
+  }
+  // 锁定后，因撤销而释放的幸存搭档只能经带原因的手工调整重新入组。
+  if (String(activity.get('onsite_locked_at') || '') !== '') {
+    const releasedPairs = queryAll(
+      app, 'activity_pairs', "activity_id = {:a} && status = 'released'", 'id', { a: activity.id },
+    );
+    for (const pair of releasedPairs) {
+      unavailable[pair.get('speaker_checkin_id')] = true;
+      unavailable[pair.get('listener_checkin_id')] = true;
+    }
   }
   const speakers = queryAll(
     app,
     'checkins', "activity_id = {:a} && status = 'valid' && onsite_role = 'speaker' && onsite_sequence > 0",
     'onsite_sequence', { a: activity.id },
-  ).filter((checkin) => !used[checkin.id]);
+  ).filter((checkin) => !unavailable[checkin.id]);
   const listeners = queryAll(
     app,
     'checkins', "activity_id = {:a} && status = 'valid' && onsite_role = 'listener' && onsite_sequence > 0",
     'onsite_sequence', { a: activity.id },
-  ).filter((checkin) => !used[checkin.id]);
+  ).filter((checkin) => !unavailable[checkin.id]);
 
   const latest = app.findRecordsByFilter(
     'activity_pairs', 'activity_id = {:a}', '-pair_sequence', 1, 0, { a: activity.id },
@@ -324,21 +334,30 @@ routerAdd('POST', '/api/cc/activities/{id}/pairings/start', (e) => {
           const activePairs = queryAll(
             txApp, 'activity_pairs', "activity_id = {:a} && status = 'active'", 'id', { a: activityId },
           );
-          const used = {};
+          const unavailable = {};
           for (const pair of activePairs) {
-            used[pair.get('speaker_checkin_id')] = true;
-            used[pair.get('listener_checkin_id')] = true;
+            unavailable[pair.get('speaker_checkin_id')] = true;
+            unavailable[pair.get('listener_checkin_id')] = true;
+          }
+          if (String(activity.get('onsite_locked_at') || '') !== '') {
+            const releasedPairs = queryAll(
+              txApp, 'activity_pairs', "activity_id = {:a} && status = 'released'", 'id', { a: activityId },
+            );
+            for (const pair of releasedPairs) {
+              unavailable[pair.get('speaker_checkin_id')] = true;
+              unavailable[pair.get('listener_checkin_id')] = true;
+            }
           }
           const speakers = queryAll(
             txApp,
             'checkins', "activity_id = {:a} && status = 'valid' && onsite_role = 'speaker' && onsite_sequence > 0",
             'onsite_sequence', { a: activityId },
-          ).filter((checkin) => !used[checkin.id]);
+          ).filter((checkin) => !unavailable[checkin.id]);
           const listeners = queryAll(
             txApp,
             'checkins', "activity_id = {:a} && status = 'valid' && onsite_role = 'listener' && onsite_sequence > 0",
             'onsite_sequence', { a: activityId },
-          ).filter((checkin) => !used[checkin.id]);
+          ).filter((checkin) => !unavailable[checkin.id]);
           const latest = txApp.findRecordsByFilter(
             'activity_pairs', 'activity_id = {:a}', '-pair_sequence', 1, 0, { a: activityId },
           );
@@ -677,7 +696,12 @@ routerAdd('GET', '/api/cc/activities/{id}/my-pairing', (e) => {
       const value = answer ? jsonValue(answer.get('value_json'), '') : '';
       if (typeof value === 'string') displayName = value;
     }
-    response.state = pair.get('adjustment_reason') ? 'reassigned' : 'paired';
+    const releasedHistory = one(
+      $app, 'activity_pairs',
+      "activity_id = {:a} && status = 'released' && (speaker_checkin_id = {:c} || listener_checkin_id = {:c})",
+      { a: activityId, c: valid.id }, '-released_at',
+    );
+    response.state = pair.get('adjustment_reason') || releasedHistory ? 'reassigned' : 'paired';
     response.pair_code = 'P' + String(pair.get('pair_sequence')).padStart(2, '0');
     response.partner = {
       onsite_code: (partnerCheckin.get('onsite_role') === 'speaker' ? 'S' : 'L') +
