@@ -18,7 +18,7 @@
 // - checkin_sessions：禁直连 create/update（走签到开放/关闭端点）
 // - training_checkin_sessions / training_attendances：禁直连 create/update（走培训签到端点）
 // - registration_field_defs：更新禁改 organization_id / field_code
-// - participant_accounts：更新禁改 status
+// - participant_accounts：更新禁改 status / username / 全部手机号状态字段
 // - admin_accounts：更新禁改 status / organization_id / email（换邮箱走 PB 内置 requestEmailChange 流程）
 //
 // 说明：onRecord*Request 仅在 HTTP 直连请求时触发，hooks 内部 app.save 不触发本守卫；
@@ -184,13 +184,28 @@ onRecordUpdateRequest((e) => {
 }, 'registration_field_defs');
 
 // ---------------------------------------------------------------------------
-// participant_accounts / admin_accounts：账号状态禁经直连修改
+// participant_accounts / admin_accounts：账号状态与认证属性禁经直连修改
 // （停用/恢复仅超级管理员或服务端 hooks 内部 save）
 // ---------------------------------------------------------------------------
 onRecordUpdateRequest((e) => {
   const isSuper = !!e.auth && e.auth.collection().name === '_superusers';
-  if (!isSuper && e.record.original().get('status') !== e.record.get('status')) {
-    throw new ForbiddenError('参与者账号状态（status）不可经直连 API 修改');
+  if (!isSuper) {
+    const original = e.record.original();
+    if (original.get('status') !== e.record.get('status')) {
+      throw new ForbiddenError('参与者账号状态（status）不可经直连 API 修改');
+    }
+    for (const field of [
+      'username',
+      'phone_e164',
+      'phone_lookup_hash',
+      'phone_verified_at',
+      'phone_binding_source',
+      'phone_migration_status',
+    ]) {
+      if (original.get(field) !== e.record.get(field)) {
+        throw new ForbiddenError('参与者认证属性不可经直连 API 修改，请使用手机号绑定或换绑流程');
+      }
+    }
   }
   e.next();
 }, 'participant_accounts');

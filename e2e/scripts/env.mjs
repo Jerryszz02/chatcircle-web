@@ -19,7 +19,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { seedTemplatesSql, seedBizData } from './seed.mjs';
+import { FIXTURE, seedTemplatesSql, seedBizData } from './seed.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const E2E_DIR = path.resolve(__dirname, '..');
@@ -114,7 +114,17 @@ export async function start({ detached = false } = {}) {
     ['serve', `--http=127.0.0.1:${PB_PORT}`, '--dir', pbData,
      '--hooksDir', path.join(REPO_ROOT, 'backend', 'pb_hooks')],
     path.join(RUNTIME_DIR, 'pocketbase.log'),
-    { detached },
+    {
+      detached,
+      env: {
+        ...process.env,
+        CC_ENVIRONMENT: 'test',
+        CC_SMS_PROVIDER: 'mock',
+        CC_SMS_MOCK_CODE: FIXTURE.phoneCode,
+        CC_PHONE_HASH_KEY: 'cc-e2e-phone-hash-key-2026-08-28-test-only',
+        CC_PHONE_CODE_IP_MAX: '100',
+      },
+    },
   );
   await waitFor(`${PB_URL}/api/health`, 'PocketBase');
 

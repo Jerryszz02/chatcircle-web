@@ -5,6 +5,8 @@ import { participantAuth } from '../../../shared/auth';
 import type { ParticipantAccountRecord } from '../../../shared/api/types';
 import { Button, Card, Loading, PageLayout } from '../../../shared/ui';
 import { getMeOverview, isUnauthorized, type MeOverview } from '../api';
+import { PhoneBindingForm } from '../components/PhoneBindingForm';
+import { PhoneChangeForm } from '../components/PhoneChangeForm';
 import {
   activityRoleLabel,
   activityStatusLabel,
@@ -23,6 +25,8 @@ export function MePage() {
   const [data, setData] = useState<MeOverview | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(true);
+  const [phoneForm, setPhoneForm] = useState<'none' | 'bind' | 'change'>('none');
+  const [, setAccountVersion] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,7 +53,13 @@ export function MePage() {
     };
   }, [navigate]);
 
-  const username = (participantAuth.record as ParticipantAccountRecord | null)?.username ?? '';
+  const account = participantAuth.record as ParticipantAccountRecord | null;
+  const phoneStatus = account?.phone_migration_status || 'legacy_unbound';
+  const phoneMasked = account?.phone_masked || '';
+  const phoneUpdated = () => {
+    setPhoneForm('none');
+    setAccountVersion((value) => value + 1);
+  };
 
   const headerActions = (
     <Button
@@ -65,7 +75,6 @@ export function MePage() {
 
   return (
     <PageLayout section="参与者端" title="我的中心" actions={headerActions} className="ccp-root" backTo="/">
-      {username ? <p className="cc-hint">当前账号：{username}</p> : null}
       {loading ? <Loading fullscreen /> : null}
 
       {!loading && error ? (
@@ -76,6 +85,34 @@ export function MePage() {
 
       {!loading && data ? (
         <>
+          <Card title="账号与手机号">
+            {phoneStatus === 'phone_bound' ? (
+              <>
+                <p className="cc-hint">已绑定：{phoneMasked || '手机号已验证'}</p>
+                {phoneForm === 'change' ? (
+                  <PhoneChangeForm onSuccess={phoneUpdated} />
+                ) : (
+                  <Button variant="secondary" block onClick={() => setPhoneForm('change')}>
+                    更换手机号
+                  </Button>
+                )}
+              </>
+            ) : phoneStatus === 'merge_required' ? (
+              <p className="cc-notice">
+                该手机号已关联其他账号，无法自动合并。请联系人工支持，并保留当前账号的登录信息。
+              </p>
+            ) : phoneForm === 'bind' ? (
+              <PhoneBindingForm onSuccess={phoneUpdated} />
+            ) : (
+              <>
+                <p className="cc-hint">当前是存量用户名账号，绑定手机号后才能使用新的验证码登录方式。</p>
+                <Button variant="primary" block onClick={() => setPhoneForm('bind')}>
+                  绑定手机号
+                </Button>
+              </>
+            )}
+          </Card>
+
           {data.has_approved_listener_registration ? (
             <Card title="聆听者培训">
               <p className="cc-hint">

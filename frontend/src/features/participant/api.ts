@@ -1,6 +1,16 @@
 import { apiGet, apiPost, ApiError } from '../../shared/api/http';
 import { collectionsForRole } from '../../shared/api/collections';
 import { pbClients } from '../../shared/pocketbase';
+import {
+  ACCOUNT_EVENT_ENDPOINTS,
+  type BindPhoneInput,
+  type BindPhoneResponse,
+  type ChangePhoneInput,
+  type ParticipantPhoneAuthResponse,
+  type RequestPhoneCodeInput,
+  type RequestPhoneCodeResponse,
+  type VerifyPhoneCodeInput,
+} from '../../shared/api/accountEvent';
 import type {
   ActivityRecord,
   ActivityRole,
@@ -21,6 +31,54 @@ import type {
 
 /** 公开推文排序：后台置顶优先，其余按首次发布时间倒序。 */
 const PUBLIC_POSTS_SORT = '-is_pinned,-published_at';
+
+const PHONE_DEVICE_SESSION_KEY = 'cc_phone_device_session';
+
+/**
+ * 验证码请求的设备会话标识。只在 sessionStorage 保存随机值，不含手机号或账号信息；
+ * 服务端与手机号/IP 一起做多轴限流。隐私模式禁用 storage 时退化为本页随机值。
+ */
+let fallbackPhoneDeviceSession = '';
+function phoneDeviceSession(): string {
+  try {
+    const existing = sessionStorage.getItem(PHONE_DEVICE_SESSION_KEY);
+    if (existing) return existing;
+    const value = crypto.randomUUID();
+    sessionStorage.setItem(PHONE_DEVICE_SESSION_KEY, value);
+    return value;
+  } catch {
+    if (!fallbackPhoneDeviceSession) {
+      fallbackPhoneDeviceSession = `device_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    }
+    return fallbackPhoneDeviceSession;
+  }
+}
+
+/** 请求手机号验证码；purpose=bind/change 时 participant client 会自动携带当前 token。 */
+export function requestParticipantPhoneCode(
+  input: RequestPhoneCodeInput,
+): Promise<RequestPhoneCodeResponse> {
+  return apiPost(pbClients.participant, ACCOUNT_EVENT_ENDPOINTS.requestPhoneCode, input, {
+    headers: { 'X-CC-Device-Session': phoneDeviceSession() },
+  });
+}
+
+/** 验证手机号并登录/注册。调用方负责把响应写入 participant authStore。 */
+export function verifyParticipantPhoneCode(
+  input: VerifyPhoneCodeInput,
+): Promise<ParticipantPhoneAuthResponse> {
+  return apiPost(pbClients.participant, ACCOUNT_EVENT_ENDPOINTS.verifyPhoneCode, input);
+}
+
+/** 存量账号绑定手机号。 */
+export function bindParticipantPhone(input: BindPhoneInput): Promise<BindPhoneResponse> {
+  return apiPost(pbClients.participant, ACCOUNT_EVENT_ENDPOINTS.bindPhone, input);
+}
+
+/** 已绑定账号经旧号 + 新号双验证码换绑。 */
+export function changeParticipantPhone(input: ChangePhoneInput): Promise<BindPhoneResponse> {
+  return apiPost(pbClients.participant, ACCOUNT_EVENT_ENDPOINTS.changePhone, input);
+}
 
 /**
  * 参与者端自定义端点封装（统一端点契约，technical-design §5.5）。

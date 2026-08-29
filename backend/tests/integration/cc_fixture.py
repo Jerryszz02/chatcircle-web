@@ -15,6 +15,13 @@ from cc_client import call
 
 # 套件内统一使用的演示密码（一次性临时实例，无真实凭据）
 PASSWORD = 'cc_it_pass_123'
+_SUPER_TOKEN = ''
+
+
+def configure_super_token(token):
+    """配置仅供临时集成测试夹具使用的超管 token。"""
+    global _SUPER_TOKEN
+    _SUPER_TOKEN = token
 
 
 def pb_dt(dt):
@@ -115,10 +122,27 @@ def create_admin_via_impersonate(base, st, org_id, username, password=PASSWORD):
 
 
 def create_participant(base, username, password=PASSWORD):
-    """参与者自动注册（用户名已存在则为登录），返回 (participant_id, token, created)。"""
-    s, r = call(base, 'POST', '/api/cc/auth/participant', {'username': username, 'password': password})
-    assert s == 200, '参与者注册/登录失败：%s' % r
-    return r['record']['id'], r['token'], r.get('created')
+    """超管预置存量参与者并 impersonate，返回 (participant_id, token, created)。
+
+    T1 后公开用户名端点只允许已有账号登录，不能再作为测试建号捷径；测试数据
+    通过一次性临时实例的超管权限创建，避免生产接口重新出现绕过手机号验证的路径。
+    """
+    assert _SUPER_TOKEN, '未配置集成测试超管 token'
+    normalized = username.strip().lower()
+    s, record = call(base, 'POST', '/api/collections/participant_accounts/records', {
+        'username': normalized,
+        'password': password,
+        'passwordConfirm': password,
+        'status': 'active',
+        'phone_migration_status': 'legacy_unbound',
+    }, _SUPER_TOKEN)
+    assert s == 200, '超管预置参与者失败：%s' % record
+    participant_id = record['id']
+    s, auth = call(base, 'POST',
+                   '/api/collections/participant_accounts/impersonate/%s' % participant_id,
+                   {}, _SUPER_TOKEN)
+    assert s == 200 and auth.get('token'), 'impersonate 取参与者登录态失败：%s' % auth
+    return participant_id, auth['token'], True
 
 
 def create_activity(base, at, org_id, code, title, fields=None, caps=(10, 5, 5),

@@ -1,12 +1,12 @@
 # Chat Circles — 数据库设计（PocketBase 集合设计草案）
 
-> **2026-08-28 T3 更新：**当前 `participant_accounts` 仍是用户名账号，schema 也没有活动配对集合；T3 只新增兼容当前 schema 的事务快照与 Realtime 守卫，不重复 T1/T2/T6 的迁移。§6 的目标 schema 仍为`计划中`。
+> **2026-08-29 T1/T3 更新：**`participant_accounts` 已增加隐藏手机号/HMAC、验证时间、绑定来源和迁移状态，并新增内部 `participant_phone_challenges` 集合；存量账号已回填 `legacy_unbound`。T3 在兼容当前 schema 的前提下新增事务快照与 Realtime 守卫。现场编号、`activity_pairs`、标准报名字段激活和细粒度 `export_jobs.scope_json` 仍为`计划中`。
 
 > 本文档将 PRD v0.3 §9 数据模型落地为 PocketBase 集合定义，面向后续实现工程师。阅读本文不需要先读 PRD；涉及 PRD 口径处均注明出处。所有表结构为**设计草案**：字段名、枚举机器码、索引与规则如与实现阶段证据冲突，以实现阶段评审结论为准并回写本文。
 
 ## 1. 文档目的
 
-- 给出 PRD §9.1 全部 19 个集合的 PocketBase collection 定义草案：字段名、类型、必填、唯一约束与索引。2026-08 实现期新增「聆听者培训体系」3 集合（trainings / training_checkin_sessions / training_attendances，§5.2.20~5.2.22，PRD 外扩展）与 reports 活动数据报告集合（§5.2.23）；2026-08 后端改版新增 posts 内容推文集合（§5.2.24，PRD 外扩展），合计 24 个业务集合。
+- 给出 PRD §9.1 全部 19 个集合的 PocketBase collection 定义草案；实现期又增加培训三集合、reports、posts，以及 T1 内部 `participant_phone_challenges`，当前合计 25 个业务/内部集合。
 - 固化标识规则（`participant_id` 全平台稳定、`registration_id` 参与者×活动唯一、`question_code` 稳定性、`group_tag` 预留）。
 - 定义多机构隔离在 PocketBase 层面的实现方式：`organization_id` 冗余字段 + API Rules 服务端强制过滤。
 - 汇总全部状态枚举与状态机（活动 7 态、报名 4 态及迁移矩阵、签到场次/记录、问卷 5 态、答卷 3 态、邀请码 4 态、培训 3 态及培训签到场次/记录），并给出事务与并发约束。
@@ -113,8 +113,8 @@
 | status | select(active, disabled) | 是 | — | 账号停用为可审计事件（PRD §11.3） |
 | （created） | 系统字段 | — | 索引 | 即 PRD §9.1 的 `created_at`；跨活动账号连续性统计可用 |
 
-- **当前实现**不存手机号、邮箱、微信等联系方式；**目标状态**新增已验证手机号作为主要登录身份，保留 `username` 仅用于存量兼容，见 [account-event-workflow-prd.md](account-event-workflow-prd.md) §3、§9。
-- API Rules 要点：参与者仅能 view/update 本人记录（`@request.auth.id = id`），且不可改 `username`（机构管理员也不得修改参与者凭据，PRD §3.2）；create 仅经报名链路自动注册接口。
+- **当前实现**已保存隐藏的规范化手机号、HMAC 查找值、验证时间、绑定来源与迁移状态；`username` 仅用于存量兼容，新手机号账号使用服务端随机内部凭据，见 [account-event-workflow-prd.md](account-event-workflow-prd.md) §3、§9。
+- API Rules 要点：参与者仅能 view 本人记录；手机号和迁移字段禁止普通客户端直改。新账号只在验证码验证成功后由 `phoneauth.pb.js` 创建；存量用户名端点只登录已有账号，未知用户名不得建号。
 - 无密码重置/找回入口（任何角色，PRD §5.7）。
 
 #### 5.2.5 activities — 活动主数据与名额（base）
@@ -540,7 +540,7 @@
 
 ## 6. T0 冻结的目标契约（计划中 schema）
 
-本节是后续 T1/T2/T3/T6 的数据库门禁，不表示当前迁移已存在。机器名与前端共享类型以 `frontend/src/shared/api/accountEvent.ts` 为准。
+本节是 T1/T2/T3/T6 的数据库门禁。T1 手机号字段与 challenge 集合已由 `1787895000_cc_participant_phone_auth.js` 实现；其余字段/集合仍不表示当前迁移已存在。机器名与前端共享类型以 `frontend/src/shared/api/accountEvent.ts` 为准。
 
 ### 6.1 participant_accounts 追加字段
 
@@ -625,7 +625,7 @@ down 迁移只允许在新字段/集合尚无业务数据时回滚 schema。一�
 |---|---|---|
 | AC-02 一次性邀请码 | `admin_invites` 4 态 + 事务注册 | 重复使用/过期邀请码注册失败 |
 | AC-03 机构隔离 | §5.4 规则与冗余 `organization_id` | 自动化越权测试全部通过 |
-| AC-06 自动注册/登录 | `participant_accounts` 唯一用户名归一化 | 错误密码不产生重复账号；用户名规则生效 |
+| AC-06 账号创建/存量登录 | 手机 HMAC 唯一索引 + 存量 `username` 小写归一化 | 新手机号重试不产生重复账号；未知用户名和错误密码均不建号；用户名规则生效 |
 | AC-07 报名审核与回退 | §5.5 迁移矩阵 + `registrations` 约束 | 矩阵外迁移被拒；回退留痕 |
 | AC-08 名额硬限制 | §5.6 事务校验 | 并发审核不超额；名额不可低于已通过数 |
 | AC-09 固定二维码签到 | `checkin_qr_token` + `checkin_sessions` + `checkins` 唯一有效约束 | 仅通过者开放期可签到，一人一条 |

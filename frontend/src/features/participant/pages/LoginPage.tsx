@@ -1,12 +1,13 @@
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { hasAnySession, participantAuth } from '../../../shared/auth';
 import { Card, PageLayout } from '../../../shared/ui';
-import { ParticipantAuthForm } from '../components/ParticipantAuthForm';
+import { ParticipantAccessPanel } from '../components/ParticipantAccessPanel';
 import { sanitizeRedirect } from '../lib/redirect';
 
 /**
- * 平台通用登录页（/login，FR-AUTH-008）。
- * - 不提供注册入口：账号在活动报名链路中自动创建（PRD §5.2 账号规则）；
+ * 平台通用登录页（/login）。
+ * - 手机号 + 验证码是主登录/注册入口；
+ * - 存量用户名账号可登录后绑定手机号，participant_id 与历史记录不变；
  * - 支持 redirect 参数回跳（从活动/签到/问卷链接跳来，登录后回到原目标）；
  * - 无回跳地址时进入「我的」中心（FR-PAR-004）。
  */
@@ -31,14 +32,10 @@ export function LoginPage() {
         <span />
       </div>
       <Card>
-        <ParticipantAuthForm
-          submitLabel="登录"
-          intro="输入您的用户名和密码登录。"
-          onSuccess={() => navigate(target, { replace: true })}
-        />
+        <ParticipantAccessPanel onSuccess={() => navigate(target, { replace: true })} />
       </Card>
       <p className="cc-hint">
-        还没有账号？账号在活动现场的报名流程中自动创建，本页不提供注册。
+        首次验证手机号会自动创建账号；已有手机号会直接登录。
       </p>
     </PageLayout>
   );

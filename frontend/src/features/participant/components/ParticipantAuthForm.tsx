@@ -13,14 +13,11 @@ import {
 } from '../lib/username';
 
 /**
- * 用户名密码单框（FR-AUTH-001：自动识别登录或注册）。
- * 报名链路与通用登录页复用：
- * - 用户名不存在 → 服务端自动创建账号并登录；存在 → 校验密码登录；
- * - 错误密码由服务端返回错误（不建号，AC-06），前端原样展示服务端文案；
+ * 存量用户名账号登录表单，仅由手机号主入口中的迁移流程使用：
+ * - 用户名不存在或密码错误 → 服务端返回同形错误，绝不创建账号或签发 token；
+ * - 已有账号校验密码成功后必须继续绑定手机号；
  * - 连续失败触发限流后的拒绝文案同样来自服务端（FR-AUTH-007）。
- * 本组件不做「注册/登录」切换：语义统一为「输入用户名和密码，继续」。
- * 用户名上限与服务端 pattern（4–20 位）对齐；密码框按自动注册场景标记
- * new-password，避免密码管理器把既有凭据回填进「创建账号」语境。
+ * 用户名上限与服务端 pattern（4–20 位）对齐。
  */
 export function ParticipantAuthForm({
   submitLabel = '继续',
@@ -88,7 +85,7 @@ export function ParticipantAuthForm({
         hint="至少 8 位；请牢记，平台不提供找回"
         error={passwordError}
         required
-        autoComplete="new-password"
+        autoComplete="current-password"
       />
       {formError ? (
         <p className="cc-error" role="alert">

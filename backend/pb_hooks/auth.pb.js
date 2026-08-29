@@ -1,12 +1,11 @@
-// auth.pb.js — 认证 hooks：参与者自动注册/登录 + 管理员邀请码注册
+// auth.pb.js — 认证 hooks：存量参与者登录 + 管理员邀请码注册
 //
 // 端点契约（technical-design §5.4，统一端点契约）：
 // - POST /api/cc/auth/participant {username, password}
-//     用户名小写归一化；不存在则创建并登录，存在则校验密码；
-//     错误密码不得创建重复账号（AC-06）；返回 { token, record }；
+//     T1 后仅供存量用户名账号迁移：用户名小写归一化，只校验已存在账号；
+//     不存在与密码错误返回相同响应，绝不创建未验证手机号的新账号；返回 { token, record }；
 //     同人同 IP 连续失败限流（FR-AUTH-007，常量 5 次 / 10 分钟滑动窗口）；
 //     同 IP 跨用户名失败累计限流（防密码喷洒，30 次 / 10 分钟）；
-//     同 IP 新建账号限流（防批量注册，10 个 / 小时，本机直连豁免）；
 //     密码格式校验前置到账号 lookup 之前（消除账号枚举 oracle）。
 // - POST /api/cc/auth/admin-register {invite_code, username, email, password}
 //     事务内消费一次性邀请码创建管理员（FR-ORG-002/003、AC-02；邮箱为 2026-08 改版新增，AC-24）：
@@ -21,7 +20,7 @@
 // 各 handler 顶部的共享函数与 lib/*.pb.js 契约同源（由生成器按引用自动内联，勿手工改副本）。
 
 // ---------------------------------------------------------------------------
-// POST /api/cc/auth/participant — 参与者自动注册/登录（FR-AUTH-001~008、AC-06/AC-21）
+// POST /api/cc/auth/participant — 存量参与者登录（T1 迁移兼容、AC-06/AC-21）
 // ---------------------------------------------------------------------------
 routerAdd('POST', '/api/cc/auth/participant', (e) => {
   try {
@@ -48,7 +47,6 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
     $app.store().set(k, kept);
   };
   const resetRateLimit = (key) => { $app.store().remove(ccRlKey(key)); };
-  const ccUniqueErr = (err) => !!err && typeof err.message === 'string' && /unique/i.test(err.message);
   // 用户名规则（FR-AUTH-005）：4–20 位字母/数字/下划线，存储统一小写（大小写不敏感唯一）
   const CC_USERNAME_RE = /^[a-z0-9_]{4,20}$/;
   // 登录限流常量（PRD 未给数值，technical-design 待确认 #1）：同一 username + IP 10 分钟窗口 5 次失败（AC-21）
@@ -61,22 +59,6 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
   // 只计失败不计成功，避免共享出口（NAT/校园网）正常用户互相误伤）
   const CC_SPRAY_MAX_FAILURES = 30;
   const CC_SPRAY_WINDOW_SEC = 600;
-  // 注册限流：同一来源 IP 每小时最多自动创建 10 个新账号（防批量注册/资源占用）
-  const CC_REG_MAX = 10;
-  const CC_REG_WINDOW_SEC = 3600;
-  // 本机直连判定（仅用于豁免注册限流）：TCP peer 为 loopback 且未带代理头。
-  // 判定用 e.request.remoteAddr（TCP 对等端，HTTP 头伪造不了），而非 e.realIP()；
-  // 本地开发与集成测试从 127.0.0.1 批量建号不受限，生产经 Caddy 反代时
-  // TCP peer 为容器网段地址，不会命中豁免。
-  const ccIsLoopbackPeer = () => {
-    try {
-      const ra = String(e.request.remoteAddr || '');
-      const host = ra.slice(0, ra.lastIndexOf(':')).replace(/^\[|\]$/g, '');
-      if (host !== '127.0.0.1' && host !== '::1') return false;
-      return !e.request.header.get('X-Forwarded-For') && !e.request.header.get('X-Real-Ip');
-    } catch (err) { return false; }
-  };
-
   const body = e.requestInfo().body || {};
   const username = String(body.username == null ? '' : body.username).trim().toLowerCase();
   if (!CC_USERNAME_RE.test(username)) {
@@ -102,47 +84,20 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
   }
 
   const lookup = () => ccOne($app, 'participant_accounts', 'username = {:u}', { u: username });
-  let record = lookup();
-  let created = false;
-
-  if (!record) {
-    // 用户名不存在 → 自动注册并登录（FR-AUTH-001）
-    // 注册限流：per-IP 每小时 ≤10 个新账号（本机直连豁免，见 ccIsLoopbackPeer 注释）
-    const regKey = 'register|' + e.realIP();
-    if (!ccIsLoopbackPeer() && !checkRateLimit(regKey, CC_REG_MAX, CC_REG_WINDOW_SEC)) {
-      ccError(429, 'REGISTRATION_RATE_LIMITED', '注册过于频繁，请稍后再试');
-    }
-    const collection = $app.findCollectionByNameOrId('participant_accounts');
-    record = new Record(collection);
-    record.set('username', username);
-    record.set('password', password);
-    record.set('status', 'active');
-    try {
-      $app.save(record);
-      created = true;
-      recordRateLimitFailure(regKey, CC_REG_WINDOW_SEC); // 借失败计数器做窗口计数（同源函数，语义 = 窗口内计一次）
-    } catch (err) {
-      // 并发同名注册：唯一索引兜底（AC-06 任何情况下不产生重复账号），转为密码校验路径
-      if (!ccUniqueErr(err)) throw err;
-      record = lookup();
-      if (!record) throw err;
-    }
+  const record = lookup();
+  // T1 后用户名入口仅用于迁移已有账号。未知用户名与错误密码必须同形响应，
+  // 且不能创建账号或签发 token，否则可绕过手机号验证直接进入参与者业务端点。
+  if (!record || !record.validatePassword(password)) {
+    recordRateLimitFailure(rateKey, CC_LOGIN_WINDOW_SEC);
+    recordRateLimitFailure(sprayKey, CC_SPRAY_WINDOW_SEC);
+    ccError(400, 'INVALID_CREDENTIALS', '用户名或密码错误');
   }
-
-  if (!created) {
-    // 用户名已存在（含并发撞号回退）→ 校验密码；错误密码不建号（AC-06）
-    if (record.get('status') !== 'active') {
-      ccError(403, 'ACCOUNT_DISABLED', '账号已停用');
-    }
-    if (!record.validatePassword(password)) {
-      recordRateLimitFailure(rateKey, CC_LOGIN_WINDOW_SEC);
-      recordRateLimitFailure(sprayKey, CC_SPRAY_WINDOW_SEC);
-      ccError(400, 'INVALID_CREDENTIALS', '用户名或密码错误');
-    }
+  if (record.get('status') !== 'active') {
+    ccError(403, 'ACCOUNT_DISABLED', '账号已停用');
   }
 
   resetRateLimit(rateKey);
-  return e.json(200, { token: record.newAuthToken(), record: record, created: created });
+  return e.json(200, { token: record.newAuthToken(), record: record, created: false });
   } catch (err) {
     // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
     if (err && err.__ccError === true) {
@@ -300,4 +255,3 @@ routerAdd('POST', '/api/cc/auth/admin-register', (e) => {
     throw err;
   }
 });
-
