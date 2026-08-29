@@ -62,7 +62,7 @@ bash backend/scripts/seed_demo.sh
 bash backend/tests/run_integration.sh
 ```
 
-一键自举临时 PocketBase 实例，执行 `tests/integration/` 下全部套件（506 项断言），覆盖既有主链路、越权、状态机、签到/问卷/导出/培训等回归，以及 T2 现场编号、并发开始/调整、迟到补配、锁定前后释放、本人最小权限与审计。任一失败退出码为 1；详见 `tests/README.md`。
+一键自举临时 PocketBase 实例，执行 `tests/integration/` 下全部套件（519 项断言），覆盖既有主链路、越权、状态机、签到/问卷/导出/培训等回归，以及 T2 现场编号与配对、T3 实时汇总与 Realtime 权限。任一失败退出码为 1；详见 `tests/README.md`。
 
 ### 迁移冒烟验证
 

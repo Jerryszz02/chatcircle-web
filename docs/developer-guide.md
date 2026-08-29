@@ -289,8 +289,8 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 ### 5.7 后端测试体系（`backend/tests/`）
 
-- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 18 个 suite（501 断言）：越权矩阵 AC-03、名额并发 AC-08、状态机 AC-07、签到 AC-09/20、培训、问卷资格、导出 AC-16/17、T3 实时汇总与 Realtime ACL、限流 AC-21、备份告警 AC-23、无硬删除 AC-18、安全加固回归（必须是最后一个使用内置认证的 suite）等。
-- `migration_smoke.sh`：up→全量 down→sqlite3 直查 24 个业务集合清零→再 up，随后 serve 抽查 58 项。
+- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 19 个 suite（519 断言）：越权矩阵 AC-03、名额并发 AC-08、状态机 AC-07、签到 AC-09/20、T2 配对、T3 实时汇总与 Realtime ACL、培训、问卷资格、导出 AC-16/17、限流 AC-21、备份告警 AC-23、无硬删除 AC-18、安全加固回归（必须是最后一个使用内置认证的 suite）等。
+- `migration_smoke.sh`：T2/seed 局部回滚 → 全量 down → sqlite3 直查 25 个业务集合清零 → 再 up，随后 serve 抽查，共 61 项。
 - **两条强制规则**：① authguard 对内置 auth-with-password 按 IP 限 25 次/10min，一轮全量当前使用 22 次（余量 3）——新增套件仍应避免消耗这项预算，管理员登录态用 impersonate，参与者走 `/api/cc/auth/participant`；② 新增带 `organization_id` 的接口，**必须同 PR 补机构越权用例**（通用端点放 `suite_acl.py`，领域聚合端点可放对应 suite）。
 
 ## 6. 前端详解（`frontend/`）
@@ -308,7 +308,7 @@ src/
 │   ├── pocketbase.ts      #   3 个按角色隔离的 PB client 单例（见 §6.3）
 │   ├── auth.ts / session.ts / guards.tsx
 │   ├── api/               #   types.ts（当前 record 类型+枚举，与 pb_migrations 手工同步）
-│   │                      #   accountEvent.ts（T0 冻结契约；T3 汇总响应已实现，其余仍是目标）
+│   │                      #   accountEvent.ts（T0 冻结契约；T2/T3 对应后端已实现，其余仍是目标）
 │   │                      #   collections.ts（类型化 RecordService 封装）、http.ts（自定义端点 fetch 包装）
 │   ├── ui/                #   无样式结构组件（Button/Card/Modal/Toast/Loading/PageLayout/ForbiddenPage…）
 │   ├── styles/global.css  #   设计 token + .cc-* 共享类（见 §6.6）

@@ -48,7 +48,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | 最近同步 | 2026-08-29（T2/T3 `已验证`）：T2 落地现场编号、`activity_pairs`、配对/锁定端点、释放/调整与审计；T3 落地事务快照、互补桶联合抑制与 Realtime 失效化；T0 契约版本不变。 |
 | 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb-t2-pairing-backend`；`agent/t2-pairing-backend` 已同步 `origin/main@5d67520`。本分支尚未合并或部署。 |
 | 本次关键代码证据 | `pairings.pb.js` 与 `1787880000_cc_activity_pairings.js` 提供 T2 现场编号、配对、释放、调整与锁定；默认分支的 `live.pb.js` 与 `activityLive.ts` 提供 T3 快照和 Realtime 失效化。 |
-| 本次验证命令 | T2 review 修复已通过迁移冒烟、后端完整集成（506/506）、前端 lint/typecheck/test/build 与 planning 文档审计；与 T3 合并后的最终结果以本 PR CI 为准。 |
+| 本次验证命令 | rebase 到 T3 后已通过迁移冒烟（61/61）、后端完整集成（519/519）、前端 lint/typecheck（44 files / 313 tests）/build；planning 文档审计与本 PR CI 继续作为发布门禁。 |
 | 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T2/T3 均复用 `2026-08-28.t0-v1`，T1/T4–T6 继续按冻结契约实现。 |
 
 ## 已生成文档
@@ -99,7 +99,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 
 ## 开发入口
 
-仓库已经完成初始化。当前代码结构、本地启动、测试与部署命令以 [开发者指南](../developer-guide.md) 和各 package 的 `package.json` 为准；planning 文档不复制易漂移的命令。后续 T1/T2/T4~T6 必须先读 [api-design.md](api-design.md) 并复用 `frontend/src/shared/api/accountEvent.ts`；不得改名或另造契约，T4/T5 应直接消费 T3 已提供的快照/订阅服务。
+仓库已经完成初始化。当前代码结构、本地启动、测试与部署命令以 [开发者指南](../developer-guide.md) 和各 package 的 `package.json` 为准；planning 文档不复制易漂移的命令。后续 T1/T4~T6 必须先读 [api-design.md](api-design.md) 并复用 `frontend/src/shared/api/accountEvent.ts`；不得改名或另造契约，T4/T5 应直接消费 T2 配对端点与 T3 快照/订阅服务。
 
 ## Roadmap
 

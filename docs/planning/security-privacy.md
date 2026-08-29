@@ -1,6 +1,6 @@
 # 安全与隐私（Security & Privacy）
 
-> **2026-08-29 T3 更新：**本实现分支已验证小样本互补桶联合抑制、单活动机构隔离，以及 participant 只能订阅本人 pairing topic、不能直订 `activity_pairs`；手机号、本人配对展示和字段级敏感导出业务仍`计划中`。冻结边界见 [api-design.md](api-design.md)。
+> **2026-08-29 T2/T3 更新：**默认分支的 T3 已验证小样本互补桶联合抑制、单活动机构隔离与 Realtime topic 权限；本 T2 分支已验证参与者不能直读 `activity_pairs`、只能经本人最小快照读取配对。手机号、参与者配对 UI 和字段级敏感导出仍`计划中`。冻结边界见 [api-design.md](api-design.md)。
 
 - 项目：Chat Circles 活动管理、报名审核、签到与问卷数据平台（Empact）
 - 需求基线：PRD v0.3（评审修订版，2026-08-05），对应章节：§3.2、§6.1、§6.9、§9、§10、§11、§12、§13、§16.1

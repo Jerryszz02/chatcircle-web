@@ -1,10 +1,6 @@
 # 参与者手机号账号与活动全流程升级（专项 PRD）
 
-> 状态：整体`计划中`；T0 与 T3 `已验证`，T1/T2/T4/T5/T6/T7 仍待实现
->
-> 状态：T0 `2026-08-28 已验证`；T2 配对后端在 `agent/t2-pairing-backend` `已验证`，尚未合并或部署；T1/T3–T6 仍为`计划中`
->
-> T3 状态：`2026-08-29 已验证`（review 修复后，仅本实现分支；尚未证明已合并默认分支或已部署）
+> 状态：T0 契约与 T3 实时数据服务已在默认分支`已验证`；T2 配对后端在 `agent/t2-pairing-backend` `已验证`，尚未合并或部署；T1/T4~T7 仍待实现
 >
 > 最近更新：2026-08-29
 >
@@ -262,7 +258,7 @@ T0
 
 T0 由主任务维护共享契约和迁移边界；并行任务不得各自发明同义字段或端点。Wave 2 开始前，应先把 Wave 1 的契约合并到最新 `origin/main`。
 
-T3 验证证据（2026-08-29，本实现分支）：`suite_live_summary.py` 覆盖双完成率交集、零分母、互补桶联合抑制、跨机构 404 与 Realtime topic 越权；全量后端集成 501/501 通过。管理端订阅服务另有 Vitest 覆盖六类快照依赖“先订阅再拉快照”、活动/问卷失效事件防抖和重连刷新；迁移冒烟最近一次仍为 58/58。该证据不等于默认分支已合并或生产已部署。
+T2/T3 合并验证证据（2026-08-29，本 T2 分支 rebase 到 `origin/main@5d67520`）：`suite_pairings.py` 覆盖现场编号、配对、锁定前后边界、并发与幂等；`suite_live_summary.py` 覆盖双完成率交集、零分母、互补桶联合抑制、跨机构 404 与 Realtime topic 越权；全量后端集成 519/519、迁移冒烟 61/61 通过。管理端订阅服务另有 Vitest 覆盖六类快照依赖“先订阅再拉快照”、活动/问卷失效事件防抖和重连刷新。该证据不等于 T2 已合并或生产已部署。
 
 ## 11. 验收清单
 
@@ -302,5 +298,5 @@ T3 验证证据（2026-08-29，本实现分支）：`suite_live_summary.py` 覆�
 可在新对话中直接粘贴：
 
 ```text
-请先完整阅读 docs/planning/account-event-workflow-prd.md、docs/planning/api-design.md 和 docs/planning/README.md，并检查当前 origin/main 的代码现状。T0 契约已冻结，后续任务必须复用 frontend/src/shared/api/accountEvent.ts，不得自创同义字段或端点。请按 T1/T2/T3 的依赖顺序选择一个任务，以一个 Worktree、一个 agent/<task-name> 分支、一个独立 PR 推进，并同步相关 planning 与 developer guide。
+请先完整阅读 docs/planning/account-event-workflow-prd.md、docs/planning/api-design.md 和 docs/planning/README.md，并检查当前 origin/main 的代码现状。T0 契约已冻结，后续任务必须复用 frontend/src/shared/api/accountEvent.ts，不得自创同义字段或端点。T2/T3 已验证；请按依赖选择 T1 或 T4~T6 的一个任务，以一个 Worktree、一个 agent/<task-name> 分支、一个独立 PR 推进，并同步相关 planning 与 developer guide。
 ```

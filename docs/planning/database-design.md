@@ -540,7 +540,7 @@
 
 ## 6. T0 冻结的目标契约（T2 已部分落地）
 
-本节是后续 T1/T2/T3/T6 的数据库门禁，不表示当前迁移已存在。机器名与前端共享类型以 `frontend/src/shared/api/accountEvent.ts` 为准。
+本节是 T1/T2/T3/T6 的数据库门禁；其中 §6.3/§6.4 已由本 T2 分支实现，T3 不新增 schema，T1/T6 仍为目标设计。机器名与前端共享类型以 `frontend/src/shared/api/accountEvent.ts` 为准。
 
 ### 6.1 participant_accounts 追加字段
 
