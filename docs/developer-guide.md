@@ -264,7 +264,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 - **敏感导出过滤**：普通导出按 `registration_field_defs.is_sensitive` 与 `survey_questions.is_sensitive` 两个标记位排除（**禁止按字段名启发式判断**），participants.csv 不含 username；敏感导出需机构开关 + `confirm:true` 二次确认 + 独立审计动作。CSV 公式注入防护（`= + - @ Tab` 前置单引号）。导出文件落 `pb_data/exports`（0700/0600），文件名随机，下载有路径前缀防护。
 - **名额并发**：报名创建端点只是预检，**硬校验在 transition 到 approved 的事务内**（总名额+角色名额双查）；SQLite busy 类错误重试 2 次后 409。
 - **错误形态**：统一 `{code, message, data:{code}}`；handler 抛 `ccError` 由顶层 catch 转换，事务内抛出即回滚。部分文件（surveys/submissions/exports/super/metrics）混用 `jsonError` 直接 return 形态——改代码时跟随本文件既有风格。
-- **Realtime 只做失效通知**：管理端订阅 registrations/checkins/submissions/activity_pairs 后统一防抖重取 `live-summary`，不从事件 payload 推导指标；参与者只能订阅自己的 `cc.participant.pairing.<participantId>` 主题，且消息发送前再次按当前认证清洗。
+- **Realtime 只做失效通知**：管理端订阅 activities/registrations/checkins/activity_surveys/submissions/activity_pairs 后统一防抖重取 `live-summary`，不从事件 payload 推导指标；参与者只能订阅自己的 `cc.participant.pairing.<participantId>` 主题，且消息发送前再次按当前认证清洗。人口统计任一桶小于 5 时，该维度全部桶一起抑制，防止结合已通过总数做减法反推。
 - **配置**：hooks 内**没有任何环境变量**，阈值都是代码内常量（登录 5 次/10min、邀请码默认 7 天、签到 token 24 位……）。运行时持久状态只有 `$app.store()` 和 `pb_data/exports`。
 
 ### 5.6 迁移编写约定

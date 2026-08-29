@@ -29,8 +29,10 @@ export interface ActivityLiveSubscriptionOptions {
 export type StopActivityLiveSubscription = () => Promise<void>;
 
 const sourceFilters = (client: PocketBase, activityId: string) => ({
+  activities: client.filter('id = {:activityId}', { activityId }),
   registrations: client.filter('activity_id = {:activityId}', { activityId }),
   checkins: client.filter('activity_id = {:activityId}', { activityId }),
+  activity_surveys: client.filter('activity_id = {:activityId}', { activityId }),
   submissions: client.filter('activity_survey_id.activity_id = {:activityId}', { activityId }),
   activity_pairs: client.filter('activity_id = {:activityId}', { activityId }),
 });

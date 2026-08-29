@@ -46,8 +46,10 @@ describe('account-event T0 共享契约', () => {
 
   it('实时事件只作为快照无效化信号', () => {
     expect(ACTIVITY_LIVE_REALTIME_SOURCES).toEqual([
+      'activities',
       'registrations',
       'checkins',
+      'activity_surveys',
       'submissions',
       'activity_pairs',
     ]);

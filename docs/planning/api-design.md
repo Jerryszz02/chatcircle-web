@@ -80,18 +80,18 @@
 - 现场问卷完成率的分子和分母都只取“当前 valid 签到 + 角色符合”的人群交集。
 - 总体完成率的分子和分母都只取“当前 approved + 角色符合”的人群交集。
 - 分母为 0 返回 `rate: null`；有值时强制在 `[0,1]`。
-- `gender/age_range` 单分组人数小于 5 时返回 `{count:null, suppressed:true}`，前端不可从其他桶反推被抑制值。
+- `gender/age_range` 任一分组人数小于 5 时，该维度全部桶都返回 `{count:null, suppressed:true}`；只有该维度所有桶均达到 5 才展示计数，禁止结合 `registrations.approved.total` 或其他桶做减法反推。
 - `recent_checkins.display_name` 只对有权管理员返回，不进入普通聚合图表。
 
 ## 5. Realtime 契约
 
-T3 当前实现位于 `backend/pb_hooks/live.pb.js` 与 `frontend/src/features/admin/lib/activityLive.ts`。管理端严格先建立四类订阅再拉快照，record event 仅防抖触发重拉；SDK 每次重新收到 `PB_CONNECT` 都强制刷新，连接状态轮询只用于离线提示。参与者 topic 的订阅与发送均按 auth id 二次过滤，非法 topic 被拒。
+T3 当前实现位于 `backend/pb_hooks/live.pb.js` 与 `frontend/src/features/admin/lib/activityLive.ts`。管理端严格先建立六类快照依赖订阅再拉快照，record event 仅防抖触发重拉；SDK 每次重新收到 `PB_CONNECT` 都强制刷新，连接状态轮询只用于离线提示。参与者 topic 的订阅与发送均按 auth id 二次过滤，非法 topic 被拒。
 
 Realtime 不传输第二套指标或配对真相，只用 PocketBase record event 或受控的自定义消息使 HTTP 快照失效：
 
 | 消费者 | 订阅源 | 收到事件后 |
 | --- | --- | --- |
-| 活动工作台 | `registrations`、`checkins`、`submissions`、`activity_pairs`，按 activity 过滤 | 防抖后重拉 `live-summary` |
+| 活动工作台 | `activities`、`registrations`、`checkins`、`activity_surveys`、`submissions`、`activity_pairs`，按 activity 过滤 | 活动现场字段、问卷清单或业务记录变化后，均防抖重拉 `live-summary` |
 | 参与者配对卡 | 本人 `checkins`、`cc.participant.pairing.{participantId}` 自定义 topic | 重拉 `my-pairing`；禁止订阅 `activity_pairs` |
 
 客户端顺序必须是“先订阅，再拉快照”，避免初始快照与订阅之间的丢事件窗口。SSE 断开时显示离线状态；恢复时无条件重拉快照。collection list/view rule 仍是最终授权层，客户端 filter 不是权限边界。

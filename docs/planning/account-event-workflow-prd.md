@@ -4,9 +4,9 @@
 >
 > T0 状态：`2026-08-28 已验证`（共享契约与迁移边界已冻结，业务功能未实现）
 >
-> T3 状态：`2026-08-28 已验证`（仅本实现分支；尚未证明已合并默认分支或已部署）
+> T3 状态：`2026-08-29 已验证`（review 修复后，仅本实现分支；尚未证明已合并默认分支或已部署）
 >
-> 最近更新：2026-08-28
+> 最近更新：2026-08-29
 >
 > 适用项目：Chat Circles 现有 React + PocketBase 网站
 >
@@ -212,7 +212,7 @@ T0 已将目标契约冻结为 `2026-08-28.t0-v1`。机器名与共享 TypeScrip
 ### 9.1 数据变更
 
 - `participant_accounts`：追加 `phone_e164`、`phone_lookup_hash`、`phone_verified_at`、`phone_binding_source`、`phone_migration_status`。精确查找/唯一索引使用带部署 secret 的 HMAC-SHA256 hash。PocketBase 0.28.4 已实测可将 text 手机号加入 password identity，但因产品只提供短信验证码，T0 决定不这样做；验证成功后由 hook 签发 token，username identity 仅保留给存量迁移。
-- `registration_field_defs`：冻结 `FULL_NAME`(text，必填，敏感，只用于联系/配对)、`GENDER`(single_choice，选填，仅聚合)、`AGE_RANGE`(single_choice，选填，仅聚合)。不收集 `BIRTH_YEAR` 或完整生日，聚合分组低于 5 人时抑制展示。
+- `registration_field_defs`：冻结 `FULL_NAME`(text，必填，敏感，只用于联系/配对)、`GENDER`(single_choice，选填，仅聚合)、`AGE_RANGE`(single_choice，选填，仅聚合)。不收集 `BIRTH_YEAR` 或完整生日；任一聚合分组低于 5 人时，同维度全部分组一起抑制，避免通过总数和互补桶反推。
 - `activities`：追加 `pairing_started_at/by` 与 `onsite_locked_at/by`，分别作为迟到自动补配和活动开始后高风险调整的服务端事实。
 - `checkins`：追加 `onsite_role`、`onsite_sequence`、`numbered_at`；号码发出后即使撤销签到也不复用。
 - 新增 `activity_pairs`：活动、`pair_sequence`、双方 registration/checkin、状态 `active/released/completed`、配对/释放/完成时间、操作者与原因；同一参与者每场活动至多一个 active 配对。
@@ -262,7 +262,7 @@ T0
 
 T0 由主任务维护共享契约和迁移边界；并行任务不得各自发明同义字段或端点。Wave 2 开始前，应先把 Wave 1 的契约合并到最新 `origin/main`。
 
-T3 验证证据（2026-08-28，本实现分支）：`suite_live_summary.py` 覆盖双完成率交集、零分母、小样本抑制、跨机构 404 与 Realtime topic 越权；全量后端集成 501/501、迁移冒烟 58/58 通过。管理端订阅服务另有 Vitest 覆盖“先订阅再拉快照”、事件防抖和重连刷新。该证据不等于默认分支已合并或生产已部署。
+T3 验证证据（2026-08-29，本实现分支）：`suite_live_summary.py` 覆盖双完成率交集、零分母、互补桶联合抑制、跨机构 404 与 Realtime topic 越权；全量后端集成 501/501 通过。管理端订阅服务另有 Vitest 覆盖六类快照依赖“先订阅再拉快照”、活动/问卷失效事件防抖和重连刷新；迁移冒烟最近一次仍为 58/58。该证据不等于默认分支已合并或生产已部署。
 
 ## 11. 验收清单
 

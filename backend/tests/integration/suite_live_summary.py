@@ -131,12 +131,14 @@ def run(ctx):
               empty_metric.get('onsite_completion') == {'eligible': 0, 'submitted': 0, 'rate': None}
               and empty_metric.get('overall_completion') == {'eligible': 0, 'submitted': 0, 'rate': None},
               empty_metric)
-    rep.check('T3-04 小于 5 的 demographic 桶隐藏计数，达到 5 的桶可见',
+    rep.check('T3-04 小桶连同互补桶一起隐藏，安全维度仍可展示',
               _bucket(initial, 'gender', 'female') == {
-                  'key': 'female', 'count': 5, 'suppressed': False}
+                  'key': 'female', 'count': None, 'suppressed': True}
               and _bucket(initial, 'gender', 'male') == {
-                  'key': 'male', 'count': None, 'suppressed': True},
-              (initial.get('demographics') or {}).get('gender'))
+                  'key': 'male', 'count': None, 'suppressed': True}
+              and _bucket(initial, 'age_range', '25_34') == {
+                  'key': '25_34', 'count': 6, 'suppressed': False},
+              initial.get('demographics'))
     rep.check('T3-05 最近签到仅下发该场 FULL_NAME，T2 未合入时配对指标兼容为 0',
               len(initial.get('recent_checkins') or []) == 5
               and all(item.get('display_name', '').startswith('快照参与者')

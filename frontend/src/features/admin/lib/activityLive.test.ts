@@ -88,7 +88,7 @@ describe('activity live realtime invalidation', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it('先完成四类订阅再拉初始快照，并给 submissions 使用活动关系过滤', async () => {
+  it('先完成全部六类依赖订阅再拉初始快照，并使用活动范围过滤', async () => {
     const fake = fakeClient();
     const snapshots: ActivityLiveSummaryResponse[] = [];
 
@@ -99,14 +99,22 @@ describe('activity live realtime invalidation', () => {
     });
 
     const fetchIndex = fake.log.findIndex((entry) => entry.startsWith('fetch:'));
-    expect(fetchIndex).toBe(5);
+    expect(fetchIndex).toBe(7);
     expect(fake.log.slice(0, fetchIndex).map((entry) => entry.split(':')[1])).toEqual([
       'PB_CONNECT',
+      'activities',
       'registrations',
       'checkins',
+      'activity_surveys',
       'submissions',
       'activity_pairs',
     ]);
+    expect(fake.log.find((entry) => entry.startsWith('subscribe:activities'))).toContain(
+      "id = 'activity-1'",
+    );
+    expect(fake.log.find((entry) => entry.startsWith('subscribe:activity_surveys'))).toContain(
+      "activity_id = 'activity-1'",
+    );
     expect(fake.log.find((entry) => entry.startsWith('subscribe:submissions'))).toContain(
       "activity_survey_id.activity_id = 'activity-1'",
     );
@@ -128,8 +136,8 @@ describe('activity live realtime invalidation', () => {
       onStatusChange: (value) => statuses.push(value),
     });
 
-    fake.callbacks.get('registrations')?.();
-    fake.callbacks.get('checkins')?.();
+    fake.callbacks.get('activities')?.();
+    fake.callbacks.get('activity_surveys')?.();
     await vi.advanceTimersByTimeAsync(199);
     expect(fake.requestCount()).toBe(1);
     await vi.advanceTimersByTimeAsync(1);
@@ -149,8 +157,10 @@ describe('activity live realtime invalidation', () => {
     await stop();
     expect(fake.releases).toEqual([
       'PB_CONNECT',
+      'activities',
       'registrations',
       'checkins',
+      'activity_surveys',
       'submissions',
       'activity_pairs',
     ]);

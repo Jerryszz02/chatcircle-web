@@ -458,8 +458,10 @@ export const ACCOUNT_EVENT_ENDPOINTS = {
  * 订阅必须先建立，再拉取快照；任一事件防抖后重拉，断线恢复时无条件重拉。
  */
 export const ACTIVITY_LIVE_REALTIME_SOURCES = [
+  'activities',
   'registrations',
   'checkins',
+  'activity_surveys',
   'submissions',
   'activity_pairs',
 ] as const;

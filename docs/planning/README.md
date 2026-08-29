@@ -45,10 +45,10 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 |---|---|
 | 生成请求 | 归档 2026-08-27 专项升级，并于 2026-08-28 实施 T0 共享契约与迁移设计 |
 | 初始生成 | 2026-08-05 |
-| 最近同步 | 2026-08-28（T3 `已验证`）：实现单活动快照、双问卷完成率、小样本抑制、Realtime topic 权限、管理端订阅防抖与重连刷新；T0 冻结契约不变。 |
+| 最近同步 | 2026-08-29（T3 review 修复后`已验证`）：人口统计改为互补桶联合抑制；管理端订阅补齐 `activities` 与 `activity_surveys`，活动现场字段和问卷清单变化也会刷新快照；T0 契约版本不变。 |
 | 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb-t3-realtime-data-service`；`agent/t3-realtime-data-service` 从 `origin/main@54de5e8` 创建。不把本工作分支写成默认分支或已部署生产状态。 |
-| 本次关键代码证据 | `backend/pb_hooks/live.pb.js` 提供同事务 `live-summary` 与 Realtime 双向权限守卫；`frontend/src/features/admin/lib/activityLive.ts` 只用事件失效化 HTTP 快照。T1/T2 schema 未在本任务重复实现；缺少 `activity_pairs` 时快照兼容返回空配对指标。 |
-| 本次验证命令 | 2026-08-28 已通过 `bash backend/tests/migration_smoke.sh`（58/58）、`bash backend/tests/run_integration.sh`（501/501）、`npm test -- --run`（44 files / 313 tests）、lint、typecheck、build、全部 hook `node --check` 与 planning 文档审计。 |
+| 本次关键代码证据 | `backend/pb_hooks/live.pb.js` 提供同事务 `live-summary`、互补桶联合抑制与 Realtime 双向权限守卫；`frontend/src/features/admin/lib/activityLive.ts` 用六类依赖事件失效化 HTTP 快照。T1/T2 schema 未在本任务重复实现；缺少 `activity_pairs` 时快照兼容返回空配对指标。 |
+| 本次验证命令 | 2026-08-29 review 修复已通过 `bash backend/tests/run_integration.sh`（501/501）、`npm test -- --run`（44 files / 313 tests）、lint、typecheck、build、全部 hook `node --check` 与 planning 文档审计；无 schema 变更，首版分支迁移冒烟最近一次为 58/58。 |
 | 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T3 已按 `2026-08-28.t0-v1` 落地快照与 Realtime 失效化，其余任务继续复用同一契约。 |
 
 ## 已生成文档

@@ -79,14 +79,17 @@ routerAdd('GET', '/api/cc/activities/{id}/live-summary', (e) => {
       const eligible = Object.keys(eligibleIds).length;
       return { eligible: eligible, submitted: submitted, rate: ratio(submitted, eligible) };
     };
-    const suppressedBuckets = (counts) =>
-      Object.keys(counts)
-        .sort()
-        .map((key) => ({
-          key: key,
-          count: counts[key] < 5 ? null : counts[key],
-          suppressed: counts[key] < 5,
-        }));
+    const suppressedBuckets = (counts) => {
+      const keys = Object.keys(counts).sort();
+      // 任一小桶都必须连同同维度的互补桶一起隐藏，否则可用 approved.total
+      // 减去其余可见桶，反推出小桶的精确人数。
+      const suppressDimension = keys.some((key) => counts[key] < 5);
+      return keys.map((key) => ({
+        key: key,
+        count: suppressDimension ? null : counts[key],
+        suppressed: suppressDimension,
+      }));
+    };
     const onsiteCode = (role, sequence) => {
       const n = Number(sequence || 0);
       if ((role !== 'speaker' && role !== 'listener') || !Number.isFinite(n) || n <= 0) return '';
