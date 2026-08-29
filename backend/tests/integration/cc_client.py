@@ -14,12 +14,14 @@ import urllib.request
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
-def call(base, method, path, body=None, token=None, raw=False):
+def call(base, method, path, body=None, token=None, raw=False, headers=None):
     """发起一次 HTTP 调用，返回 (status, 解析后的 JSON / raw=True 时为原始字节)。"""
     req = urllib.request.Request(base + path, method=method)
     req.add_header('Content-Type', 'application/json')
     if token:
         req.add_header('Authorization', token)
+    for key, value in (headers or {}).items():
+        req.add_header(key, value)
     data = json.dumps(body).encode() if body is not None else None
     try:
         with _OPENER.open(req, data, timeout=30) as res:

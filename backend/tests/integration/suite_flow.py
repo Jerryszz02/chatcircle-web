@@ -2,7 +2,7 @@
 """suite_flow — 主链路全链路断言（自 /tmp/cc_e2e.py 联调脚本沉淀为正式产物）。
 
 覆盖：邀请码 → 管理员注册/登录 → 建活动（数组版 form_config）→ 发布 →
-参与者自动注册 → 公开详情 → 报名 → 审核 → 签到（错误分支 + 幂等）→
+预置存量参与者 → 公开详情 → 报名 → 审核 → 签到（错误分支 + 幂等）→
 问卷（资格/草稿/提交幂等/只读答案/me 聚合）→ 看板指标口径 → 导出 ZIP →
 备份端点下线形态（410/无审计）→ 未认证错误形态 →
 现有/往期划分（公开列表 scope 过滤）与已结束活动报名截止（end_time 兜底）。
@@ -90,16 +90,10 @@ def run(ctx):
               pub if s != 200 else '')
 
     # ---------- D. 参与者链路 ----------
-    s, p1 = call(base, 'POST', '/api/cc/auth/participant',
-                 {'username': 'FlowUser_One', 'password': fx.PASSWORD})
-    P1T, P1 = p1.get('token'), p1.get('record', {}).get('id')
-    rep.check('D1 参与者自动注册（用户名小写归一 + created=true）',
-              s == 200 and p1.get('created') is True
-              and p1.get('record', {}).get('username') == 'flowuser_one',
-              p1 if s != 200 else '')
-    _, p2 = call(base, 'POST', '/api/cc/auth/participant',
-                 {'username': 'flowuser_two', 'password': fx.PASSWORD})
-    P2T = p2.get('token')
+    P1, P1T, created = fx.create_participant(base, 'FlowUser_One')
+    _, P2T, _ = fx.create_participant(base, 'flowuser_two')
+    rep.check('D1 预置存量参与者夹具（用户名小写归一 + 可 impersonate）',
+              created is True and bool(P1) and bool(P1T), [P1, created])
 
     s, det = call(base, 'GET', '/api/cc/public/activities/%s' % AID)
     rf = det.get('registration_fields') or []
@@ -340,12 +334,8 @@ def run(ctx):
               and rf2.get('listener_exp', {}).get('role_scope') == 'listener',
               det2 if s != 200 else rf2)
 
-    _, prl = call(base, 'POST', '/api/cc/auth/participant',
-                  {'username': 'flow_role_lis', 'password': fx.PASSWORD})
-    PRL_T = prl.get('token')
-    _, prs = call(base, 'POST', '/api/cc/auth/participant',
-                  {'username': 'flow_role_spk', 'password': fx.PASSWORD})
-    PRS_T = prs.get('token')
+    _, PRL_T, _ = fx.create_participant(base, 'flow_role_lis')
+    _, PRS_T, _ = fx.create_participant(base, 'flow_role_spk')
 
     s, r = call(base, 'POST', '/api/cc/activities/%s/register' % act2,
                 {'activity_role': 'listener',
@@ -400,12 +390,11 @@ def run(ctx):
     rep.check('I1 已结束未关闭活动详情：registration.open=false 且 reason=ended',
               s == 200 and det3.get('registration', {}).get('open') is False
               and det3.get('registration', {}).get('reason') == 'ended', det3)
-    _, p3 = call(base, 'POST', '/api/cc/auth/participant',
-                 {'username': 'flow_user_three', 'password': fx.PASSWORD})
+    _, P3T, _ = fx.create_participant(base, 'flow_user_three')
     s, r3 = call(base, 'POST', '/api/cc/activities/%s/register' % act_ended,
                  {'activity_role': 'speaker',
                   'answers': [{'field_def_id': fields['nickname'], 'value': '阿三'}]},
-                 p3.get('token'))
+                 P3T)
     rep.check('I2 已结束活动提交报名 → 400 REGISTRATION_CLOSED',
               s == 400 and biz_code(r3) == 'REGISTRATION_CLOSED', r3)
 

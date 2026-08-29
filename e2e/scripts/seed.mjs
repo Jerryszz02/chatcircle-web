@@ -15,6 +15,8 @@ export const FIXTURE = {
   adminEmail: 'e2e_admin@e2e.cc.local', // 2026-08 改版：管理员注册必填邮箱（AC-24）
   participantUsername: 'e2e_user1',
   participantPassword: 'e2e_user_pass_1',
+  participantPhone: '13800003001',
+  phoneCode: '246810',
   activityTitle: 'E2E 八月倾诉茶话会',
   surveyTitle: 'E2E 活动后问卷',
   // 培训链路 fixture（training-flow.spec.ts）：
@@ -23,8 +25,10 @@ export const FIXTURE = {
   trainingTitle: 'E2E 聆听者培训八月场',
   listenerUsername: 'e2e_listener1', // 已有 approved 聆听者报名（培训签到资格，账号级）
   listenerPassword: 'e2e_lis_pass_1',
+  listenerPhone: '13800003002',
   outsiderUsername: 'e2e_user2', // 仅有 approved 倾诉者报名，无聆听者资格（负向用例）
   outsiderPassword: 'e2e_user_pass_2',
+  outsiderPhone: '13800003003',
   listenerNickname: '小听',
   outsiderNickname: '小外',
   answers: {
@@ -198,11 +202,37 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     throw new Error(`资格活动发布失败：${JSON.stringify(qualPub).slice(0, 300)}`);
   }
 
-  // 参与者自动注册（POST /api/cc/auth/participant：用户名不存在即建号并登录，FR-AUTH-001）
-  // → 报名第二活动 → 管理员审核通过。聆听者获得培训签到资格（账号级，全平台通用）；
+  // 超管在一次性临时库预置存量用户名账号，再经 T1 bind-phone 绑定测试手机号；公开
+  // 用户名端点只允许登录既有账号，不能作为 fixture 建号捷径。固定 username 仅供管理端
+  // 名单断言，测试页面随后只用手机号验证码登录。
+  const createLegacyAndBind = async (username, password, phone) => {
+    const record = await call('POST', `${pbUrl}/api/collections/participant_accounts/records`, {
+      username: username.trim().toLowerCase(),
+      password,
+      passwordConfirm: password,
+      status: 'active',
+      phone_migration_status: 'legacy_unbound',
+    }, ST);
+    const auth = await call(
+      'POST', `${pbUrl}/api/collections/participant_accounts/impersonate/${record.id}`, {}, ST,
+    );
+    const sent = await call('POST', `${pbUrl}/api/cc/auth/participant/request-code`, {
+      phone, purpose: 'bind_phone',
+    }, auth.token);
+    await call('POST', `${pbUrl}/api/cc/auth/participant/bind-phone`, {
+      phone, challenge_id: sent.challenge_id, code: FIXTURE.phoneCode,
+    }, auth.token);
+    return { ...auth, record };
+  };
+
+  const mainParticipant = await createLegacyAndBind(
+    FIXTURE.participantUsername, FIXTURE.participantPassword, FIXTURE.participantPhone,
+  );
+
+  // 培训账号报名第二活动 → 管理员审核通过。聆听者获得培训签到资格（账号级，全平台通用）；
   // 倾诉者仅 approved 倾诉者报名，用于负向用例（listener_not_approved）。
-  const registerAndApprove = async (username, password, role, nickname) => {
-    const auth = await call('POST', `${pbUrl}/api/cc/auth/participant`, { username, password });
+  const registerAndApprove = async (username, password, phone, role, nickname) => {
+    const auth = await createLegacyAndBind(username, password, phone);
     const reg = await call('POST', `${pbUrl}/api/cc/activities/${qualActivity.id}/register`, {
       activity_role: role,
       answers: [{ field_def_id: fieldDefs.nickname, value: nickname }],
@@ -212,8 +242,8 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     }, AT);
     return auth.record.id;
   };
-  await registerAndApprove(FIXTURE.listenerUsername, FIXTURE.listenerPassword, 'listener', FIXTURE.listenerNickname);
-  await registerAndApprove(FIXTURE.outsiderUsername, FIXTURE.outsiderPassword, 'speaker', FIXTURE.outsiderNickname);
+  await registerAndApprove(FIXTURE.listenerUsername, FIXTURE.listenerPassword, FIXTURE.listenerPhone, 'listener', FIXTURE.listenerNickname);
+  await registerAndApprove(FIXTURE.outsiderUsername, FIXTURE.outsiderPassword, FIXTURE.outsiderPhone, 'speaker', FIXTURE.outsiderNickname);
 
   // 培训：集合 API 创建（status 服务端强制 draft；checkin_qr_token 由 hooks 生成并随响应带回）
   // → 发布为 published。开放签到留给 spec 经管理端 UI 操作（与主链路活动签到同模式）。
@@ -245,13 +275,18 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     adminPassword: FIXTURE.adminPassword,
     participantUsername: FIXTURE.participantUsername,
     participantPassword: FIXTURE.participantPassword,
+    participantPhone: FIXTURE.participantPhone,
+    participantId: mainParticipant.record.id,
+    phoneCode: FIXTURE.phoneCode,
     trainingId: training.id,
     trainingTitle: FIXTURE.trainingTitle,
     trainingCheckinToken: training.checkin_qr_token,
     listenerUsername: FIXTURE.listenerUsername,
     listenerPassword: FIXTURE.listenerPassword,
+    listenerPhone: FIXTURE.listenerPhone,
     outsiderUsername: FIXTURE.outsiderUsername,
     outsiderPassword: FIXTURE.outsiderPassword,
+    outsiderPhone: FIXTURE.outsiderPhone,
     answers: FIXTURE.answers,
   };
 }

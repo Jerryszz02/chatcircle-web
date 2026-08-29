@@ -9,7 +9,7 @@
 >
 > 各子目录另有聚焦手册，本文会引用而不是复制它们：`backend/README.md`（后端操作）、`deploy/README.md`（生产部署）、`mcp/README.md`（MCP 数据取送）、`e2e/`（端到端测试）。
 >
-> **专项升级边界（2026-08-29）**：`frontend/src/shared/api/accountEvent.ts` 已冻结手机号/配对/快照/细粒度导出的目标契约；T2 现场编号与配对后端、T3 单活动实时数据服务均已实现并验证，T1/T4~T6 仍是目标契约。本 T2 分支尚未合并或部署。
+> **专项升级边界（2026-08-29）**：`frontend/src/shared/api/accountEvent.ts` 已冻结手机号/配对/快照/细粒度导出契约；T1 手机号认证与参与者 UI、T2 现场编号与配对后端、T3 单活动实时数据服务均已实现并验证，T4~T6 仍是目标契约。本 T2 分支尚未合并或部署。
 
 ---
 
@@ -29,7 +29,7 @@
 |---|---|---|
 | 超级管理员（全平台唯一） | PocketBase `_superusers` | 全平台 |
 | 机构管理员 | `admin_accounts`（auth 集合，带 `organization_id`） | 仅本机构 |
-| 参与者 | `participant_accounts`（auth 集合，不绑机构、无联系方式） | 仅本人 |
+| 参与者 | `participant_accounts`（auth 集合，不绑机构；已验证手机号为主要登录身份） | 仅本人 |
 
 「倾诉者 speaker / 聆听者 listener」**不是平台角色**，而是每条报名记录上的 `activity_role`；同一参与者可在不同活动选不同角色。聆听者培训是与活动解绑的独立体系：签到资格 = 该账号在全平台任一活动有 approved 的 listener 报名。
 
@@ -41,8 +41,8 @@
 ├── frontend/            # React SPA。src/features/{participant,admin,superadmin} + src/shared/
 │                        #   详见 frontend 各节；操作手册级内容不在这里，全在本文 §6
 ├── backend/             # PocketBase 后端
-│   ├── pb_migrations/   #   版本化 schema（27 个迁移文件 / 25 个业务集合），schema 变更的唯一入口
-│   ├── pb_hooks/        #   服务端业务规则（JSVM *.pb.js）：53 个自定义路由 + Realtime 守卫 + 写守卫 + 审计
+│   ├── pb_migrations/   #   版本化 schema（28 个迁移文件 / 26 个业务或内部集合），schema 变更的唯一入口
+│   ├── pb_hooks/        #   服务端业务规则（JSVM *.pb.js）：54 个自定义路由 + Realtime 守卫 + 写守卫 + 审计
 │   ├── tests/           #   L3 集成套件 + 迁移冒烟（CI 必过），仅用 bash/curl/python3 标准库
 │   ├── scripts/         #   种子数据、历史数据补录
 │   ├── pb_data/         #   本地开发数据（SQLite），【不入库】
@@ -89,14 +89,14 @@ Docker 一键启动（生产同构）：`cp .env.example .env` → **先填好 `
 1. **写入收口**。几乎所有业务写操作（报名、审核、签到、问卷、导出、邀请码……）都只走 `pb_hooks` 里的自定义端点（`POST /api/cc/*`），在服务端事务内完成；集合的直连 create/update 被 `guards.pb.js` 等守卫封堵，直连 delete 全部集合关闭。前端集合 API 主要用于**读**。
 2. **读路径分两路**。管理端读集合走 PocketBase 原生 API + API rules（机构隔离靠 rule 里的 `@request.auth.organization_id` 链式反查）；参与者读公开/聚合信息走 hooks 白名单端点（`/api/cc/public/*`、`/api/cc/me/*`），不直连集合。
 3. **机构隔离在服务端强制**。写路径分两种：**自定义端点**内 `organization_id` 一律由 hooks 从登录身份注入，客户端传入的会被忽略；少数放行的**集合直连 create**（活动、培训、机构自定义报名字段）则由前端显式传本机构 `organization_id`（取自登录管理员身份，如 `ActivityForm.tsx`），由 API rules 校验 `@request.auth.organization_id = organization_id`，且 guards 禁止 update 再改它。读路径靠 rules 按身份过滤。跨机构访问返回 **404 而非 403**（不泄露资源存在性）。
-4. **无硬删除**。全部 25 个业务集合 `deleteRule: null`；停用/归档/作废/撤销/释放一律用状态字段表达（FR-AUD-001）。改代码时不要引入任何删除语义。
+4. **无硬删除**。全部 26 个业务/内部集合 `deleteRule: null`；停用/归档/作废/撤销/释放一律用状态字段表达（FR-AUD-001）。改代码时不要引入任何删除语义。
 5. **pb_hooks 是隔离作用域的 JS，不是 Node 项目**。PocketBase 0.28 JSVM 中各 `*.pb.js` 文件作用域完全隔离，没有 import/全局共享。`pb_hooks/lib/` 下三个文件（http/ratelimit/audit）是**契约标准源，运行时不会被加载**；每个领域文件把所需工具函数**原样内联**在自己闭包里。**改 lib 语义后必须同步所有内联副本**——这是本仓库最大的维护陷阱（文件头部有"勿手工改副本"警告）。
 
 整体请求路径（生产）：浏览器 → Caddy（TLS、安全头、封 `/_/*`）→ PocketBase（`pb_public/` 静态前端 + 集合 API + `/api/cc/*` hooks）→ SQLite。
 
 ## 5. 后端详解
 
-### 5.1 数据模型（25 个业务集合）
+### 5.1 数据模型（26 个业务/内部集合）
 
 schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域（命名 `<Unix时间戳>_cc_<域名>.js`，按时间戳排序执行）。按域分组：
 
@@ -107,7 +107,8 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 | `organizations` | 机构主数据 + 机构级开关：`status`(active/disabled)、`require_activity_approval`（活动发布需平台审核）、`allow_sensitive_export`（敏感导出开关） |
 | `admin_accounts` (auth) | 机构管理员：username+密码、`organization_id`、`status`；`authRule: status='active'` 拒绝停用账号登录；token 7 天 |
 | `admin_invites` | 一次性管理员邀请码：**只存 `token_hash`**（sha256），明文仅生成时返回一次；`status`(unused/used/revoked/expired)、`expires_at`（默认 7 天） |
-| `participant_accounts` (auth) | 参与者：仅 username+密码（小写归一），**不存任何联系方式**、不绑机构；token 30 天；无找回入口 |
+| `participant_accounts` (auth) | 参与者：已验证手机号为主要身份；完整 `phone_e164` 与 HMAC 查找值为 hidden，公开响应仅给掩码/绑定状态；username+密码只保留给存量迁移；token 30 天 |
+| `participant_phone_challenges` | 手机验证码内部 challenge：只存手机号 HMAC、用途、账号关系、provider/状态/过期时间，不存完整手机号或验证码；全部集合 API rules 关闭 |
 
 **活动与报名**
 
@@ -183,7 +184,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 **培训 `trainings.status`（3 态）**：draft→published→closed；培训签到资格 = 全平台任一 approved listener 报名（否则 `listener_not_approved`）。
 
-### 5.4 自定义端点全集（53 个，统一 `/api/cc/*` 前缀）
+### 5.4 自定义端点全集（54 个 `routerAdd`，统一 `/api/cc/*` 前缀）
 
 鉴权标记：`anon` 无需登录 / `participant` / `admin`（机构管理员，requireAuth 同时校验账号与所属机构均 active）/ `super` / `admin|super`。
 
@@ -192,7 +193,9 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 | 端点 | 鉴权 | 说明 |
 |---|---|---|
 | GET `/api/cc/health` | anon | 存活探针 |
-| POST `/api/cc/auth/participant` | anon | 参与者**自动注册/登录一体**：用户名小写归一，不存在即建号，存在则验密；三层限流（同人+IP 5 次/10min、同 IP 跨用户名 30 次/10min 防喷洒、同 IP 建号 10 个/h） |
+| POST `/api/cc/auth/participant` | anon | **仅存量用户名账号迁移登录**：用户名小写归一，只校验已存在账号；未知用户名与错误密码同形拒绝且不建号、不签发 token；双层限流（同人+IP 5 次/10min、同 IP 跨用户名 30 次/10min 防喷洒） |
+| POST `/api/cc/auth/participant/request-code` `/verify-code` | anon | 手机号验证码请求与登录/注册；响应不区分号码是否已注册，成功响应不含内部 username/完整手机号/HMAC |
+| POST `/api/cc/auth/participant/bind-phone` `/change-phone` | participant | 存量账号绑定保留 participant_id；换绑需旧号和新号双验证码，冲突不自动覆盖 |
 | POST `/api/cc/auth/admin-register` | anon | 一次性邀请码注册管理员，事务内消费邀请码+建号+审计 |
 | （非路由）PB 内置 auth-with-password | — | `authguard.pb.js` 补限流：per-IP 20 次/10min + per-身份+IP 5 次失败/10min |
 
@@ -289,8 +292,8 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 ### 5.7 后端测试体系（`backend/tests/`）
 
-- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 19 个 suite（519 断言）：越权矩阵 AC-03、名额并发 AC-08、状态机 AC-07、签到 AC-09/20、T2 配对、T3 实时汇总与 Realtime ACL、培训、问卷资格、导出 AC-16/17、限流 AC-21、备份告警 AC-23、无硬删除 AC-18、安全加固回归（必须是最后一个使用内置认证的 suite）等。
-- `migration_smoke.sh`：T2/seed 局部回滚 → 全量 down → sqlite3 直查 25 个业务集合清零 → 再 up，随后 serve 抽查，共 61 项。
+- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 20 个 suite（535 断言）：越权矩阵 AC-03、名额并发 AC-08、状态机 AC-07、签到 AC-09/20、T1 手机号认证与存量登录防绕过、T2 配对、T3 实时汇总与 Realtime ACL、培训、问卷资格、导出 AC-16/17、限流 AC-21、备份告警 AC-23、无硬删除 AC-18、安全加固回归等。
+- `migration_smoke.sh`：seed 及后续迁移局部回滚 → 全量 down → sqlite3 直查 26 个业务/内部集合清零 → 再 up，随后 serve 抽查，共 62 项。
 - **两条强制规则**：① authguard 对内置 auth-with-password 按 IP 限 25 次/10min，一轮全量当前使用 22 次（余量 3）——新增套件仍应避免消耗这项预算，管理员登录态用 impersonate，参与者走 `/api/cc/auth/participant`；② 新增带 `organization_id` 的接口，**必须同 PR 补机构越权用例**（通用端点放 `suite_acl.py`，领域聚合端点可放对应 suite）。
 
 ## 6. 前端详解（`frontend/`）
@@ -308,7 +311,7 @@ src/
 │   ├── pocketbase.ts      #   3 个按角色隔离的 PB client 单例（见 §6.3）
 │   ├── auth.ts / session.ts / guards.tsx
 │   ├── api/               #   types.ts（当前 record 类型+枚举，与 pb_migrations 手工同步）
-│   │                      #   accountEvent.ts（T0 冻结契约；T2/T3 对应后端已实现，其余仍是目标）
+│   │                      #   accountEvent.ts（T0 冻结契约；T1/T2/T3 已实现，其余仍是目标）
 │   │                      #   collections.ts（类型化 RecordService 封装）、http.ts（自定义端点 fetch 包装）
 │   ├── ui/                #   无样式结构组件（Button/Card/Modal/Toast/Loading/PageLayout/ForbiddenPage…）
 │   ├── styles/global.css  #   设计 token + .cc-* 共享类（见 §6.6）
@@ -326,7 +329,7 @@ src/
 
 - **三角色各一个 PB client 单例**，token 分 key 存 localStorage（`cc_participant_auth`/`cc_admin_auth`/`cc_super_auth`）；任一角色登录成功会**清空另两角色会话**（单会话互斥）。角色→集合映射：participant→participant_accounts、admin→admin_accounts、super→_superusers。
 - PB 地址：`VITE_PB_URL` 或回退 `window.location.origin`（生产同源）。client 关闭了 autoCancellation，并包了两层：stripUndefinedParams（SDK 0.21 会把 `filter: undefined` 序列化成字符串导致 400）+ 管理端 401 统一清会话跳登录页（参与者端不跳，由页面自处理 `?redirect=` 回跳）。
-- 登录/注册路径：参与者**没有独立注册页**——唯一入口是报名链路里的"用户名+密码单框自动识别"（`POST /api/cc/auth/participant`）；机构管理员走 `authWithPassword` + 邀请码注册端点；超管无注册入口。
+- 登录/注册路径：参与者在 `/login` 和报名链路使用手机号+验证码，首次验证自动建号；原用户名+密码入口只用于存量账号登录后绑定手机号。机构管理员走 `authWithPassword` + 邀请码注册端点；超管无注册入口。
 - 路由守卫 `RequireRole`（`shared/guards.tsx`）：本角色会话有效→放行；持其它角色会话→403 页；未登录→跳对应登录页。**守卫只是 UX，权限永远由服务端 rules/hooks 强制**——改权限不要只改前端。
 - 会话响应式：`useSessionSnapshot()`（useSyncExternalStore 订阅三个 authStore）。
 
@@ -352,7 +355,7 @@ Vitest + jsdom + Testing Library，40 个测试文件与源码 colocate，主力
 
 ## 7. 端到端业务流程（前后端串起来）
 
-**参与者主链路**：广场/详情（`GET /api/cc/public/activities*`）→ 报名页内嵌单框认证（`POST /api/cc/auth/participant`，不存在即建号）→ 提交报名（`POST .../register`，按所选角色的 role_scope 字段渲染表单）→ 在 `/me`（`GET /api/cc/me/overview`）看审核状态 → 到场扫固定二维码（管理端用 qrcode 本地生成，参与者系统相机扫码打开 `/checkin/:token`）→ 落地即自动 `POST /api/cc/checkin/self`（幂等）→ 活动后打开问卷链接 `/survey/:qrToken`（四条件资格）→ 草稿/提交。
+**参与者主链路**：广场/详情（`GET /api/cc/public/activities*`）→ 报名页请求并验证手机号验证码（首次自动建号；存量用户名账号先登录再绑定）→ 提交报名（`POST .../register`，按所选角色的 role_scope 字段渲染表单）→ 在 `/me`（`GET /api/cc/me/overview`）看审核状态和绑定/换绑手机号 → 到场扫固定二维码 → `POST /api/cc/checkin/self`（幂等）→ 活动后问卷草稿/提交。
 
 **机构管理员日常**：建活动（draft）→ （如机构开审核则提交审批）→ 发布 → 审核报名（transition，事务内名额硬校验）→ 现场开放签到场次、展示二维码、补签/撤销 → 从模板复制问卷并开放 → 看板/导出 ZIP（13 个 CSV）→ 培训同理（trainings 三件套）。
 
@@ -395,7 +398,7 @@ MCP 是由 WorkBuddy、Kimi、Claude、Codex 等本地客户端启动的 STDIO �
 
 | 层 | 位置 | 运行 | 覆盖 |
 |---|---|---|---|
-| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 44 files / 313 tests：lib 纯逻辑、页面行为、路由守卫与 T3 Realtime 失效化 |
+| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 46 files / 320 tests：lib 纯逻辑、页面行为、路由守卫、T1 手机号交互与 T3 Realtime 失效化 |
 | 后端集成 + 迁移冒烟 | `backend/tests/` | `bash backend/tests/run_integration.sh`、`migration_smoke.sh` | 越权矩阵、状态机、并发名额、导出、限流、无硬删除……（AC-01~23 映射见 docs/planning/test-plan.md） |
 | E2E 主链路 | `e2e/` | `cd e2e && npm test`（环境全自动自举，与本地库隔离） | 报名→审核→签到→问卷→导出、培训链路（移动 viewport，少而精） |
 

@@ -6,7 +6,7 @@ Chat Circles 后端为单个 PocketBase 实例：认证、业务 API、collectio
 
 | 路径 | 内容 |
 | --- | --- |
-| `pb_migrations/` | 全部 schema 变更（集合、字段、索引、API rules），版本化管理。**schema 只能经迁移变更**，禁止在生产环境用 admin UI 手工改结构。当前含 25 个业务集合的 27 个 JS 迁移；T2 迁移 `1787880000_cc_activity_pairings.js` 增加现场字段与 `activity_pairs`。 |
+| `pb_migrations/` | 全部 schema 变更（集合、字段、索引、API rules），版本化管理。**schema 只能经迁移变更**，禁止在生产环境用 admin UI 手工改结构。当前含 26 个业务/内部集合的 28 个 JS 迁移；T2 的 `1787880000` 增加现场字段与 `activity_pairs`，T1 的 `1787895000` 增加参与者手机号字段与内部 challenge 集合。 |
 | `pb_hooks/` | 全部服务端业务规则（JS），按领域分文件（`auth.pb.js`、`registrations.pb.js` 等）。**0.28.4 JSVM 各 hooks 文件作用域完全隔离**，共享函数以 `lib/` 为契约标准源、在 handler 内内联（勿手工改副本）。 |
 | `tests/` | 服务端测试：`integration/` 集成测试套件（L3，CI 必过）+ `migration_smoke.sh` 迁移冒烟，见下文「测试」。 |
 | `scripts/` | 开发辅助脚本：`seed_demo.sh` 演示种子数据注入，见下文「演示种子数据」。 |
@@ -54,6 +54,22 @@ bash backend/scripts/seed_demo.sh
 
 实现说明：模板因 `survey_templates.current_version_id ↔ survey_template_versions.template_id` 循环引用无法经 API 一次创建，脚本对模板首版使用 sqlite3 直插（`seed_demo.py --sql-fixture`，列名与迁移 1785888660 一致），其余数据全部走 API 注入；脚本自带临时 serve（默认端口 8096，注入完即停止），若已有 serve 占用同一数据目录请先停止。
 
+## 参与者手机号认证
+
+T1 使用阿里云号码认证服务 `Dypnsapi` 的 `SendSmsVerifyCode` / `CheckSmsVerifyCode`。本地启动前至少配置：
+
+```sh
+export CC_ENVIRONMENT=development
+export CC_SMS_PROVIDER=aliyun
+export CC_PHONE_HASH_KEY='替换为至少32字符的独立随机密钥'
+export ALIBABA_CLOUD_ACCESS_KEY_ID='从部署环境注入'
+export ALIBABA_CLOUD_ACCESS_KEY_SECRET='从部署环境注入'
+export CC_SMS_SIGN_NAME='控制台中的短信认证签名'
+export CC_SMS_TEMPLATE_CODE='控制台中的短信认证模板代码'
+```
+
+完整手机号只写入 `participant_accounts.phone_e164` 隐藏字段，精确查找使用带部署密钥的 HMAC；验证码和完整手机号不写 challenge、日志或审计。`CC_SMS_PROVIDER=mock` 只供自动化测试，且在 `CC_ENVIRONMENT=production` 下会被服务端拒绝。
+
 ## 测试
 
 ### 集成测试套件（L3，CI 必过）
@@ -62,7 +78,7 @@ bash backend/scripts/seed_demo.sh
 bash backend/tests/run_integration.sh
 ```
 
-一键自举临时 PocketBase 实例，执行 `tests/integration/` 下全部套件（519 项断言），覆盖既有主链路、越权、状态机、签到/问卷/导出/培训等回归，以及 T2 现场编号与配对、T3 实时汇总与 Realtime 权限。任一失败退出码为 1；详见 `tests/README.md`。
+一键自举临时 PocketBase 实例并执行全部套件（535 项断言），覆盖既有主链路、越权、并发、导出与审计回归，以及 T1 手机号认证、T2 现场编号与配对、T3 实时汇总与 Realtime 权限。任一失败退出码为 1；仅依赖 python3 标准库。端口可用 `CC_IT_PORT` 覆盖（默认 8097），`CC_IT_KEEP=1` 保留临时目录调试。详见 `tests/README.md`。
 
 ### 迁移冒烟验证
 
@@ -70,7 +86,7 @@ bash backend/tests/run_integration.sh
 bash backend/tests/migration_smoke.sh
 ```
 
-脚本使用临时数据目录（不污染 `pb_data/`）：空库 `migrate up` → T2/seed 局部回滚 → 全部 `migrate down` → 再 `migrate up` 往返，随后启动 serve 抽查 25 个集合存在性、访问规则、唯一索引、三类身份隔离与无硬删除。全部检查通过时退出码为 0。
+脚本使用临时数据目录（不污染 `pb_data/`）：空库 `migrate up` → seed 及其后续迁移局部回滚 → 全部 `migrate down` → 再 `migrate up` 往返，随后启动 serve 抽查 26 个业务/内部集合、权限、唯一索引、三类身份隔离与无硬删除（62 项检查）。全部检查通过时退出码为 0。
 
 ## 邮件（SMTP）配置（2026-08 改版）
 

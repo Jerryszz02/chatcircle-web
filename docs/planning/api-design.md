@@ -1,12 +1,12 @@
 # 手机号账号与活动现场 API 契约
 
-> 状态：T0 契约与 T3 实时数据服务已在默认分支验证；T2 现场编号与配对后端在 `agent/t2-pairing-backend` `已验证`，尚未合并或部署；T1/T4–T6 仍为`计划中`
+> 状态：T0 契约、T1 手机号认证与 T3 实时数据服务已在默认分支验证；T2 现场编号与配对后端在 `agent/t2-pairing-backend` `已验证`，尚未合并或部署；T4–T6 仍为`计划中`
 >
 > 契约版本：`2026-08-28.t0-v1`
 >
 > 适用范围：[account-event-workflow-prd.md](account-event-workflow-prd.md) 的手机号账号、现场编号/配对、实时工作台与细粒度导出
 >
-> 当前实现差距：默认分支已提供 T3 `live-summary`、Realtime topic 守卫和管理端失效化订阅；本 T2 分支已有 §4 的配对/锁定端点、现场 schema 与本人最小快照。§3 手机号、T4/T5 UI 和 §6 导出 v2 尚未实现。实际可用 API 以 [developer-guide.md](../developer-guide.md) 和 `backend/pb_hooks/` 为准。
+> 当前实现差距：T1 四个手机号端点已在 `phoneauth.pb.js` 落地并通过 mock provider 集成测试；T3 已提供 `live-summary`、Realtime topic 守卫和管理端失效化订阅服务；本 T2 分支已有 §4 的配对/锁定端点、现场 schema、本人最小快照与提交后失效消息。真实阿里云账号、费用与测试号码仍待部署环境联调，T4/T5 UI 和 §6 导出 v2 尚未实现；本分支尚未合并或部署。实际代码现状以 [developer-guide.md](../developer-guide.md) 和 `backend/pb_hooks/` 为准。
 
 ## 1. 权威边界
 
@@ -59,7 +59,7 @@
 | `POST /api/cc/auth/participant/bind-phone` | participant | `BindPhoneInput` → `BindPhoneResponse` | 只绑当前 `participant_id`；号码已占用则停止并进入人工合并，不覆盖 |
 | `POST /api/cc/auth/participant/change-phone` | participant | `ChangePhoneInput` → `BindPhoneResponse` | 新号验证成功后，经旧号验证码或人工支持单号证明后原子换绑；记录前后号码的掩码/hash，不记完整号码 |
 
-统一业务错误码：`invalid_phone`、`code_throttled`、`code_invalid`、`code_expired`、`challenge_consumed`、`account_disabled`、`phone_conflict`、`provider_unavailable`。`request-code` 的限流/服务商失败不得变成账号存在性 oracle。
+统一业务错误码：`invalid_phone`、`privacy_notice_required`、`code_throttled`、`code_invalid`、`code_expired`、`challenge_consumed`、`account_disabled`、`phone_conflict`、`support_required`、`provider_unavailable`。`request-code` 的限流/服务商失败不得变成账号存在性 oracle。
 
 ## 4. 现场快照、编号与配对
 

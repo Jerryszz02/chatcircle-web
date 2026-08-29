@@ -10,6 +10,17 @@ services:
       - '127.0.0.1:8090:8090'
     volumes:
       - pb_data:/pb/pb_data
+    environment:
+      CC_ENVIRONMENT: ${CC_ENVIRONMENT:-production}
+      CC_SMS_PROVIDER: ${CC_SMS_PROVIDER:-aliyun}
+      CC_PHONE_HASH_KEY: ${CC_PHONE_HASH_KEY:?app 需要至少 32 字符的手机号 HMAC 密钥}
+      ALIBABA_CLOUD_ACCESS_KEY_ID: ${ALIBABA_CLOUD_ACCESS_KEY_ID:?app 需要号码认证服务 AccessKey ID}
+      ALIBABA_CLOUD_ACCESS_KEY_SECRET: ${ALIBABA_CLOUD_ACCESS_KEY_SECRET:?app 需要号码认证服务 AccessKey Secret}
+      ALIBABA_CLOUD_SECURITY_TOKEN: ${ALIBABA_CLOUD_SECURITY_TOKEN:-}
+      CC_SMS_SIGN_NAME: ${CC_SMS_SIGN_NAME:?app 需要短信认证签名}
+      CC_SMS_TEMPLATE_CODE: ${CC_SMS_TEMPLATE_CODE:?app 需要短信认证模板代码}
+      CC_SMS_SCHEME_NAME: ${CC_SMS_SCHEME_NAME:-}
+      CC_PARTICIPANT_PRIVACY_NOTICE_VERSION: ${CC_PARTICIPANT_PRIVACY_NOTICE_VERSION:-2026-08-28.v1}
     restart: unless-stopped
     # 限制容器日志体积，避免 json-file 长期累积撑满磁盘
     logging:

@@ -105,6 +105,12 @@ export interface ParticipantAccountRecord extends BaseRecord {
   /** 4–20 位字母/数字/下划线，小写归一化后全局唯一（FR-AUTH-005）。 */
   username: string;
   status: ActiveStatus;
+  /** T1 手机号迁移状态；存量测试记录未刷新时允许缺省。 */
+  phone_migration_status?: 'legacy_unbound' | 'phone_bound' | 'merge_required';
+  phone_binding_source?: 'sms_signup' | 'legacy_bind' | 'manual_merge';
+  phone_verified_at?: string;
+  /** 仅自定义手机号端点返回的掩码；完整号码和查找 HMAC 不进入客户端类型。 */
+  phone_masked?: string;
 }
 
 // ---------- 5.2.5 activities — 活动主数据与名额 ----------

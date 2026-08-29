@@ -90,6 +90,7 @@ def main():
 
     rep = Reporter()
     st, sid = fx.super_login(args.base_url, args.su, args.sp)
+    fx.configure_super_token(st)
     print('[INFO] 超管登录成功，准备平台级 fixture（标准字段 / 模板版本）')
     fields = fx.ensure_standard_fields(args.base_url, st)
     tpl_id, ver_id = fx.template_version_id(args.base_url, st)
@@ -121,12 +122,13 @@ def main():
     import suite_hardening
     import suite_reports
     import suite_live_summary
+    import suite_phone_auth
 
     for mod in (suite_flow, suite_acl, suite_capacity, suite_transitions, suite_checkins, suite_pairings,
                 suite_trainings, suite_surveys, suite_exports, suite_auth, suite_admin_email,
                 suite_posts, suite_outcome, suite_backup,
                 suite_nodelete, suite_templates, suite_hardening, suite_reports,
-                suite_live_summary):
+                suite_live_summary, suite_phone_auth):
         mod.run(ctx)
 
     ok = rep.summary()

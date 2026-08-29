@@ -12,6 +12,42 @@
   --ccp-mint-bg: #e2f4ef;
 }
 
+.cc-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 16px;
+  color: var(--cc-neutral-700);
+  font-size: var(--cc-fs-small);
+  line-height: 1.55;
+}
+
+.cc-consent input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.cc-link-button {
+  min-height: 44px;
+  margin: -8px 0 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cc-brand-600);
+  font: inherit;
+  cursor: pointer;
+}
+
+.cc-auth-switch {
+  margin-top: 12px;
+}
+
+.cc-auth-switch + .cc-hint {
+  margin-top: 12px;
+}
+
 /* ---------- 页面底色：米白（body 在 .ccp-root 作用域外，用 :has 选择器；值即 :root 的 --cc-neutral-50） ---------- */
 
 body:has(.ccp-root) {

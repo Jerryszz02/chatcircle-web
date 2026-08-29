@@ -43,10 +43,10 @@ if [ ! -x "$PB" ]; then
     Linux_aarch64) PLAT="linux_arm64" ;;
     *) echo "不支持的平台：$(uname -s)_$(uname -m)，请手工下载 PocketBase $PB_VERSION 到 backend/"; exit 1 ;;
   esac
-  TMP_ZIP="$(mktemp /tmp/pb_dl_XXXXXX.zip)"
-  curl -fsSL -o "$TMP_ZIP" "https://github.com/pocketbase/pocketbase/releases/download/v$PB_VERSION/pocketbase_${PB_VERSION}_${PLAT}.zip"
-  unzip -o -q "$TMP_ZIP" pocketbase -d "$BACKEND_DIR"
-  rm -f "$TMP_ZIP"
+  DOWNLOAD_DIR="$(mktemp -d /tmp/cc_pb_download_XXXXXX)"
+  curl -fsSL -o "$DOWNLOAD_DIR/pocketbase.zip" "https://github.com/pocketbase/pocketbase/releases/download/v$PB_VERSION/pocketbase_${PB_VERSION}_${PLAT}.zip"
+  unzip -o -q "$DOWNLOAD_DIR/pocketbase.zip" pocketbase -d "$BACKEND_DIR"
+  rm -rf "$DOWNLOAD_DIR"
 fi
 
 # --- 2. 临时数据目录 + 退出清理 ------------------------------------------------
@@ -75,8 +75,14 @@ echo "[INFO] migrate up 完成（$(grep -cE '^Applied' "$WORK/migrate.log" || tr
 python3 "$SCRIPT_DIR/integration/run.py" --sql-fixture --data-dir "$DATA_DIR"
 
 # --- 5. 启动 serve（显式三目录参数） ----------------------------------------------
-CC_PAIRING_PAGE_SIZE="$PAIRING_PAGE_SIZE" "$PB" serve \
-  --dir "$DATA_DIR" --migrationsDir "$MIGRATIONS_DIR" --hooksDir "$HOOKS_DIR" \
+CC_ENVIRONMENT=test \
+CC_SMS_PROVIDER=mock \
+CC_SMS_MOCK_CODE=246810 \
+CC_SMS_MOCK_FAIL_PHONE=13900000009 \
+CC_PHONE_HASH_KEY=cc-it-phone-hash-key-2026-08-28-test-only \
+CC_PHONE_CODE_IP_MAX=200 \
+CC_PAIRING_PAGE_SIZE="$PAIRING_PAGE_SIZE" \
+"$PB" serve --dir "$DATA_DIR" --migrationsDir "$MIGRATIONS_DIR" --hooksDir "$HOOKS_DIR" \
   --http "127.0.0.1:$PORT" > "$WORK/serve.log" 2>&1 &
 SERVE_PID=$!
 

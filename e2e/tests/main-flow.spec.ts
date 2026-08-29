@@ -43,14 +43,15 @@ test.describe.serial('V1 主链路', () => {
       await expect(page.getByRole('link', { name: '立即报名' })).toBeVisible();
     });
 
-    // ---------- 2. 点击报名 → 单框自动注册并登录（AC-06） ----------
-    await test.step('报名链路自动注册', async () => {
+    // ---------- 2. 点击报名 → 手机号验证码登录（T1） ----------
+    await test.step('报名链路手机号登录', async () => {
       await page.getByRole('link', { name: '立即报名' }).click();
       await page.waitForURL(`**/a/${fixture.activityId}/register`);
-      await page.getByLabel('用户名').fill(fixture.participantUsername);
-      await page.getByLabel('密码').fill(fixture.participantPassword);
-      await page.getByRole('button', { name: '继续' }).click();
-      // 注册成功后出现报名表
+      await page.getByRole('textbox', { name: /^手机号/ }).fill(fixture.participantPhone);
+      await page.getByRole('checkbox').check();
+      await page.getByRole('button', { name: '获取验证码' }).click();
+      await page.getByRole('textbox', { name: /^验证码/ }).fill(fixture.phoneCode);
+      await page.getByRole('button', { name: '登录 / 注册' }).click();
       await expect(page.getByRole('button', { name: '提交报名' })).toBeVisible();
     });
 
