@@ -29,6 +29,24 @@ onRecordCreate((e) => {
 onRecordCreate((e) => {
   const app = e.app;
   const record = e.record;
+  // 各 hook 在 PocketBase JSVM 中隔离执行，分页 helper 需放在回调闭包内。
+  const queryAll = (queryApp, collection, filter, sort, params) => {
+    const configured = Number($os.getenv('CC_PAIRING_PAGE_SIZE'));
+    const pageSize = isFinite(configured) && configured > 0
+      ? Math.min(Math.floor(configured), 500) : 500;
+    const out = [];
+    let offset = 0;
+    for (;;) {
+      const page = queryApp.findRecordsByFilter(
+        collection, filter, sort || '', pageSize, offset, params || {},
+      );
+      if (!page || page.length === 0) break;
+      out.push(...page);
+      if (page.length < pageSize) break;
+      offset += page.length;
+    }
+    return out;
+  };
   if (record.get('status') !== 'valid') {
     e.next();
     return;
@@ -62,21 +80,23 @@ onRecordCreate((e) => {
   const now = new Date().toISOString().replace('T', ' ').slice(0, 23) + 'Z';
   const actorId = record.get('operator_id') || record.get('participant_id') || 'system';
   const actorRole = record.get('operator_id') ? 'admin' : (record.get('participant_id') ? 'participant' : 'system');
-  const activePairs = app.findRecordsByFilter(
-    'activity_pairs', "activity_id = {:a} && status = 'active'", '', 5000, 0, { a: activity.id },
+  const activePairs = queryAll(
+    app, 'activity_pairs', "activity_id = {:a} && status = 'active'", 'id', { a: activity.id },
   );
   const used = {};
   for (const pair of activePairs) {
     used[pair.get('speaker_checkin_id')] = true;
     used[pair.get('listener_checkin_id')] = true;
   }
-  const speakers = app.findRecordsByFilter(
+  const speakers = queryAll(
+    app,
     'checkins', "activity_id = {:a} && status = 'valid' && onsite_role = 'speaker' && onsite_sequence > 0",
-    'onsite_sequence', 5000, 0, { a: activity.id },
+    'onsite_sequence', { a: activity.id },
   ).filter((checkin) => !used[checkin.id]);
-  const listeners = app.findRecordsByFilter(
+  const listeners = queryAll(
+    app,
     'checkins', "activity_id = {:a} && status = 'valid' && onsite_role = 'listener' && onsite_sequence > 0",
-    'onsite_sequence', 5000, 0, { a: activity.id },
+    'onsite_sequence', { a: activity.id },
   ).filter((checkin) => !used[checkin.id]);
 
   const latest = app.findRecordsByFilter(
@@ -126,6 +146,23 @@ onRecordUpdate((e) => {
 
   const app = e.app;
   const record = e.record;
+  const queryAll = (queryApp, collection, filter, sort, params) => {
+    const configured = Number($os.getenv('CC_PAIRING_PAGE_SIZE'));
+    const pageSize = isFinite(configured) && configured > 0
+      ? Math.min(Math.floor(configured), 500) : 500;
+    const out = [];
+    let offset = 0;
+    for (;;) {
+      const page = queryApp.findRecordsByFilter(
+        collection, filter, sort || '', pageSize, offset, params || {},
+      );
+      if (!page || page.length === 0) break;
+      out.push(...page);
+      if (page.length < pageSize) break;
+      offset += page.length;
+    }
+    return out;
+  };
   const activity = app.findRecordById('activities', record.get('activity_id'));
   const now = new Date().toISOString().replace('T', ' ').slice(0, 23) + 'Z';
   const actorId = record.get('operator_id') || 'system';
@@ -159,21 +196,23 @@ onRecordUpdate((e) => {
   if (String(activity.get('pairing_started_at') || '') === '' ||
       String(activity.get('onsite_locked_at') || '') !== '') return;
 
-  const activePairs = app.findRecordsByFilter(
-    'activity_pairs', "activity_id = {:a} && status = 'active'", '', 5000, 0, { a: activity.id },
+  const activePairs = queryAll(
+    app, 'activity_pairs', "activity_id = {:a} && status = 'active'", 'id', { a: activity.id },
   );
   const used = {};
   for (const pair of activePairs) {
     used[pair.get('speaker_checkin_id')] = true;
     used[pair.get('listener_checkin_id')] = true;
   }
-  const speakers = app.findRecordsByFilter(
+  const speakers = queryAll(
+    app,
     'checkins', "activity_id = {:a} && status = 'valid' && onsite_role = 'speaker' && onsite_sequence > 0",
-    'onsite_sequence', 5000, 0, { a: activity.id },
+    'onsite_sequence', { a: activity.id },
   ).filter((checkin) => !used[checkin.id]);
-  const listeners = app.findRecordsByFilter(
+  const listeners = queryAll(
+    app,
     'checkins', "activity_id = {:a} && status = 'valid' && onsite_role = 'listener' && onsite_sequence > 0",
-    'onsite_sequence', 5000, 0, { a: activity.id },
+    'onsite_sequence', { a: activity.id },
   ).filter((checkin) => !used[checkin.id]);
   const latest = app.findRecordsByFilter(
     'activity_pairs', 'activity_id = {:a}', '-pair_sequence', 1, 0, { a: activity.id },
@@ -220,6 +259,24 @@ routerAdd('POST', '/api/cc/activities/{id}/pairings/start', (e) => {
     const byId = (app, collection, id) => {
       try { return app.findRecordById(collection, id); } catch (err) { if (isNoRows(err)) return null; throw err; }
     };
+    // 先 limit 再在内存排除已配对者会让第 5001 条以后永久无法进入队列。
+    const queryAll = (queryApp, collectionName, filter, sort, params) => {
+      const configured = Number($os.getenv('CC_PAIRING_PAGE_SIZE'));
+      const pageSize = isFinite(configured) && configured > 0
+        ? Math.min(Math.floor(configured), 500) : 500;
+      const out = [];
+      let offset = 0;
+      for (;;) {
+        const page = queryApp.findRecordsByFilter(
+          collectionName, filter, sort || '', pageSize, offset, params || {},
+        );
+        if (!page || page.length === 0) break;
+        out.push(...page);
+        if (page.length < pageSize) break;
+        offset += page.length;
+      }
+      return out;
+    };
     const auth = e.auth;
     if (!auth) ccError(401, 'unauthorized', '请先登录');
     const collection = auth.collection().name;
@@ -263,21 +320,23 @@ routerAdd('POST', '/api/cc/activities/{id}/pairings/start', (e) => {
             txApp.save(activity);
           }
 
-          const activePairs = txApp.findRecordsByFilter(
-            'activity_pairs', "activity_id = {:a} && status = 'active'", '', 5000, 0, { a: activityId },
+          const activePairs = queryAll(
+            txApp, 'activity_pairs', "activity_id = {:a} && status = 'active'", 'id', { a: activityId },
           );
           const used = {};
           for (const pair of activePairs) {
             used[pair.get('speaker_checkin_id')] = true;
             used[pair.get('listener_checkin_id')] = true;
           }
-          const speakers = txApp.findRecordsByFilter(
+          const speakers = queryAll(
+            txApp,
             'checkins', "activity_id = {:a} && status = 'valid' && onsite_role = 'speaker' && onsite_sequence > 0",
-            'onsite_sequence', 5000, 0, { a: activityId },
+            'onsite_sequence', { a: activityId },
           ).filter((checkin) => !used[checkin.id]);
-          const listeners = txApp.findRecordsByFilter(
+          const listeners = queryAll(
+            txApp,
             'checkins', "activity_id = {:a} && status = 'valid' && onsite_role = 'listener' && onsite_sequence > 0",
-            'onsite_sequence', 5000, 0, { a: activityId },
+            'onsite_sequence', { a: activityId },
           ).filter((checkin) => !used[checkin.id]);
           const latest = txApp.findRecordsByFilter(
             'activity_pairs', 'activity_id = {:a}', '-pair_sequence', 1, 0, { a: activityId },
@@ -299,9 +358,7 @@ routerAdd('POST', '/api/cc/activities/{id}/pairings/start', (e) => {
             txApp.save(pair);
           }
 
-          activeCount = txApp.findRecordsByFilter(
-            'activity_pairs', "activity_id = {:a} && status = 'active'", '', 5000, 0, { a: activityId },
-          ).length;
+          activeCount = activePairs.length + createdPairs;
           waiting.speaker = speakers.length - createdPairs;
           waiting.listener = listeners.length - createdPairs;
           waiting.total = waiting.speaker + waiting.listener;

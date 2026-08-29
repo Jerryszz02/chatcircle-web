@@ -13,6 +13,7 @@
 # 环境变量：
 #   CC_IT_PORT  实例端口（默认 8097，避开本地开发 8090 与迁移冒烟 8099）
 #   CC_IT_KEEP=1 保留临时目录（调试定位用，默认运行结束清理）
+#   CC_IT_PAIRING_PAGE_SIZE  T2 队列分页测试页大小（默认 2，强制小 fixture 跨页）
 # 退出码：全部断言通过为 0，任一失败为 1。
 # 依赖：bash、curl、python3（标准库，无第三方包）。
 
@@ -26,6 +27,7 @@ PB_VERSION="0.28.4"
 PB="$BACKEND_DIR/pocketbase"
 PORT="${CC_IT_PORT:-8097}"
 BASE="http://127.0.0.1:$PORT"
+PAIRING_PAGE_SIZE="${CC_IT_PAIRING_PAGE_SIZE:-2}"
 SU_EMAIL="it-super@cc.local"
 SU_PASS="cc_it_super_pass_123"
 
@@ -73,7 +75,8 @@ echo "[INFO] migrate up 完成（$(grep -cE '^Applied' "$WORK/migrate.log" || tr
 python3 "$SCRIPT_DIR/integration/run.py" --sql-fixture --data-dir "$DATA_DIR"
 
 # --- 5. 启动 serve（显式三目录参数） ----------------------------------------------
-"$PB" serve --dir "$DATA_DIR" --migrationsDir "$MIGRATIONS_DIR" --hooksDir "$HOOKS_DIR" \
+CC_PAIRING_PAGE_SIZE="$PAIRING_PAGE_SIZE" "$PB" serve \
+  --dir "$DATA_DIR" --migrationsDir "$MIGRATIONS_DIR" --hooksDir "$HOOKS_DIR" \
   --http "127.0.0.1:$PORT" > "$WORK/serve.log" 2>&1 &
 SERVE_PID=$!
 

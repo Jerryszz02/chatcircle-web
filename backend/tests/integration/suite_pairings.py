@@ -145,7 +145,7 @@ def run(ctx):
     fx.self_checkin(base, qr, listeners[1]['token'])
     fx.self_checkin(base, qr, listeners[2]['token'])
     active = _pairings(base, AT1, act, 'active')
-    rep.check('PAIR-06 配对开始后迟到者按队首自动补成 P02/P03',
+    rep.check('PAIR-06 迟到者跨候选分页边界仍按队首自动补成 P02/P03',
               [row.get('pair_sequence') for row in active] == [1, 2, 3], active)
 
     # 第四名 speaker 等待；撤销 P01 speaker 后，锁定前搭档回队并自动与 S04 组成 P04。
