@@ -1,11 +1,45 @@
 # -*- coding: utf-8 -*-
 """suite_pairings — T2 现场编号、批量/迟到配对、释放调整、权限与审计。"""
+import json
 import threading
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 import cc_fixture as fx
 from cc_client import biz_code, call
+
+
+_NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _realtime_client_id(base):
+    stream = _NO_PROXY.open(base + '/api/realtime', timeout=5)
+    client_id = ''
+    for _ in range(12):
+        line = stream.readline().decode('utf-8', 'replace').strip()
+        if line.startswith('id:'):
+            client_id = line.split(':', 1)[1].strip()
+        if client_id and line == '':
+            break
+    assert client_id, '未收到 PocketBase PB_CONNECT client id'
+    return stream, client_id
+
+
+def _realtime_event(stream, expected_event):
+    event = ''
+    data = ''
+    for _ in range(24):
+        line = stream.readline().decode('utf-8', 'replace').strip()
+        if line.startswith('event:'):
+            event = line.split(':', 1)[1].strip()
+        elif line.startswith('data:'):
+            data += line.split(':', 1)[1].strip()
+        elif line == '' and event:
+            if event == expected_event:
+                return json.loads(data or '{}')
+            event, data = '', ''
+    raise AssertionError('未收到预期 Realtime 事件：%s' % expected_event)
 
 
 def _list(base, token, collection, flt='', sort=''):
@@ -119,7 +153,11 @@ def run(ctx):
               s == 200 and before.get('state') == 'waiting_to_start'
               and before.get('onsite_code', '').startswith('S'), before)
 
-    # 两管理员并发首次开始配对：终态只有一组，另一请求幂等补齐空队列。
+    # 两管理员并发首次开始配对：终态只有一组，另一请求幂等补齐空队列；参与者收到最小失效消息。
+    realtime_stream, realtime_client_id = _realtime_client_id(base)
+    realtime_topic = 'cc.participant.pairing.%s' % listeners[0]['participant_id']
+    subscribe_status, subscribe_body = call(base, 'POST', '/api/realtime', {
+        'clientId': realtime_client_id, 'subscriptions': [realtime_topic]}, listeners[0]['token'])
     start_barrier = threading.Barrier(3)
 
     def start_pairing(token):
@@ -131,11 +169,18 @@ def run(ctx):
         f2 = pool.submit(start_pairing, AT2)
         start_barrier.wait()
         start_results = [f1.result(), f2.result()]
+    try:
+        pairing_event = _realtime_event(realtime_stream, realtime_topic)
+    finally:
+        realtime_stream.close()
     active = _pairings(base, AT1, act, 'active')
-    rep.check('PAIR-03 两管理员并发开始配对不重复组号/不一人多配',
+    rep.check('PAIR-03 并发开始不重复配对，并向本人发送最小 Realtime 失效消息',
               all(item[0] == 200 for item in start_results) and len(active) == 1
-              and active[0].get('pair_sequence') == 1,
-              [start_results, active])
+              and active[0].get('pair_sequence') == 1 and subscribe_status == 204
+              and set(pairing_event) == {'contract_version', 'activity_id', 'changed_at'}
+              and pairing_event.get('contract_version') == '2026-08-28.t0-v1'
+              and pairing_event.get('activity_id') == act,
+              [start_results, active, subscribe_body, pairing_event])
     s, repeated = call(base, 'POST', '/api/cc/activities/%s/pairings/start' % act, {}, AT1)
     rep.check('PAIR-04 重复开始幂等且不重排已有组',
               s == 200 and repeated.get('already_started') is True
@@ -222,6 +267,10 @@ def run(ctx):
         'listener_checkin_id': listener_checkin_id,
         'reason': '锁定后换组',
     }
+    reassign_stream, reassign_client_id = _realtime_client_id(base)
+    reassign_topic = 'cc.participant.pairing.%s' % paired_speaker['participant_id']
+    reassign_subscribe_status, reassign_subscribe_body = call(base, 'POST', '/api/realtime', {
+        'clientId': reassign_client_id, 'subscriptions': [reassign_topic]}, paired_speaker['token'])
     reassign_barrier = threading.Barrier(3)
 
     def reassign(token):
@@ -234,13 +283,21 @@ def run(ctx):
         r2 = pool.submit(reassign, AT2)
         reassign_barrier.wait()
         reassign_results = [r1.result(), r2.result()]
+    try:
+        reassign_event = _realtime_event(reassign_stream, reassign_topic)
+    finally:
+        reassign_stream.close()
     pair_ids = [(item[1].get('pairing') or {}).get('id') for item in reassign_results]
     active = _pairings(base, AT1, act, 'active')
-    rep.check('PAIR-10 并发/重复手工调整幂等且一人至多一个 active pair',
+    rep.check('PAIR-10 并发调整幂等，并在提交后发送本人 Realtime 失效消息',
               all(item[0] == 200 for item in reassign_results)
               and len(set(pair_ids)) == 1 and len(active) == 3
-              and max(row.get('pair_sequence') for row in active) == 5,
-              [reassign_results, active])
+              and max(row.get('pair_sequence') for row in active) == 5
+              and reassign_subscribe_status == 204
+              and set(reassign_event) == {'contract_version', 'activity_id', 'changed_at'}
+              and reassign_event.get('contract_version') == '2026-08-28.t0-v1'
+              and reassign_event.get('activity_id') == act,
+              [reassign_results, active, reassign_subscribe_body, reassign_event])
     s, reassigned_mine = call(base, 'GET', '/api/cc/activities/%s/my-pairing' % act,
                               token=paired_speaker['token'])
     rep.check('PAIR-11 调整后本人状态为 reassigned 且显示新组号',

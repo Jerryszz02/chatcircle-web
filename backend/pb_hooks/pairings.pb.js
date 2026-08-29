@@ -266,6 +266,84 @@ onRecordUpdate((e) => {
 }, 'checkins');
 
 // ---------------------------------------------------------------------------
+// Pair 提交成功后只发送最小失效消息；客户端收到后重拉 my-pairing。
+// create 覆盖开始配对/迟到补配/手工调整的新组，update 覆盖释放/完成后的旧组双方。
+// ---------------------------------------------------------------------------
+onRecordAfterCreateSuccess((e) => {
+  e.next();
+  const notifyPairParticipants = (app, pair) => {
+    const participantIds = {};
+    for (const field of ['speaker_checkin_id', 'listener_checkin_id']) {
+      try {
+        const checkin = app.findRecordById('checkins', pair.get(field));
+        const participantId = String(checkin.get('participant_id') || '');
+        if (participantId) participantIds[participantId] = true;
+      } catch (_) {
+        // Pair 已提交，不因通知查询失败反向影响业务结果。
+      }
+    }
+    const clients = app.subscriptionsBroker().clients();
+    const data = JSON.stringify({
+      contract_version: '2026-08-28.t0-v1',
+      activity_id: pair.get('activity_id'),
+      changed_at: new Date().toISOString(),
+    });
+    for (const participantId in participantIds) {
+      const topic = 'cc.participant.pairing.' + participantId;
+      const message = new SubscriptionMessage({ name: topic, data: data });
+      for (const clientId in clients) {
+        const client = clients[clientId];
+        if (!client.hasSubscription(topic)) continue;
+        const auth = client.get('auth');
+        if (!auth || auth.collection().name !== 'participant_accounts' ||
+            auth.get('status') !== 'active' || auth.id !== participantId) continue;
+        try { client.send(message); } catch (_) {
+          // 连接可能刚好断开；客户端重连后会无条件重拉快照。
+        }
+      }
+    }
+  };
+  notifyPairParticipants(e.app, e.record);
+}, 'activity_pairs');
+
+onRecordAfterUpdateSuccess((e) => {
+  e.next();
+  const notifyPairParticipants = (app, pair) => {
+    const participantIds = {};
+    for (const field of ['speaker_checkin_id', 'listener_checkin_id']) {
+      try {
+        const checkin = app.findRecordById('checkins', pair.get(field));
+        const participantId = String(checkin.get('participant_id') || '');
+        if (participantId) participantIds[participantId] = true;
+      } catch (_) {
+        // Pair 已提交，不因通知查询失败反向影响业务结果。
+      }
+    }
+    const clients = app.subscriptionsBroker().clients();
+    const data = JSON.stringify({
+      contract_version: '2026-08-28.t0-v1',
+      activity_id: pair.get('activity_id'),
+      changed_at: new Date().toISOString(),
+    });
+    for (const participantId in participantIds) {
+      const topic = 'cc.participant.pairing.' + participantId;
+      const message = new SubscriptionMessage({ name: topic, data: data });
+      for (const clientId in clients) {
+        const client = clients[clientId];
+        if (!client.hasSubscription(topic)) continue;
+        const auth = client.get('auth');
+        if (!auth || auth.collection().name !== 'participant_accounts' ||
+            auth.get('status') !== 'active' || auth.id !== participantId) continue;
+        try { client.send(message); } catch (_) {
+          // 连接可能刚好断开；客户端重连后会无条件重拉快照。
+        }
+      }
+    }
+  };
+  notifyPairParticipants(e.app, e.record);
+}, 'activity_pairs');
+
+// ---------------------------------------------------------------------------
 // POST /api/cc/activities/{id}/pairings/start — 幂等批量配对/补齐等待队列
 // ---------------------------------------------------------------------------
 routerAdd('POST', '/api/cc/activities/{id}/pairings/start', (e) => {
