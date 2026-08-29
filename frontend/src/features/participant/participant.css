@@ -1020,3 +1020,68 @@ a.cc-btn {
 .ccp-anchor {
   scroll-margin-top: 64px;
 }
+
+/* ---------- 我的现场编号 / 配对状态卡（T5，PRD §5.3） ---------- */
+
+.ccp-pairing-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ccp-pairing-icon {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--cc-neutral-600);
+}
+
+.ccp-pairing-icon svg {
+  width: 100%;
+  height: 100%;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* 图标颜色与状态标签同色系，但状态表达以文字 + 图标为主，不只依赖颜色。 */
+.ccp-pairing-icon-success {
+  color: var(--cc-success-text);
+}
+
+.ccp-pairing-icon-warning {
+  color: var(--cc-warning-text);
+}
+
+.ccp-pairing-icon-danger {
+  color: var(--cc-error-text);
+}
+
+.ccp-pairing-icon-info {
+  color: var(--cc-info-text);
+}
+
+/* 本人现场编号：移动端主入口大号展示，数字等宽对齐。 */
+.ccp-onsite-code {
+  margin: 4px 0 8px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  line-height: 1.2;
+  color: var(--cc-brand-700);
+  font-variant-numeric: tabular-nums;
+}
+
+.ccp-pairing-details {
+  margin: 12px 0 0;
+  padding-top: 8px;
+  border-top: 1px dashed var(--cc-neutral-300);
+}
+
+.ccp-pairing-offline {
+  margin-top: 8px;
+}

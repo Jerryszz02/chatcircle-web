@@ -5,6 +5,7 @@ import { participantAuth } from '../../../shared/auth';
 import type { ParticipantAccountRecord } from '../../../shared/api/types';
 import { Button, Card, Loading, PageLayout } from '../../../shared/ui';
 import { getMeOverview, isUnauthorized, type MeOverview } from '../api';
+import { MyPairingCard } from '../components/MyPairingCard';
 import { PhoneBindingForm } from '../components/PhoneBindingForm';
 import { PhoneChangeForm } from '../components/PhoneChangeForm';
 import {
@@ -147,6 +148,8 @@ export function MePage() {
                       {registration.status_reason ? (
                         <p className="cc-item-meta">原因：{registration.status_reason}</p>
                       ) : null}
+                      {/* T5：已签到后在此展示本人现场编号与配对状态（PRD §5.3「我的活动」入口） */}
+                      <MyPairingCard activityId={activity.id} />
                     </li>
                   );
                 })}

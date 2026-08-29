@@ -1,13 +1,14 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { clearAllSessions, stubApi, unstubApi } from '../../../test/mockApi';
+import { clearAllSessions, saveParticipantSession, stubApi, unstubApi } from '../../../test/mockApi';
 import { ActivityDetailPage } from './ActivityDetailPage';
 
 /**
  * 公开活动详情页测试（FR-ACT-003/005/007 前端侧）。
  * 覆盖：未登录可看、报名开放状态与剩余名额展示、未开放原因分支、
- * 非公开活动（404/403）展示与标题稳定性（路由契约）。
+ * 非公开活动（404/403）展示与标题稳定性（路由契约）；
+ * T5：已登录参与者的活动现场页入口——「我的现场编号」配对卡（PRD §5.3）。
  */
 
 function detailBody(overrides: Record<string, unknown> = {}) {
@@ -87,5 +88,33 @@ describe('ActivityDetailPage 公开活动详情', () => {
     renderDetail();
     expect(await screen.findByText('活动不存在或未开放')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '活动详情' })).toBeInTheDocument();
+  });
+
+  it('活动现场页入口：已登录且已签到的参与者看到本人现场编号与配对状态（T5）', async () => {
+    saveParticipantSession();
+    stubApi({
+      'GET /api/cc/public/activities/': { body: detailBody() },
+      'GET /api/cc/activities/act1/my-pairing': {
+        body: {
+          contract_version: '2026-08-28.t0-v1',
+          activity_id: 'act1',
+          state: 'waiting_for_partner',
+          onsite_code: 'S01',
+          updated_at: '2026-08-29T08:00:00Z',
+        },
+      },
+    });
+    renderDetail();
+    expect(await screen.findByRole('heading', { name: '八月光影茶话会' })).toBeInTheDocument();
+    expect(await screen.findByText('我的现场编号')).toBeInTheDocument();
+    expect(screen.getByText('S01')).toBeInTheDocument();
+    expect(screen.getByText('正在等待搭档')).toBeInTheDocument();
+  });
+
+  it('未登录访客不展示配对卡', async () => {
+    stubApi({ 'GET /api/cc/public/activities/': { body: detailBody() } });
+    renderDetail();
+    expect(await screen.findByRole('heading', { name: '八月光影茶话会' })).toBeInTheDocument();
+    expect(screen.queryByText('我的现场编号')).not.toBeInTheDocument();
   });
 });
