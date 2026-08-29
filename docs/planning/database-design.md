@@ -1,12 +1,12 @@
 # Chat Circles — 数据库设计（PocketBase 集合设计草案）
 
-> **2026-08-29 T1/T3 更新：**`participant_accounts` 已增加隐藏手机号/HMAC、验证时间、绑定来源和迁移状态，并新增内部 `participant_phone_challenges` 集合；存量账号已回填 `legacy_unbound`。T3 在兼容当前 schema 的前提下新增事务快照与 Realtime 守卫。现场编号、`activity_pairs`、标准报名字段激活和细粒度 `export_jobs.scope_json` 仍为`计划中`。
+> **2026-08-29 T1/T2/T3 更新：**`participant_accounts` 已增加隐藏手机号/HMAC、验证时间、绑定来源和迁移状态，并新增内部 `participant_phone_challenges` 集合；存量账号已回填 `legacy_unbound`。T3 提供事务快照与 Realtime 守卫；本 T2 分支已实现并验证 §6.3/§6.4 的现场编号字段与 `activity_pairs`。标准字段激活和细粒度 `export_jobs.scope_json` 仍为`计划中`；本 T2 分支尚未合并或部署。
 
 > 本文档将 PRD v0.3 §9 数据模型落地为 PocketBase 集合定义，面向后续实现工程师。阅读本文不需要先读 PRD；涉及 PRD 口径处均注明出处。所有表结构为**设计草案**：字段名、枚举机器码、索引与规则如与实现阶段证据冲突，以实现阶段评审结论为准并回写本文。
 
 ## 1. 文档目的
 
-- 给出 PRD §9.1 全部 19 个集合的 PocketBase collection 定义草案；实现期又增加培训三集合、reports、posts，以及 T1 内部 `participant_phone_challenges`，当前合计 25 个业务/内部集合。
+- 给出 PRD §9.1 全部 19 个集合的 PocketBase collection 定义草案；实现期又增加培训三集合、reports、posts、T1 内部 `participant_phone_challenges`，以及 T2 `activity_pairs`，当前合计 26 个业务/内部集合。
 - 固化标识规则（`participant_id` 全平台稳定、`registration_id` 参与者×活动唯一、`question_code` 稳定性、`group_tag` 预留）。
 - 定义多机构隔离在 PocketBase 层面的实现方式：`organization_id` 冗余字段 + API Rules 服务端强制过滤。
 - 汇总全部状态枚举与状态机（活动 7 态、报名 4 态及迁移矩阵、签到场次/记录、问卷 5 态、答卷 3 态、邀请码 4 态、培训 3 态及培训签到场次/记录），并给出事务与并发约束。
@@ -24,7 +24,7 @@
 |---|---|
 | 需求基线 | PRD v0.3（评审修订版，2026-08-05），`docs/Chat_Circles_活动与问卷平台_PRD_v0.3.docx`；本文引用其 §9 数据模型、§4 状态模型、§6 功能需求、§10 导出规范、§11 安全审计、§12.3 备份、§14 验收标准、附录 B 命名规范 |
 | 已确认技术决策 | 响应式 Web（React 18 + Vite + TypeScript）+ PocketBase（后端/认证/SQLite）+ Docker；统一入口 `chatcircle.empact.cn`；完整 V1（M0~M5） |
-| 项目现状（2026-08-28） | `origin/main@54de5e8` 已有 PocketBase 迁移、hooks、前端、测试、部署配置与 T0 冻结契约；当前 T3 分支仍无 `activity_pairs`，参与者 identity 仍为 `username` |
+| 项目现状（2026-08-29） | `agent/t2-pairing-backend` 已同步 `origin/main@5d67520`；默认分支含 T3，本分支新增 `activity_pairs`、现场编号与配对 hooks 且测试通过；参与者 identity 仍为 `username`，T2 尚未合并或部署 |
 | T0 证据 | PocketBase 0.28.4 隔离临时库实测已确认自定义 text identity 可登录且唯一索引生效；为保持“只有短信验证码”的产品语义，目标方案不把手机号加入 password identity |
 | 相关文档 | [README.md](README.md)（项目索引与术语）、[api-design.md](api-design.md)（T0 端点/权限/兼容契约）、technical-design.md（架构决策）、security-privacy.md（审计与隐私细则） |
 
@@ -538,9 +538,9 @@
 
 备份任务实现与恢复演练属部署侧内容，详见 technical-design.md；本文只约束数据侧口径。
 
-## 6. T0 冻结的目标契约（计划中 schema）
+## 6. T0 冻结的目标契约（T2 已部分落地）
 
-本节是 T1/T2/T3/T6 的数据库门禁。T1 手机号字段与 challenge 集合已由 `1787895000_cc_participant_phone_auth.js` 实现；其余字段/集合仍不表示当前迁移已存在。机器名与前端共享类型以 `frontend/src/shared/api/accountEvent.ts` 为准。
+本节是 T1/T2/T3/T6 的数据库门禁。T1 手机号字段与 challenge 集合已由 `1787895000_cc_participant_phone_auth.js` 实现，§6.3/§6.4 已由本 T2 分支实现，T3 不新增 schema，T6 仍为目标设计。机器名与前端共享类型以 `frontend/src/shared/api/accountEvent.ts` 为准。
 
 ### 6.1 participant_accounts 追加字段
 
@@ -566,6 +566,8 @@
 
 ### 6.3 activities / checkins 追加字段
 
+状态：T2 分支`已验证`，迁移为 `backend/pb_migrations/1787880000_cc_activity_pairings.js`；存量签到不补号。
+
 `activities` 追加：
 
 | 字段 | 类型 | 语义 |
@@ -585,6 +587,8 @@
 在线分配号码与 valid 签到在同一事务中完成。服务端按报名角色原子读取并递增 `next_speaker_sequence` 或 `next_listener_sequence`，把递增前的值写入 `onsite_sequence`；编号顺序定义为数据库成功执行对应计数器自增的顺序，与写事务提交顺序一致。事务/唯一索引冲突时重试整个事务，不读取 `max(onsite_sequence)`，也不用 `checked_in_at` 或预生成 `checkin_id` 推断并发先后。撤销签到保留三个字段且不回退计数器，故序号不复用；存量签到不补号。
 
 ### 6.4 activity_pairs（新 base collection）
+
+状态：T2 分支`已验证`；普通角色只读规则按机构隔离，全部写入只经 `pairings.pb.js` 事务路径。
 
 | 字段 | 类型 | 约束/语义 |
 | --- | --- | --- |

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """suite_nodelete — 无硬删除（AC-18、FR-AUD-001、FR-AUD-002）。
 
-断言：全部 23 个业务集合的 delete 通道对机构管理员与参与者关闭（403/404）；
+断言：全部 24 个可造 fixture 的业务集合 delete 通道对机构管理员与参与者关闭（403/404）；
 审计日志对普通管理员无创建/修改途径（FR-AUD-002）。
 归档/作废后记录仍可审计查询，由 suite_checkins CHK-18 与 suite_surveys SUR-20 覆盖。
 """
@@ -31,6 +31,12 @@ def run(ctx):
     call(base, 'POST', '/api/cc/activities/%s/checkin/open' % act, {}, AT)
     s, ck = fx.self_checkin(base, fx.checkin_token(base, AT, act), PT)
     checkin = (ck.get('checkin') or {}).get('id')
+    # T2 activity_pairs：补一名聆听者签到并开始配对，得到真实 pair fixture。
+    P2, PT2, _ = fx.create_participant(base, 'ndel_listener')
+    reg2 = fx.register(base, PT2, act, 'listener', fx.field_answers(fields, '删验聆听者'))
+    fx.transition(base, AT, reg2, 'approved')
+    fx.self_checkin(base, fx.checkin_token(base, AT, act), PT2)
+    call(base, 'POST', '/api/cc/activities/%s/pairings/start' % act, {}, AT)
     sv, _ = fx.create_survey(base, AT, act, ver_id, '删验问卷')
     call(base, 'POST', '/api/cc/activity-surveys/%s/open' % sv, {}, AT)
     s, sub = call(base, 'POST', '/api/cc/activity-surveys/%s/submit' % sv,
@@ -78,20 +84,22 @@ def run(ctx):
     question = sid('survey_questions', "activity_survey_id='%s'" % sv)
     answer = sid('answers', "submission_id='%s'" % submission)
     audit = sid('audit_logs', "organization_id='%s'" % org)
+    activity_pair = sid('activity_pairs', "activity_id='%s'" % act)
 
     targets = [
         ('organizations', org), ('admin_invites', invite), ('admin_accounts', admin2),
         ('participant_accounts', P), ('activities', act), ('activity_approvals', approval),
         ('registration_field_defs', fields['nickname']), ('registrations', reg),
         ('registration_answers', reg_ans), ('checkin_sessions', session),
-        ('checkins', checkin), ('survey_templates', ctx['tpl_id']),
+        ('checkins', checkin), ('activity_pairs', activity_pair),
+        ('survey_templates', ctx['tpl_id']),
         ('survey_template_versions', ver_id), ('activity_surveys', sv),
         ('survey_questions', question), ('submissions', submission),
         ('answers', answer), ('export_jobs', job), ('audit_logs', audit),
         ('trainings', training), ('training_checkin_sessions', tsession),
         ('training_attendances', tattendance), ('posts', post),
     ]
-    rep.check('NDEL-00 fixture：23 个集合均有真实记录', all(t[1] for t in targets),
+    rep.check('NDEL-00 fixture：24 个集合均有真实记录', all(t[1] for t in targets),
               [t for t in targets if not t[1]])
 
     # ---------- 1. 机构管理员 delete 全部业务集合被拒 ----------
@@ -102,16 +110,16 @@ def run(ctx):
 
     # ---------- 2. 参与者 delete 被拒 ----------
     s, r = call(base, 'DELETE', '/api/collections/registrations/records/%s' % reg, token=PT)
-    rep.check('NDEL-23 参与者 delete 本人报名 → 403/404', s in (403, 404), r)
+    rep.check('NDEL-25 参与者 delete 本人报名 → 403/404', s in (403, 404), r)
     s, r = call(base, 'DELETE', '/api/collections/participant_accounts/records/%s' % P, token=PT)
-    rep.check('NDEL-24 参与者 delete 本人账号 → 403/404', s in (403, 404), r)
+    rep.check('NDEL-26 参与者 delete 本人账号 → 403/404', s in (403, 404), r)
 
     # ---------- 3. 审计日志无创建/修改途径（FR-AUD-002）----------
     s, r = call(base, 'POST', '/api/collections/audit_logs/records',
                 {'actor_id': 'x', 'actor_role': 'admin', 'organization_id': org,
                  'action': 'test.probe', 'target_type': 'x', 'target_id': 'y',
                  'result': 'success'}, AT)
-    rep.check('NDEL-25 管理员 create audit_logs → 403/404', s in (403, 404), r)
+    rep.check('NDEL-27 管理员 create audit_logs → 403/404', s in (403, 404), r)
     s, r = call(base, 'PATCH', '/api/collections/audit_logs/records/%s' % audit,
                 {'action': 'tampered'}, AT)
-    rep.check('NDEL-26 管理员 update audit_logs → 403/404', s in (403, 404), r)
+    rep.check('NDEL-28 管理员 update audit_logs → 403/404', s in (403, 404), r)

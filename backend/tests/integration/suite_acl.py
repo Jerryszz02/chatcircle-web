@@ -54,6 +54,22 @@ def run(ctx):
     s, ckb = fx.self_checkin(base, fx.checkin_token(base, AT_B, act_b_pub), PT_B)
     checkin_b = (ckb.get('checkin') or {}).get('id')
     call(base, 'POST', '/api/cc/activities/%s/checkin/close' % act_b_pub, {}, AT_B)
+    P_B2, PT_B2, _ = fx.create_participant(base, 'acl_user_b_listener')
+    reg_b2 = fx.register(base, PT_B2, act_b_pub, 'listener',
+                         fx.field_answers(fields, '越权乙听', phone='13800000001'))
+    fx.transition(base, AT_B, reg_b2, 'approved')
+    s, manual_b2 = call(base, 'POST', '/api/cc/checkins/manual',
+                        {'activity_id': act_b_pub, 'participant_id': P_B2,
+                         'reason': 'ACL 配对 fixture'}, AT_B)
+    checkin_b2 = (manual_b2.get('checkin') or {}).get('id')
+    s, pairing_b = call(base, 'POST', '/api/cc/activities/%s/pairings/start' % act_b_pub,
+                        {}, AT_B)
+    s, pairs_b = call(
+        base, 'GET',
+        "/api/collections/activity_pairs/records?perPage=1&filter=(activity_id='%s')" % act_b_pub,
+        token=st,
+    )
+    pair_b = ((pairs_b.get('items') or [{}])[0]).get('id')
     sv_b, qr_b = fx.create_survey(base, AT_B, act_b_pub, ver_id, '机构B问卷')
     call(base, 'POST', '/api/cc/activity-surveys/%s/open' % sv_b, {}, AT_B)
     s, subb = call(base, 'POST', '/api/cc/activity-surveys/%s/submit' % sv_b,
@@ -97,10 +113,11 @@ def run(ctx):
     question_b = sid('survey_questions', "activity_survey_id='%s'" % sv_b)
     answer_b = sid('answers', "submission_id='%s'" % sub_b)
     audit_b = sid('audit_logs', "organization_id='%s'" % org_b)
-    fixture_ok = all([reg_b, checkin_b, sv_b, sub_b, job_b, field_b, invite_b,
+    fixture_ok = all([reg_b, reg_b2, checkin_b, checkin_b2, pair_b,
+                      sv_b, sub_b, job_b, field_b, invite_b,
                       reg_ans_b, session_b, question_b, answer_b, audit_b,
                       training_b, attendance_b, tsession_b])
-    rep.check('fixture 双侧数据齐备（B 侧报名/签到/问卷/答卷/导出/审计/自定义字段/邀请码/培训/培训签到）',
+    rep.check('fixture 双侧数据齐备（B 侧报名/签到/配对/问卷/答卷/导出/审计/自定义字段/邀请码/培训/培训签到）',
               fixture_ok)
     if not fixture_ok:
         return
@@ -128,6 +145,8 @@ def run(ctx):
     deny('registration_answers', reg_ans_b, 'ACL-06 详情：机构B报名答案 → 404')
     list_clean('checkins', [checkin_b], 'ACL-07 签到列表不含机构B签到')
     deny('checkins', checkin_b, 'ACL-08 详情：机构B签到 → 404')
+    list_clean('activity_pairs', [pair_b], 'ACL-T2-01 配对列表不含机构B配对')
+    deny('activity_pairs', pair_b, 'ACL-T2-02 详情：机构B配对 → 404')
     list_clean('checkin_sessions', [session_b], 'ACL-09 签到场次列表不含机构B场次')
     deny('checkin_sessions', session_b, 'ACL-10 详情：机构B签到场次 → 404')
     list_clean('activity_surveys', [sv_b], 'ACL-11 问卷列表不含机构B问卷')

@@ -5,7 +5,7 @@
 #   1. 空库 migrate up 成功；
 #   2. migrate down 全部回滚 → 再次 migrate up，往返成功；
 #   3. serve 启动后经 API 抽查：
-#      - 24 个业务集合全部存在（字段/规则随集合定义）；
+#      - 25 个业务集合全部存在（字段/规则随集合定义）；
 #      - 未认证访问业务集合被拒或为空（无公开广场，FR-ACT-002）；
 #      - 活动公开详情经 /api/cc/public/activities 白名单端点可达，原生 viewRule 仅本机构
 #        管理员（匿名/参与者 404，FR-ACT-003 收敛后形态）；
@@ -95,6 +95,33 @@ run_migrate "migrate up（空库）成功" "$WORK/up1.log" up
 
 # --- 3. 回滚到 seed 迁移，验证推文与审计成对清理 -------------------------------
 # seed 之后允许继续追加业务迁移；按文件名前缀计算需回滚的层数，不能假设 seed 永远最新。
+# 回滚前造 501 条活动，验证恢复迁移时 T2 分页回填覆盖全部存量记录。
+if command -v sqlite3 >/dev/null 2>&1; then
+  sqlite3 "$DATA_DIR/data.db" <<'SQL'
+INSERT INTO organizations
+  (id, name, status, require_activity_approval, allow_sensitive_export, remark, created, updated)
+VALUES
+  ('migpageorg00001', '迁移分页机构', 'active', 0, 0, '',
+   '2026-08-29 00:00:00.000Z', '2026-08-29 00:00:00.000Z');
+WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 501)
+INSERT INTO activities
+  (id, organization_id, title, activity_code, description, location,
+   start_time, end_time, status, capacity_total, capacity_speaker, capacity_listener,
+   registration_open, registration_start_at, registration_end_at, checkin_qr_token,
+   group_tag, form_config_json, created, updated,
+   pairing_started_at, pairing_started_by, onsite_locked_at, onsite_locked_by,
+   next_speaker_sequence, next_listener_sequence)
+SELECT printf('migpageact%05d', n), 'migpageorg00001', '迁移分页活动',
+       printf('CC_MIG_PAGE_%05d', n), '', '',
+       '2099-01-01 10:00:00.000Z', '2099-01-01 12:00:00.000Z', 'draft', 2, 1, 1,
+       0, '', '', printf('mig_page_token_%05d', n), '', '{}',
+       '2026-08-29 00:00:00.000Z', '2026-08-29 00:00:00.000Z',
+       '', '', '', '', 7, 8
+FROM seq;
+SQL
+  check_eq "T2 回滚前已造 501 条跨页存量活动" \
+    "$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM activities WHERE organization_id='migpageorg00001';")" "501"
+fi
 SEED_TS="1787802274"
 AFTER_SEED_COUNT="$(find "$MIGRATIONS_DIR" -maxdepth 1 -name '*.js' -print \
   | awk -F/ -v seed="$SEED_TS" '{name=$NF; split(name, parts, "_"); if (parts[1] > seed) n++} END {print n+0}')"
@@ -111,6 +138,8 @@ else
 fi
 run_migrate "单独 down 后再次 migrate up 成功" "$WORK/up_seed.log" up
 if command -v sqlite3 >/dev/null 2>&1; then
+  BACKFILLED_ACTIVITIES="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM activities WHERE organization_id='migpageorg00001' AND next_speaker_sequence=1 AND next_listener_sequence=1;")"
+  check_eq "T2 分页回填覆盖全部 501 条存量活动" "$BACKFILLED_ACTIVITIES" "501"
   SEED_AUDITS="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM audit_logs WHERE action='post.create' AND target_type='post' AND target_id IN ('postreview00001','postreview00002') AND actor_id='system' AND actor_role='system';")"
   check_eq "再次 up 后恰有两条 system seed 审计" "$SEED_AUDITS" "2"
 fi
@@ -121,9 +150,9 @@ info "步骤 3/5：migrate down ${MIG_COUNT}（全部回滚）→ 再 migrate up
 echo y | run_migrate "migrate down 全部回滚成功" "$WORK/down.log" down "$MIG_COUNT"
 
 if command -v sqlite3 >/dev/null 2>&1; then
-  # 回滚后 25 个业务/内部集合应全部不存在（PocketBase 系统集合不受影响）
-  LEFT="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM _collections WHERE name IN ('organizations','admin_invites','admin_accounts','participant_accounts','participant_phone_challenges','activities','activity_approvals','registration_field_defs','registrations','registration_answers','checkin_sessions','checkins','survey_templates','survey_template_versions','activity_surveys','survey_questions','submissions','answers','export_jobs','audit_logs','trainings','training_checkin_sessions','training_attendances','reports','posts');")"
-  check_eq "down 后 25 个业务/内部集合全部不存在" "$LEFT" "0"
+  # 回滚后 26 个业务/内部集合应全部不存在（PocketBase 系统集合不受影响）
+  LEFT="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM _collections WHERE name IN ('organizations','admin_invites','admin_accounts','participant_accounts','participant_phone_challenges','activities','activity_approvals','registration_field_defs','registrations','registration_answers','checkin_sessions','checkins','activity_pairs','survey_templates','survey_template_versions','activity_surveys','survey_questions','submissions','answers','export_jobs','audit_logs','trainings','training_checkin_sessions','training_attendances','reports','posts');")"
+  check_eq "down 后 26 个业务/内部集合全部不存在" "$LEFT" "0"
 else
   info "未安装 sqlite3，跳过 down 后集合计数检查"
 fi
@@ -153,8 +182,8 @@ if [ -n "$STOKEN" ]; then ok "超管认证成功"; else bad "超管认证失败"
 
 info "步骤 5/5：API 抽查（集合存在性 / 未认证拒绝 / 规则与唯一索引）"
 
-# 4.1 25 个业务/内部集合全部存在
-EXPECTED="organizations admin_invites admin_accounts participant_accounts participant_phone_challenges activities activity_approvals registration_field_defs registrations registration_answers checkin_sessions checkins survey_templates survey_template_versions activity_surveys survey_questions submissions answers export_jobs audit_logs trainings training_checkin_sessions training_attendances reports posts"
+# 4.1 26 个业务/内部集合全部存在
+EXPECTED="organizations admin_invites admin_accounts participant_accounts participant_phone_challenges activities activity_approvals registration_field_defs registrations registration_answers checkin_sessions checkins activity_pairs survey_templates survey_template_versions activity_surveys survey_questions submissions answers export_jobs audit_logs trainings training_checkin_sessions training_attendances reports posts"
 NAMES="$(curl -fsS "$BASE/api/collections?perPage=100" -H "Authorization: $STOKEN" | json_val "' '.join(sorted(c['name'] for c in d['items']))")"
 for name in $EXPECTED; do
   case " $NAMES " in

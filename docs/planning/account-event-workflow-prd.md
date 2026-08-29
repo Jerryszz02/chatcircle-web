@@ -1,10 +1,6 @@
 # 参与者手机号账号与活动全流程升级（专项 PRD）
 
-> 状态：整体`计划中`；T0 与 T3 `已验证`，T1/T2/T4/T5/T6/T7 仍待实现
->
-> T0 状态：`2026-08-28 已验证`（共享契约与迁移边界已冻结，业务功能未实现）
->
-> T3 状态：`2026-08-29 已验证`（review 修复后，仅本实现分支；尚未证明已合并默认分支或已部署）
+> 状态：T0 契约与 T3 实时数据服务已在默认分支`已验证`；T2 配对后端在 `agent/t2-pairing-backend` `已验证`，尚未合并或部署；T1/T4~T7 仍待实现
 >
 > 最近更新：2026-08-29
 >
@@ -244,8 +240,8 @@ T0 已将目标契约冻结为 `2026-08-28.t0-v1`。机器名与共享 TypeScrip
 | --- | --- | --- |
 | T0 共享契约与迁移设计 | `已验证`：契约 `2026-08-28.t0-v1`、共享类型、API/权限/Realtime、迁移顺序与 v1 兼容方案已冻结；不包含 T1–T6 功能实现 | 无，必须先合并 |
 | T1 手机号账号 | `已验证`：Dypnsapi 接口、手机号登录/注册、存量账号绑定、旧/新号双验证码换绑、隐私文案、多轴限流与 mock provider 自动化已落地；真实阿里云账号联调仍为上线门禁 | T0 |
-| T2 配对后端 | 签到编号、队列、批量配对、迟到补配、释放/调整、审计、并发与幂等测试 | T0 |
-| T3 实时数据服务 | `已验证`：单活动事务快照、报名/签到/问卷/配对指标、Realtime 失效化订阅与重连；T2 schema 未合入时配对指标兼容为空 | T0 |
+| T2 配对后端 | `已验证`（本分支）：签到编号、队列、批量配对、迟到补配、释放/调整、现场锁定、本人最小快照、提交后 Realtime 失效消息、审计、并发与幂等测试 | T0 |
+| T3 实时数据服务 | `已验证`：单活动事务快照、报名/签到/问卷/配对指标、Realtime 失效化订阅与重连 | T0 |
 | T4 机构活动工作台 | 创建向导、复制活动、生命周期首页、现场工作台、管理员配对界面 | T1、T2、T3 |
 | T5 参与者配对体验 | 签到成功页、我的活动、活动现场页的编号/等待/已配对/调整状态与实时更新 | T1、T2、T3 |
 | T6 细粒度导出 | 单活动/问卷/参与者、字段和题目选择、XLSX、CSV ZIP、敏感权限和审计 | T0、T3 |
@@ -262,7 +258,7 @@ T0
 
 T0 由主任务维护共享契约和迁移边界；并行任务不得各自发明同义字段或端点。Wave 2 开始前，应先把 Wave 1 的契约合并到最新 `origin/main`。
 
-T1/T3 组合验证证据（2026-08-29，本实现分支）：`suite_live_summary.py` 覆盖双完成率交集、零分母、互补桶联合抑制、跨机构 404 与 Realtime topic 越权；全量后端集成 517/517 通过。管理端订阅服务另有 Vitest 覆盖六类快照依赖“先订阅再拉快照”、活动/问卷失效事件防抖和重连刷新；前端 46 files / 320 tests、迁移冒烟 59/59、Playwright 3/3 均通过。该证据不等于 T1 已合并或生产已部署。
+T1/T2/T3 组合验证证据（2026-08-29，本 T2 分支合并 `origin/main@83f90e0`）：`suite_phone_auth.py` 覆盖手机号认证、存量绑定与换绑；`suite_pairings.py` 覆盖现场编号、配对、锁定前后边界、事务提交后 Realtime 失效消息、并发与幂等；`suite_live_summary.py` 覆盖双完成率交集、零分母、互补桶联合抑制、跨机构 404 与 Realtime topic 越权。合并后后端集成 535/535、迁移冒烟 62/62、前端 46 files / 320 tests、Playwright 3/3 均通过；管理端订阅服务另有 Vitest 覆盖六类快照依赖“先订阅再拉快照”、活动/问卷失效事件防抖和重连刷新。该证据不等于 T2 已合并或生产已部署。
 
 ## 11. 验收清单
 
@@ -302,5 +298,5 @@ T1/T3 组合验证证据（2026-08-29，本实现分支）：`suite_live_summary
 可在新对话中直接粘贴：
 
 ```text
-请先完整阅读 docs/planning/account-event-workflow-prd.md、docs/planning/api-design.md 和 docs/planning/README.md，并检查当前 origin/main 的代码现状。T0 契约已冻结，后续任务必须复用 frontend/src/shared/api/accountEvent.ts，不得自创同义字段或端点。请按 T1/T2/T3 的依赖顺序选择一个任务，以一个 Worktree、一个 agent/<task-name> 分支、一个独立 PR 推进，并同步相关 planning 与 developer guide。
+请先完整阅读 docs/planning/account-event-workflow-prd.md、docs/planning/api-design.md 和 docs/planning/README.md，并检查当前 origin/main 的代码现状。T0 契约已冻结，后续任务必须复用 frontend/src/shared/api/accountEvent.ts，不得自创同义字段或端点。T1/T2/T3 已验证；请按依赖选择 T4~T6 的一个任务，以一个 Worktree、一个 agent/<task-name> 分支、一个独立 PR 推进，并同步相关 planning 与 developer guide。
 ```

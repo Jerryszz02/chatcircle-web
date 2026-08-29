@@ -6,14 +6,14 @@
 
 ## 项目是什么
 
-**Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。2026-08-29 审计时，默认分支 `origin/main@5d67520` 已包含 T0 冻结契约和 T3 单活动实时数据服务；当前 T1 功能分支另已实现并验证手机号账号。现场配对、工作台 UI 和细粒度导出仍属于`计划中`功能，功能分支状态不代表已部署生产。
+**Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。2026-08-29 审计时，默认分支 `origin/main@83f90e0` 已包含 T0 冻结契约、T1 手机号账号和 T3 单活动实时数据服务；当前 T2 分支另已实现并验证现场编号与配对后端。工作台 UI、参与者配对 UI 和细粒度导出仍属于`计划中`功能，功能分支状态不代表已部署生产。
 
 - 多机构集中管理：Empact 集中式平台，统一数据库，机构间按 `organization_id` 逻辑隔离。
 - 活动全生命周期：活动创建/发布/传播（链接与二维码；另设公开活动广场页 `/activities`，仅展示已发布/已关闭活动）→ 报名与人工审核（角色名额硬限制、误判回退）→ 现场固定二维码签到（含补签/撤销）→ 多份问卷发布与填写 → 基础项目管理看板 → 规范化 ZIP/CSV 数据导出。
 - 聆听者培训体系（2026-08 扩展，PRD 外）：机构级培训创建/发布/关闭、固定二维码培训签到（资格 = 账号存在 approved 聆听者报名，全平台通用）、账号级「培训通过」标记（仅记录与展示，不作报名门槛）。
 - 三级账号权限：超级管理员、机构管理员、参与者。T1 已实现中国大陆手机号验证码登录/注册；存量用户名账号保留迁移入口，绑定后沿用原 `participant_id` 与历史记录。
-- 现场执行升级（计划中）：按签到顺序为倾诉者/聆听者编号和配对，参与者端只展示本人的编号、组号与搭档姓名。
-- 机构效率升级：T3 单活动事务快照、参与者结构抑制和 Realtime 失效化服务已在本分支`已验证`；活动创建向导、工作台 UI 和细粒度导出仍`计划中`。
+- 现场执行升级：T2 后端在本分支`已验证`，包含签到编号、队列配对、迟到补配、释放/调整、现场锁定、本人最小快照、Realtime 失效消息与审计；管理员/参与者 UI 仍`计划中`（T4/T5）。
+- 机构效率升级：T3 单活动事务快照、参与者结构抑制和 Realtime 失效化服务已在默认分支`已验证`；活动创建向导、工作台 UI 和细粒度导出仍`计划中`。
 
 正式入口域名：`chatcircle.empact.cn`。
 
@@ -45,11 +45,11 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 |---|---|
 | 生成请求 | 归档 2026-08-27 专项升级，并于 2026-08-28 实施 T0 共享契约和 T1 手机号账号 |
 | 初始生成 | 2026-08-05 |
-| 最近同步 | 2026-08-29（T1/T3 `已验证`）：手机号 schema、Dypnsapi 验证码、登录/注册、存量绑定、双验证码换绑、隐私与限流已落地；实时快照采用互补桶联合抑制，并覆盖六类依赖事件失效化。 |
-| 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb-t1-phone-auth`；`agent/t1-phone-auth` 已变基到 `origin/main@5d67520`。不把本工作分支写成已部署生产状态。 |
-| 本次关键代码证据 | `1787895000_cc_participant_phone_auth.js` 增加手机号字段与内部 challenge 集合；`phoneauth.pb.js` 实现四个冻结端点；`live.pb.js` 提供事务快照与 Realtime 守卫；参与者 UI 以手机号为主入口并保留存量迁移。T2/T6 schema 与业务仍不存在。 |
-| 本次验证命令 | 2026-08-29 变基与 review 修复后已通过前端 46 files / 320 tests、lint、typecheck、build、后端集成 517/517、迁移 59/59、Playwright 3/3、hook 语法与 planning 文档审计。 |
-| 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T1/T3 已按 `2026-08-28.t0-v1` 落地，T2/T4/T5/T6 继续复用同一契约。 |
+| 最近同步 | 2026-08-29（T1/T2/T3 `已验证`）：手机号认证与参与者 UI、现场编号/配对后端、事务快照与 Realtime 失效化均已落地；T0 契约版本不变。 |
+| 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb-t2-pairing-backend`；`agent/t2-pairing-backend` 已合并 `origin/main@83f90e0`。本分支尚未合并或部署。 |
+| 本次关键代码证据 | `phoneauth.pb.js` 与 `1787895000_cc_participant_phone_auth.js` 提供 T1；`pairings.pb.js` 与 `1787880000_cc_activity_pairings.js` 提供 T2；`live.pb.js` 与 `activityLive.ts` 提供 T3。 |
+| 本次验证命令 | T1/T2/T3 合并后已通过后端集成 535/535、迁移冒烟 62/62、前端 lint/typecheck、46 files / 320 tests、build、Playwright 3/3；planning 文档审计与当前 PR checks 继续作为发布门禁。 |
+| 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T1/T2/T3 均复用 `2026-08-28.t0-v1`，T4–T6 继续按冻结契约实现。 |
 
 ## 已生成文档
 
@@ -99,7 +99,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 
 ## 开发入口
 
-仓库已经完成初始化。当前代码结构、本地启动、测试与部署命令以 [开发者指南](../developer-guide.md) 和各 package 的 `package.json` 为准；planning 文档不复制易漂移的命令。后续 T1/T2/T4~T6 必须先读 [api-design.md](api-design.md) 并复用 `frontend/src/shared/api/accountEvent.ts`；不得改名或另造契约，T4/T5 应直接消费 T3 已提供的快照/订阅服务。
+仓库已经完成初始化。当前代码结构、本地启动、测试与部署命令以 [开发者指南](../developer-guide.md) 和各 package 的 `package.json` 为准；planning 文档不复制易漂移的命令。后续 T1/T4~T6 必须先读 [api-design.md](api-design.md) 并复用 `frontend/src/shared/api/accountEvent.ts`；不得改名或另造契约，T4/T5 应直接消费 T2 配对端点与 T3 快照/订阅服务。
 
 ## Roadmap
 

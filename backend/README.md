@@ -6,7 +6,7 @@ Chat Circles 后端为单个 PocketBase 实例：认证、业务 API、collectio
 
 | 路径 | 内容 |
 | --- | --- |
-| `pb_migrations/` | 全部 schema 变更（集合、字段、索引、API rules），版本化管理。**schema 只能经迁移变更**，禁止在生产环境用 admin UI 手工改结构。当前含 25 个业务/内部集合的 27 个 JS 迁移；T1 的 `1787895000` 增加参与者手机号字段与内部 challenge 集合，对应 database-design §5.2/§6。 |
+| `pb_migrations/` | 全部 schema 变更（集合、字段、索引、API rules），版本化管理。**schema 只能经迁移变更**，禁止在生产环境用 admin UI 手工改结构。当前含 26 个业务/内部集合的 28 个 JS 迁移；T2 的 `1787880000` 增加现场字段与 `activity_pairs`，T1 的 `1787895000` 增加参与者手机号字段与内部 challenge 集合。 |
 | `pb_hooks/` | 全部服务端业务规则（JS），按领域分文件（`auth.pb.js`、`registrations.pb.js` 等）。**0.28.4 JSVM 各 hooks 文件作用域完全隔离**，共享函数以 `lib/` 为契约标准源、在 handler 内内联（勿手工改副本）。 |
 | `tests/` | 服务端测试：`integration/` 集成测试套件（L3，CI 必过）+ `migration_smoke.sh` 迁移冒烟，见下文「测试」。 |
 | `scripts/` | 开发辅助脚本：`seed_demo.sh` 演示种子数据注入，见下文「演示种子数据」。 |
@@ -78,7 +78,7 @@ export CC_SMS_TEMPLATE_CODE='控制台中的短信认证模板代码'
 bash backend/tests/run_integration.sh
 ```
 
-一键自举临时 PocketBase 实例并执行全部套件（共 517 项断言）：既有主链路、越权、并发、导出与审计回归，加上 T1 手机号新号/旧号登录、未知用户名拒绝、存量绑定、冲突、双验证码换绑、challenge 并发消费、停用账号与 provider 失败，以及 T3 实时汇总回归。任一失败退出码为 1；仅依赖 python3 标准库。端口可用 `CC_IT_PORT` 覆盖（默认 8097），`CC_IT_KEEP=1` 保留临时目录调试。详见 `tests/README.md`。
+一键自举临时 PocketBase 实例并执行全部套件（535 项断言），覆盖既有主链路、越权、并发、导出与审计回归，以及 T1 手机号认证、T2 现场编号与配对、T3 实时汇总与 Realtime 权限。任一失败退出码为 1；仅依赖 python3 标准库。端口可用 `CC_IT_PORT` 覆盖（默认 8097），`CC_IT_KEEP=1` 保留临时目录调试。详见 `tests/README.md`。
 
 ### 迁移冒烟验证
 
@@ -86,7 +86,7 @@ bash backend/tests/run_integration.sh
 bash backend/tests/migration_smoke.sh
 ```
 
-脚本使用临时数据目录（不污染 `pb_data/`）：空库 `migrate up` → 全部 `migrate down` → 再 `migrate up` 往返，随后启动 serve 抽查业务集合、权限、唯一索引、三类身份隔离与无硬删除。全部检查通过时退出码为 0。
+脚本使用临时数据目录（不污染 `pb_data/`）：空库 `migrate up` → seed 及其后续迁移局部回滚 → 全部 `migrate down` → 再 `migrate up` 往返，随后启动 serve 抽查 26 个业务/内部集合、权限、唯一索引、三类身份隔离与无硬删除（62 项检查）。全部检查通过时退出码为 0。
 
 ## 邮件（SMTP）配置（2026-08 改版）
 

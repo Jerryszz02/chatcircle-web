@@ -1,6 +1,6 @@
 # Chat Circles 技术设计文档（V1）
 
-> **2026-08-29 T1/T3 更新：**参与者手机号账号、Dypnsapi 验证码、存量绑定与换绑，以及单活动事务快照、双完成率、互补桶联合抑制和 Realtime 失效化/重连均已在本实现分支`已验证`；真实阿里云账号联调仍为上线门禁。工作台 UI、现场编号/配对和细粒度导出仍为`计划中`；共享契约保持 `2026-08-28.t0-v1`。
+> **2026-08-29 T1/T2/T3 更新：**参与者手机号账号、Dypnsapi 验证码、存量绑定与换绑，T2 现场编号与配对后端，以及单活动事务快照、双完成率、互补桶联合抑制和 Realtime 失效化/重连均`已验证`；真实阿里云账号联调仍为上线门禁。工作台/参与者配对 UI 和细粒度导出仍为`计划中`；共享契约保持 `2026-08-28.t0-v1`。
 
 ## 文档目的
 
@@ -22,7 +22,7 @@
 | --- | --- | --- |
 | PRD v0.3（评审修订版） | `docs/Chat_Circles_活动与问卷平台_PRD_v0.3.docx` | 需求基线：数据模型（§9）、功能需求 FR-*（§6）、状态机（§4）、导出规范（§10）、安全审计（§11）、技术架构与部署（§12）、非功能需求（§13）、验收标准 AC-01~23（§14）、里程碑 M0~M5（§15）。本版已确认的规则在开发阶段不得再次默认变更 |
 | 已确认技术决策 | 项目启动共识 + 当前代码 | 响应式 Web（React 18 + Vite + TypeScript，手机优先）+ PocketBase（后端/认证/SQLite 存储）+ Docker 部署；正式域名 `chatcircle.empact.cn`；GitHub 私有仓库 `chatcircle-web` 已创建 |
-| 仓库现状 | 项目根目录，2026-08-28 | `origin/main` `57a0aad` 已包含 `frontend/`、`backend/`、`e2e/`、`deploy/`、`mcp/` 与 CI workflow；仍无手机号/配对/新快照的业务实现。本文主体源于开发前设计，代码现状与本文冲突时以代码和 [开发者指南](../developer-guide.md) 为准 |
+| 仓库现状 | 项目根目录，2026-08-29 | 本 T2 分支已同步 `origin/main@5d67520`；默认分支包含 T3 快照/Realtime，本分支新增现场编号/配对 migration、hooks、共享类型与集成测试并已验证，尚未合并或部署；手机号、工作台/参与者 UI 与细粒度导出仍未实现。本文主体源于开发前设计，代码现状与本文冲突时以代码和 [开发者指南](../developer-guide.md) 为准 |
 
 ## 非目标
 
@@ -119,7 +119,7 @@ chatcircle-web/
 
 - **schema 只能经由 `pb_migrations` 变更**，禁止在生产环境手工用 admin UI 改结构（PRD §13"数据库结构通过迁移版本化"；标准模板版本不可变）。
 - **业务规则只能写在 `pb_hooks` / collection API rules**。前端可以做同样的校验以改善体验，但不得成为唯一防线。
-- 当前集合 record 类型、状态枚举、`metric_key` 放 `src/shared/`，与 `pb_migrations` 手工同步。T0 冻结契约单独放 `frontend/src/shared/api/accountEvent.ts`；其中 T1 手机号认证与 T3 汇总响应已由本分支落地，其余类型仍只表示后续实现必须复用的机器名/类型，不表示对应 migration/hook 已存在。
+- 当前集合 record 类型、状态枚举、`metric_key` 放 `src/shared/`，与 `pb_migrations` 手工同步。T0 冻结契约单独放 `frontend/src/shared/api/accountEvent.ts`；其中 T1 手机号认证、T2 配对后端与 T3 汇总/Realtime 已落地，其余类型仍只表示后续实现必须复用的机器名/类型，不表示对应 migration/hook 已存在。
 - 手机号、配对、快照、Realtime 和导出 v2 的端点、权限、幂等、错误与 v1 兼容契约不在本文重复，统一见 [api-design.md](api-design.md)。
 - hooks 文件名仅为建议切分，实现时可调整，但"按领域分文件 + 共享逻辑以 `lib/` 为契约标准源"的边界不变。注意（0.28 JSVM 实测）：`lib/` 不能跨文件引用——各 hooks 文件作用域隔离，handler 只能使用自身闭包内标识符与 JSVM 内建全局，共享函数须在 handler 内内联（与 `lib/` 同源，勿手工改副本）。
 

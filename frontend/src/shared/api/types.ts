@@ -139,6 +139,14 @@ export interface ActivityRecord extends BaseRecord {
   group_tag?: string;
   /** 活动级报名字段启用/必填配置（草案，database-design D-3）。 */
   form_config_json?: unknown;
+  /** T2：首次开始配对与现场锁定的服务端事实。 */
+  pairing_started_at?: string;
+  pairing_started_by?: string;
+  onsite_locked_at?: string;
+  onsite_locked_by?: string;
+  /** T2 服务端编号计数器；普通 UI 不应展示或修改。 */
+  next_speaker_sequence: number;
+  next_listener_sequence: number;
 }
 
 // ---------- 5.2.6 activity_approvals — 活动发布审核历史（只追加） ----------
@@ -218,6 +226,10 @@ export interface CheckinRecord extends BaseRecord {
   /** 补签/撤销必填原因（FR-CHK-005）。 */
   reason?: string;
   revoked_at?: string;
+  /** T2：签到时冻结的活动角色与不可复用现场序号。 */
+  onsite_role?: ActivityRole;
+  onsite_sequence?: number;
+  numbered_at?: string;
 }
 
 // ---------- 5.2.12 survey_templates — 标准模板索引 ----------

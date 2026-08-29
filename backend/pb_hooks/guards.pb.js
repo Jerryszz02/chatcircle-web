@@ -12,7 +12,7 @@
 // onRecordUpdateRequest 触发时 e.record 已携带请求数据。
 //
 // 守卫清单：
-// - activities：创建强制 status='draft'；更新禁改 status / organization_id / checkin_qr_token
+// - activities：创建强制 status='draft'；更新禁改状态、机构、签到 token 与 T2 现场内部字段
 // - trainings：创建强制 status='draft'；更新禁改 status / organization_id / checkin_qr_token
 // - registrations / registration_answers：禁直连 create/update（走报名与审核端点）
 // - checkin_sessions：禁直连 create/update（走签到开放/关闭端点）
@@ -47,6 +47,14 @@ onRecordUpdateRequest((e) => {
     }
     if (original.get('checkin_qr_token') !== e.record.get('checkin_qr_token')) {
       throw new ForbiddenError('签到二维码 token（checkin_qr_token）不可变更');
+    }
+    for (const field of [
+      'pairing_started_at', 'pairing_started_by', 'onsite_locked_at', 'onsite_locked_by',
+      'next_speaker_sequence', 'next_listener_sequence',
+    ]) {
+      if (String(original.get(field) || '') !== String(e.record.get(field) || '')) {
+        throw new ForbiddenError('活动现场字段须通过签到、配对或现场锁定端点更新');
+      }
     }
   }
   e.next();
@@ -96,6 +104,25 @@ onRecordCreateRequest((e) => {
   }
   e.next();
 }, 'checkin_sessions');
+
+// ---------------------------------------------------------------------------
+// activity_pairs：普通角色禁止直连写；配对、释放和调整必须走 T2 事务端点。
+// collection rules 已关闭写入，本守卫作为纵深保护并给出明确错误。
+// ---------------------------------------------------------------------------
+onRecordCreateRequest((e) => {
+  const isSuper = !!e.auth && e.auth.collection().name === '_superusers';
+  if (!isSuper) {
+    throw new ForbiddenError('配对写操作须通过 /api/cc/activities/{id}/pairings/* 端点');
+  }
+  e.next();
+}, 'activity_pairs');
+onRecordUpdateRequest((e) => {
+  const isSuper = !!e.auth && e.auth.collection().name === '_superusers';
+  if (!isSuper) {
+    throw new ForbiddenError('配对写操作须通过 /api/cc/activities/{id}/pairings/* 端点');
+  }
+  e.next();
+}, 'activity_pairs');
 onRecordUpdateRequest((e) => {
   const isSuper = !!e.auth && e.auth.collection().name === '_superusers';
   if (!isSuper) {

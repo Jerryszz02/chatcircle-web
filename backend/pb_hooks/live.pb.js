@@ -412,7 +412,9 @@ onRealtimeMessageSend((e) => {
     e.next();
     return;
   }
-  const auth = e.auth;
+  // Realtime 连接先建立、后通过 subscribe 请求绑定 auth；e.auth 仍是最初连接请求的快照。
+  // 发送时必须读取 client 当前保存的 auth record，才能正确覆盖多标签页/多设备连接。
+  const auth = e.client ? e.client.get('auth') : null;
   const participantId = topic.slice(pairingPrefix.length);
   if (
     !auth ||
@@ -423,8 +425,15 @@ onRealtimeMessageSend((e) => {
     return;
   }
   let payload = null;
+  let encoded = e.message.data || '';
+  // JSVM 将 subscriptions.Message.data 暴露为 []byte；冻结 payload 仅含 ASCII 字段。
+  if (Array.isArray(encoded)) {
+    let decoded = '';
+    for (const byte of encoded) decoded += String.fromCharCode(byte);
+    encoded = decoded;
+  }
   try {
-    payload = JSON.parse(String(e.message.data || ''));
+    payload = JSON.parse(String(encoded));
   } catch (_) {
     return;
   }
