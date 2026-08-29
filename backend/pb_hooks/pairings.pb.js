@@ -400,6 +400,7 @@ routerAdd('POST', '/api/cc/activities/{id}/pairings/start', (e) => {
     let createdPairs = 0;
     let activeCount = 0;
     let waiting = { total: 0, speaker: 0, listener: 0 };
+    let waitingParticipantIds = [];
     let attempts = 0;
     for (;;) {
       try {
@@ -467,6 +468,9 @@ routerAdd('POST', '/api/cc/activities/{id}/pairings/start', (e) => {
           waiting.speaker = speakers.length - createdPairs;
           waiting.listener = listeners.length - createdPairs;
           waiting.total = waiting.speaker + waiting.listener;
+          waitingParticipantIds = speakers.slice(createdPairs).concat(listeners.slice(createdPairs))
+            .map((checkin) => String(checkin.get('participant_id') || ''))
+            .filter((participantId) => participantId !== '');
 
           if (!alreadyStarted || createdPairs > 0) {
             const audit = new Record(txApp.findCollectionByNameOrId('audit_logs'));
@@ -488,6 +492,34 @@ routerAdd('POST', '/api/cc/activities/{id}/pairings/start', (e) => {
         if (isBusy(err) && attempts < 2) { attempts++; continue; }
         if (isBusy(err)) ccError(409, 'conflict', '配对操作冲突，请稍后重试');
         throw err;
+      }
+    }
+
+    // 首次开始会让未配对者从 waiting_to_start 进入 waiting_for_partner；他们没有 pair
+    // record 可触发 after-success hook，因此必须在开始事务提交后单独发送失效消息。
+    if (!alreadyStarted && waitingParticipantIds.length > 0) {
+      const clients = $app.subscriptionsBroker().clients();
+      const data = JSON.stringify({
+        contract_version: '2026-08-28.t0-v1',
+        activity_id: activityId,
+        changed_at: new Date().toISOString(),
+      });
+      const notified = {};
+      for (const participantId of waitingParticipantIds) {
+        if (notified[participantId]) continue;
+        notified[participantId] = true;
+        const topic = 'cc.participant.pairing.' + participantId;
+        const message = new SubscriptionMessage({ name: topic, data: data });
+        for (const clientId in clients) {
+          const client = clients[clientId];
+          if (!client.hasSubscription(topic)) continue;
+          const clientAuth = client.get('auth');
+          if (!clientAuth || clientAuth.collection().name !== 'participant_accounts' ||
+              clientAuth.get('status') !== 'active' || clientAuth.id !== participantId) continue;
+          try { client.send(message); } catch (_) {
+            // 连接可能刚好断开；客户端重连后会无条件重拉快照。
+          }
+        }
       }
     }
 

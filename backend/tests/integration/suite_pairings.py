@@ -158,6 +158,10 @@ def run(ctx):
     realtime_topic = 'cc.participant.pairing.%s' % listeners[0]['participant_id']
     subscribe_status, subscribe_body = call(base, 'POST', '/api/realtime', {
         'clientId': realtime_client_id, 'subscriptions': [realtime_topic]}, listeners[0]['token'])
+    waiting_stream, waiting_client_id = _realtime_client_id(base)
+    waiting_topic = 'cc.participant.pairing.%s' % speakers[2]['participant_id']
+    waiting_subscribe_status, waiting_subscribe_body = call(base, 'POST', '/api/realtime', {
+        'clientId': waiting_client_id, 'subscriptions': [waiting_topic]}, speakers[2]['token'])
     start_barrier = threading.Barrier(3)
 
     def start_pairing(token):
@@ -171,16 +175,23 @@ def run(ctx):
         start_results = [f1.result(), f2.result()]
     try:
         pairing_event = _realtime_event(realtime_stream, realtime_topic)
+        waiting_event = _realtime_event(waiting_stream, waiting_topic)
     finally:
         realtime_stream.close()
+        waiting_stream.close()
     active = _pairings(base, AT1, act, 'active')
-    rep.check('PAIR-03 并发开始不重复配对，并向本人发送最小 Realtime 失效消息',
+    rep.check('PAIR-03 并发开始不重复，并通知已配对者与不平衡队列等待者',
               all(item[0] == 200 for item in start_results) and len(active) == 1
-              and active[0].get('pair_sequence') == 1 and subscribe_status == 204
+              and active[0].get('pair_sequence') == 1
+              and subscribe_status == 204 and waiting_subscribe_status == 204
               and set(pairing_event) == {'contract_version', 'activity_id', 'changed_at'}
+              and set(waiting_event) == {'contract_version', 'activity_id', 'changed_at'}
               and pairing_event.get('contract_version') == '2026-08-28.t0-v1'
-              and pairing_event.get('activity_id') == act,
-              [start_results, active, subscribe_body, pairing_event])
+              and waiting_event.get('contract_version') == '2026-08-28.t0-v1'
+              and pairing_event.get('activity_id') == act
+              and waiting_event.get('activity_id') == act,
+              [start_results, active, subscribe_body, waiting_subscribe_body,
+               pairing_event, waiting_event])
     s, repeated = call(base, 'POST', '/api/cc/activities/%s/pairings/start' % act, {}, AT1)
     rep.check('PAIR-04 重复开始幂等且不重排已有组',
               s == 200 and repeated.get('already_started') is True
