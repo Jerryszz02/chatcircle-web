@@ -18,7 +18,7 @@ import { isCurrentActivity } from '../lib/activitySplit';
  * 活动与问卷页（/activities，未登录可看）：由首页拆出。
  * 现有活动（公开活动列表中尚未结束的场次，卡片样式，点击进详情/报名）+
  * 问卷入口（登录后显示本人可填问卷，未登录显示扫码指引）。浏览活动不需要账号；
- * 报名与填写问卷时在对应链路内登录/自动注册（FR-AUTH-001）。问卷也可直接扫描
+ * 报名与填写问卷时在对应链路内完成手机号认证。问卷也可直接扫描
  * 活动现场二维码进入（/survey/:qrToken，未登录由守卫引导登录后回跳）。
  * 已结束/已关闭的场次归入往期活动页（/activities/past），判定口径见 lib/activitySplit.ts。
  * 支持 #activities / #surveys 锚点直达对应区块。

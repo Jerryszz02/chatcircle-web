@@ -78,7 +78,7 @@ export CC_SMS_TEMPLATE_CODE='控制台中的短信认证模板代码'
 bash backend/tests/run_integration.sh
 ```
 
-一键自举临时 PocketBase 实例并执行全部套件（共 503 项断言）：既有主链路、越权、并发、导出与审计回归，加上 T1 手机号新号/旧号登录、存量绑定、冲突、双验证码换绑、challenge 并发消费、停用账号与 provider 失败。任一失败退出码为 1；仅依赖 python3 标准库。端口可用 `CC_IT_PORT` 覆盖（默认 8097），`CC_IT_KEEP=1` 保留临时目录调试。详见 `tests/README.md`。
+一键自举临时 PocketBase 实例并执行全部套件（共 517 项断言）：既有主链路、越权、并发、导出与审计回归，加上 T1 手机号新号/旧号登录、未知用户名拒绝、存量绑定、冲突、双验证码换绑、challenge 并发消费、停用账号与 provider 失败，以及 T3 实时汇总回归。任一失败退出码为 1；仅依赖 python3 标准库。端口可用 `CC_IT_PORT` 覆盖（默认 8097），`CC_IT_KEEP=1` 保留临时目录调试。详见 `tests/README.md`。
 
 ### 迁移冒烟验证
 

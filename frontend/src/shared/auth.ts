@@ -7,9 +7,9 @@ import { pbClients, pbForRole, ROLE_COLLECTIONS, type Role } from './pocketbase'
 /**
  * 三类角色的认证封装（technical-design §5.4、FR-AUTH-001~009）。
  *
- * - 参与者 participant_accounts：唯一注册入口是报名链路内的自动注册/登录端点
- *   `POST /api/cc/auth/participant`（用户名不存在即建号并签发 token；已存在则验密码，
- *   错误密码不得创建重复账号，FR-AUTH-001/AC-06）；通用登录页不提供注册（FR-AUTH-008）。
+ * - 参与者 participant_accounts：T1 新账号统一走手机号验证码；
+ *   `POST /api/cc/auth/participant` 仅供存量用户名账号校验密码并进入绑定流程，
+ *   未知用户名不得创建账号或签发 token（AC-06）。
  * - 管理员 admin_accounts：标准 authWithPassword 登录；注册走一次性邀请码端点
  *   `POST /api/cc/auth/admin-register`（FR-ORG-002，由管理端注册页调用 api 层）。
  * - 超级管理员 _superusers：标准 authWithPassword 登录；初始部署时创建，无产品注册入口。
@@ -18,8 +18,8 @@ import { pbClients, pbForRole, ROLE_COLLECTIONS, type Role } from './pocketbase'
  * 参与者 token 有效期 30 天由服务端 collection 配置保证（FR-AUTH-006），前端不处理续期。
  *
  * 单会话互斥：同一浏览器任一时刻只持有一个有效会话。登录任一角色成功即
- * 清除其它两个角色的会话（makeRoleAuth 统一保证，覆盖登录页、报名链路自动
- * 注册、邀请码注册后自动登录等全部入口）；要登录另一个身份必须先退出当前账号。
+ * 清除其它两个角色的会话（makeRoleAuth 统一保证，覆盖手机号登录、存量迁移、
+ * 邀请码注册后自动登录等全部入口）；要登录另一个身份必须先退出当前账号。
  */
 
 /** 参与者自定义认证端点的响应形态（约定与 PocketBase auth 响应一致：token + record）。 */
@@ -81,7 +81,7 @@ function clearOtherRoleSessions(role: Role): void {
   }
 }
 
-/** 参与者：报名链路内自动注册/登录（不存在即注册，存在则验密码，FR-AUTH-001/005）。 */
+/** 参与者：仅登录存量用户名账号；未知用户名由服务端统一拒绝。 */
 export const participantAuth: RoleAuth = makeRoleAuth('participant', async (username, password) => {
   const res = await apiPost<ParticipantAuthResponse>(
     pbClients.participant,

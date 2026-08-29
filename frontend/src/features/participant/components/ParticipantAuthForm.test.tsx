@@ -4,7 +4,7 @@ import { clearAllSessions, makeTestToken, stubApi, unstubApi } from '../../../te
 import { ParticipantAuthForm } from './ParticipantAuthForm';
 
 /**
- * 用户名密码单框组件测试（FR-AUTH-001、AC-06 前端侧）。
+ * 存量用户名登录组件测试（AC-06 前端侧）。
  * 覆盖：用户名规则客户端校验（非法不发起请求）、小写归一化提交、
  * 服务端错误（错误密码/限流）原样展示。
  */

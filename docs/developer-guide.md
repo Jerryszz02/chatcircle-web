@@ -192,7 +192,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 | 端点 | 鉴权 | 说明 |
 |---|---|---|
 | GET `/api/cc/health` | anon | 存活探针 |
-| POST `/api/cc/auth/participant` | anon | 参与者**自动注册/登录一体**：用户名小写归一，不存在即建号，存在则验密；三层限流（同人+IP 5 次/10min、同 IP 跨用户名 30 次/10min 防喷洒、同 IP 建号 10 个/h） |
+| POST `/api/cc/auth/participant` | anon | **仅存量用户名账号迁移登录**：用户名小写归一，只校验已存在账号；未知用户名与错误密码同形拒绝且不建号、不签发 token；双层限流（同人+IP 5 次/10min、同 IP 跨用户名 30 次/10min 防喷洒） |
 | POST `/api/cc/auth/participant/request-code` `/verify-code` | anon | 手机号验证码请求与登录/注册；响应不区分号码是否已注册，成功响应不含内部 username/完整手机号/HMAC |
 | POST `/api/cc/auth/participant/bind-phone` `/change-phone` | participant | 存量账号绑定保留 participant_id；换绑需旧号和新号双验证码，冲突不自动覆盖 |
 | POST `/api/cc/auth/admin-register` | anon | 一次性邀请码注册管理员，事务内消费邀请码+建号+审计 |
@@ -282,7 +282,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 ### 5.7 后端测试体系（`backend/tests/`）
 
-- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 18 个 suite（501 断言）：越权矩阵 AC-03、名额并发 AC-08、状态机 AC-07、签到 AC-09/20、培训、问卷资格、导出 AC-16/17、T3 实时汇总与 Realtime ACL、限流 AC-21、备份告警 AC-23、无硬删除 AC-18、安全加固回归（必须是最后一个使用内置认证的 suite）等。
+- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 19 个 suite（517 断言）：越权矩阵 AC-03、名额并发 AC-08、状态机 AC-07、签到 AC-09/20、培训、问卷资格、导出 AC-16/17、T1 手机号认证与存量登录防绕过、T3 实时汇总与 Realtime ACL、限流 AC-21、备份告警 AC-23、无硬删除 AC-18、安全加固回归等。
 - `migration_smoke.sh`：up→全量 down→sqlite3 直查 24 个业务集合清零→再 up，随后 serve 抽查 58 项。
 - **两条强制规则**：① authguard 对内置 auth-with-password 按 IP 限 25 次/10min，一轮全量当前使用 22 次（余量 3）——新增套件仍应避免消耗这项预算，管理员登录态用 impersonate，参与者走 `/api/cc/auth/participant`；② 新增带 `organization_id` 的接口，**必须同 PR 补机构越权用例**（通用端点放 `suite_acl.py`，领域聚合端点可放对应 suite）。
 
@@ -388,7 +388,7 @@ MCP 是由 WorkBuddy、Kimi、Claude、Codex 等本地客户端启动的 STDIO �
 
 | 层 | 位置 | 运行 | 覆盖 |
 |---|---|---|---|
-| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 44 files / 313 tests：lib 纯逻辑、页面行为、路由守卫与 T3 Realtime 失效化 |
+| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 46 files / 320 tests：lib 纯逻辑、页面行为、路由守卫、T1 手机号交互与 T3 Realtime 失效化 |
 | 后端集成 + 迁移冒烟 | `backend/tests/` | `bash backend/tests/run_integration.sh`、`migration_smoke.sh` | 越权矩阵、状态机、并发名额、导出、限流、无硬删除……（AC-01~23 映射见 docs/planning/test-plan.md） |
 | E2E 主链路 | `e2e/` | `cd e2e && npm test`（环境全自动自举，与本地库隔离） | 报名→审核→签到→问卷→导出、培训链路（移动 viewport，少而精） |
 

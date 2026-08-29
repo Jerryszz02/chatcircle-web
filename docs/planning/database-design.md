@@ -113,8 +113,8 @@
 | status | select(active, disabled) | 是 | — | 账号停用为可审计事件（PRD §11.3） |
 | （created） | 系统字段 | — | 索引 | 即 PRD §9.1 的 `created_at`；跨活动账号连续性统计可用 |
 
-- **当前实现**不存手机号、邮箱、微信等联系方式；**目标状态**新增已验证手机号作为主要登录身份，保留 `username` 仅用于存量兼容，见 [account-event-workflow-prd.md](account-event-workflow-prd.md) §3、§9。
-- API Rules 要点：参与者仅能 view/update 本人记录（`@request.auth.id = id`），且不可改 `username`（机构管理员也不得修改参与者凭据，PRD §3.2）；create 仅经报名链路自动注册接口。
+- **当前实现**已保存隐藏的规范化手机号、HMAC 查找值、验证时间、绑定来源与迁移状态；`username` 仅用于存量兼容，新手机号账号使用服务端随机内部凭据，见 [account-event-workflow-prd.md](account-event-workflow-prd.md) §3、§9。
+- API Rules 要点：参与者仅能 view 本人记录；手机号和迁移字段禁止普通客户端直改。新账号只在验证码验证成功后由 `phoneauth.pb.js` 创建；存量用户名端点只登录已有账号，未知用户名不得建号。
 - 无密码重置/找回入口（任何角色，PRD §5.7）。
 
 #### 5.2.5 activities — 活动主数据与名额（base）
@@ -625,7 +625,7 @@ down 迁移只允许在新字段/集合尚无业务数据时回滚 schema。一�
 |---|---|---|
 | AC-02 一次性邀请码 | `admin_invites` 4 态 + 事务注册 | 重复使用/过期邀请码注册失败 |
 | AC-03 机构隔离 | §5.4 规则与冗余 `organization_id` | 自动化越权测试全部通过 |
-| AC-06 自动注册/登录 | `participant_accounts` 唯一用户名归一化 | 错误密码不产生重复账号；用户名规则生效 |
+| AC-06 账号创建/存量登录 | 手机 HMAC 唯一索引 + 存量 `username` 小写归一化 | 新手机号重试不产生重复账号；未知用户名和错误密码均不建号；用户名规则生效 |
 | AC-07 报名审核与回退 | §5.5 迁移矩阵 + `registrations` 约束 | 矩阵外迁移被拒；回退留痕 |
 | AC-08 名额硬限制 | §5.6 事务校验 | 并发审核不超额；名额不可低于已通过数 |
 | AC-09 固定二维码签到 | `checkin_qr_token` + `checkin_sessions` + `checkins` 唯一有效约束 | 仅通过者开放期可签到，一人一条 |

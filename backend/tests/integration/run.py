@@ -90,6 +90,7 @@ def main():
 
     rep = Reporter()
     st, sid = fx.super_login(args.base_url, args.su, args.sp)
+    fx.configure_super_token(st)
     print('[INFO] 超管登录成功，准备平台级 fixture（标准字段 / 模板版本）')
     fields = fx.ensure_standard_fields(args.base_url, st)
     tpl_id, ver_id = fx.template_version_id(args.base_url, st)

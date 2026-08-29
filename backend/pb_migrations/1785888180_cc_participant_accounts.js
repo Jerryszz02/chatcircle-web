@@ -11,7 +11,7 @@
 // API Rules 要点：
 // - 参与者仅能 view/update 本人记录（@request.auth.id = id），且不可改 username（PRD §3.2，
 //   机构管理员也不得修改参与者凭据，:isset 守卫）；
-// - list 关闭（无参与者名录）；create 仅经报名链路自动注册 hook（服务端，technical-design §5.4）；
+// - list 关闭（无参与者名录）；该初版 create 原经报名链路自动注册 hook，T1 起改为验证码验证后创建；
 // - deleteRule 关闭（无硬删除）；无密码重置/找回入口（任何角色，PRD §5.7）；
 // - authRule 拒绝已停用账号登录（账号停用为可审计事件，PRD §11.3）。
 

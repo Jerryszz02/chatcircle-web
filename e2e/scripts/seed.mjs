@@ -202,17 +202,27 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     throw new Error(`资格活动发布失败：${JSON.stringify(qualPub).slice(0, 300)}`);
   }
 
-  // 先建存量用户名账号并经 T1 bind-phone 绑定测试手机号，既覆盖迁移链路，也保留固定
-  // username 供管理端名单断言；测试页面随后只用手机号验证码登录。
+  // 超管在一次性临时库预置存量用户名账号，再经 T1 bind-phone 绑定测试手机号；公开
+  // 用户名端点只允许登录既有账号，不能作为 fixture 建号捷径。固定 username 仅供管理端
+  // 名单断言，测试页面随后只用手机号验证码登录。
   const createLegacyAndBind = async (username, password, phone) => {
-    const auth = await call('POST', `${pbUrl}/api/cc/auth/participant`, { username, password });
+    const record = await call('POST', `${pbUrl}/api/collections/participant_accounts/records`, {
+      username: username.trim().toLowerCase(),
+      password,
+      passwordConfirm: password,
+      status: 'active',
+      phone_migration_status: 'legacy_unbound',
+    }, ST);
+    const auth = await call(
+      'POST', `${pbUrl}/api/collections/participant_accounts/impersonate/${record.id}`, {}, ST,
+    );
     const sent = await call('POST', `${pbUrl}/api/cc/auth/participant/request-code`, {
       phone, purpose: 'bind_phone',
     }, auth.token);
     await call('POST', `${pbUrl}/api/cc/auth/participant/bind-phone`, {
       phone, challenge_id: sent.challenge_id, code: FIXTURE.phoneCode,
     }, auth.token);
-    return auth;
+    return { ...auth, record };
   };
 
   const mainParticipant = await createLegacyAndBind(
