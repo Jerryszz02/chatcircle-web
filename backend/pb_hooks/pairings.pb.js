@@ -727,40 +727,52 @@ routerAdd('POST', '/api/cc/activities/{id}/onsite/lock', (e) => {
       ccError(404, 'not_found', '活动不存在');
     }
 
+    const isBusy = (err) => !!err && /busy|locked|snapshot/i.test(String((err && err.message) || err));
     let alreadyLocked = false;
     let onsite = null;
-    $app.runInTransaction((txApp) => {
-      const activity = txApp.findRecordById('activities', activityId);
-      if (activity.get('status') !== 'published' && activity.get('status') !== 'closed') {
-        ccError(400, 'onsite_unavailable', '活动当前不可锁定现场安排');
-      }
-      alreadyLocked = String(activity.get('onsite_locked_at') || '') !== '';
-      if (!alreadyLocked) {
-        activity.set('onsite_locked_at', new Date().toISOString().replace('T', ' ').slice(0, 23) + 'Z');
-        activity.set('onsite_locked_by', auth.id);
-        txApp.save(activity);
+    let attempts = 0;
+    for (;;) {
+      try {
+        $app.runInTransaction((txApp) => {
+          const activity = txApp.findRecordById('activities', activityId);
+          if (activity.get('status') !== 'published' && activity.get('status') !== 'closed') {
+            ccError(400, 'onsite_unavailable', '活动当前不可锁定现场安排');
+          }
+          alreadyLocked = String(activity.get('onsite_locked_at') || '') !== '';
+          if (!alreadyLocked) {
+            activity.set('onsite_locked_at', new Date().toISOString().replace('T', ' ').slice(0, 23) + 'Z');
+            activity.set('onsite_locked_by', auth.id);
+            txApp.save(activity);
 
-        const audit = new Record(txApp.findCollectionByNameOrId('audit_logs'));
-        audit.set('actor_id', auth.id);
-        audit.set('actor_role', actorRole);
-        audit.set('organization_id', activity.get('organization_id'));
-        audit.set('action', 'onsite.lock');
-        audit.set('target_type', 'activity');
-        audit.set('target_id', activityId);
-        audit.set('result', 'success');
-        audit.set('reason', '');
-        audit.set('metadata', {
-          pairing_started: String(activity.get('pairing_started_at') || '') !== '',
+            const audit = new Record(txApp.findCollectionByNameOrId('audit_logs'));
+            audit.set('actor_id', auth.id);
+            audit.set('actor_role', actorRole);
+            audit.set('organization_id', activity.get('organization_id'));
+            audit.set('action', 'onsite.lock');
+            audit.set('target_type', 'activity');
+            audit.set('target_id', activityId);
+            audit.set('result', 'success');
+            audit.set('reason', '');
+            audit.set('metadata', {
+              pairing_started: String(activity.get('pairing_started_at') || '') !== '',
+            });
+            txApp.save(audit);
+          }
+          onsite = {
+            pairing_started_at: String(activity.get('pairing_started_at') || '') || undefined,
+            pairing_started_by: String(activity.get('pairing_started_by') || '') || undefined,
+            onsite_locked_at: String(activity.get('onsite_locked_at') || '') || undefined,
+            onsite_locked_by: String(activity.get('onsite_locked_by') || '') || undefined,
+          };
         });
-        txApp.save(audit);
+        break;
+      } catch (err) {
+        if (err && err.__ccError === true) throw err;
+        if (isBusy(err) && attempts < 2) { attempts++; continue; }
+        if (isBusy(err)) ccError(409, 'conflict', '现场锁定冲突，请稍后重试');
+        throw err;
       }
-      onsite = {
-        pairing_started_at: String(activity.get('pairing_started_at') || '') || undefined,
-        pairing_started_by: String(activity.get('pairing_started_by') || '') || undefined,
-        onsite_locked_at: String(activity.get('onsite_locked_at') || '') || undefined,
-        onsite_locked_by: String(activity.get('onsite_locked_by') || '') || undefined,
-      };
-    });
+    }
 
     return e.json(200, {
       contract_version: '2026-08-28.t0-v1',

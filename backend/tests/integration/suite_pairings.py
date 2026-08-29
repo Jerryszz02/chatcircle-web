@@ -173,14 +173,24 @@ def run(ctx):
               and [row.get('pair_sequence') for row in active] == [2, 3, 4],
               [revoked, active, released])
 
-    s, locked = call(base, 'POST', '/api/cc/activities/%s/onsite/lock' % act, {}, AT1)
-    s2, locked_again = call(base, 'POST', '/api/cc/activities/%s/onsite/lock' % act, {}, AT2)
-    rep.check('PAIR-08 现场锁定幂等并保留首次操作者',
-              s == 200 and s2 == 200 and locked.get('already_locked') is False
-              and locked_again.get('already_locked') is True
-              and (locked.get('onsite') or {}).get('onsite_locked_by')
-              == (locked_again.get('onsite') or {}).get('onsite_locked_by'),
-              [locked, locked_again])
+    lock_barrier = threading.Barrier(3)
+
+    def lock_onsite(token):
+        lock_barrier.wait()
+        return call(base, 'POST', '/api/cc/activities/%s/onsite/lock' % act, {}, token)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        l1 = pool.submit(lock_onsite, AT1)
+        l2 = pool.submit(lock_onsite, AT2)
+        lock_barrier.wait()
+        lock_results = [l1.result(), l2.result()]
+    lock_payloads = [item[1] for item in lock_results]
+    lock_actors = [(item.get('onsite') or {}).get('onsite_locked_by') for item in lock_payloads]
+    rep.check('PAIR-08 两管理员并发锁定均成功、幂等且保留首次操作者',
+              all(item[0] == 200 for item in lock_results)
+              and sorted(item.get('already_locked') for item in lock_payloads) == [False, True]
+              and lock_actors[0] and lock_actors[0] == lock_actors[1],
+              lock_results)
 
     # 被撤销参与者重签取得新号（不复用）；锁定后撤销 P04 只释放，不自动把两侧等待者拼组。
     s, resign = fx.self_checkin(base, qr, paired_speaker['token'])
