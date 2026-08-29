@@ -52,6 +52,20 @@ def run(ctx):
     _, AT2 = fx.create_admin_via_impersonate(base, st, org, 'pair_admin_2')
     other_org = fx.create_org(base, st, 'T2 其他机构')
     _, OTHER_AT = fx.create_admin_via_impersonate(base, st, other_org, 'pair_other_admin')
+    s, injected = call(base, 'POST', '/api/collections/activities/records', {
+        'organization_id': org, 'activity_code': 'CC_IT_PAIR_INJECT', 'title': 'T2 注入守卫',
+        'start_time': '2099-01-01 10:00:00.000Z', 'end_time': '2099-01-01 12:00:00.000Z',
+        'status': 'draft', 'capacity_total': 2, 'capacity_speaker': 1, 'capacity_listener': 1,
+        'registration_open': True,
+        'pairing_started_at': '2099-01-01 09:00:00.000Z', 'pairing_started_by': 'injected',
+        'onsite_locked_at': '2099-01-01 09:30:00.000Z', 'onsite_locked_by': 'injected',
+        'next_speaker_sequence': 99, 'next_listener_sequence': 88,
+    }, AT1)
+    rep.check('PAIR-00 新活动忽略客户端注入的现场状态并强制从 1 开始',
+              s == 200 and injected.get('next_speaker_sequence') == 1
+              and injected.get('next_listener_sequence') == 1
+              and not injected.get('pairing_started_at') and not injected.get('pairing_started_by')
+              and not injected.get('onsite_locked_at') and not injected.get('onsite_locked_by'), injected)
     act = fx.create_activity(
         base, AT1, org, 'CC_IT_PAIR_01', 'T2 配对场',
         fields=[(fields['nickname'], True, True), (full_name_id, True, True)],
@@ -214,13 +228,23 @@ def run(ctx):
               s == 200 and reassigned_mine.get('state') == 'reassigned'
               and reassigned_mine.get('pair_code') == 'P05', reassigned_mine)
 
+    # 已归档/已下架活动是终态历史，不得再释放并重建配对。
+    close_status, _ = call(base, 'POST', '/api/cc/activities/%s/close' % act, {}, AT1)
+    archive_status, _ = call(base, 'POST', '/api/cc/activities/%s/archive' % act, {}, AT1)
+    s, finalized = call(base, 'POST', '/api/cc/activities/%s/pairings/reassign' % act,
+                        reassign_body, AT1)
+    rep.check('PAIR-12 已归档活动拒绝改组且不改写历史配对',
+              close_status == 200 and archive_status == 200 and s == 400
+              and biz_code(finalized) == 'pairing_unavailable'
+              and len(_pairings(base, AT1, act, 'active')) == 3, finalized)
+
     # 权限：其他机构统一 404；参与者不能管理或直读 pair 集合，只能读本人快照。
     s, cross = call(base, 'POST', '/api/cc/activities/%s/pairings/start' % act, {}, OTHER_AT)
     s2, participant_manage = call(base, 'POST', '/api/cc/activities/%s/pairings/start' % act,
                                   {}, paired_speaker['token'])
     s3, participant_pairs = call(base, 'GET', '/api/collections/activity_pairs/records?perPage=100',
                                  token=paired_speaker['token'])
-    rep.check('PAIR-12 跨机构 404，参与者管理 403 且直读 pair 集合为空',
+    rep.check('PAIR-13 跨机构 404，参与者管理 403 且直读 pair 集合为空',
               s == 404 and biz_code(cross) == 'not_found'
               and s2 == 403 and s3 == 200 and participant_pairs.get('totalItems') == 0,
               [cross, participant_manage, participant_pairs])
@@ -229,7 +253,7 @@ def run(ctx):
     _, audits = _list(base, st, 'audit_logs', "organization_id='%s'" % org, 'created')
     actions = [row.get('action') for row in audits]
     reassign_audits = [row for row in audits if row.get('action') == 'pairing.reassign']
-    rep.check('PAIR-13 T2 状态变更审计完整且调整原因保留',
+    rep.check('PAIR-14 T2 状态变更审计完整且调整原因保留',
               all(action in actions for action in (
                   'pairing.start', 'pairing.auto', 'pairing.release', 'pairing.reassign', 'onsite.lock'))
               and any(row.get('reason') == '锁定后换组' for row in reassign_audits), actions)

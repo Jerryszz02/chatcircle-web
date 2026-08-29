@@ -31,11 +31,18 @@ migrate((app) => {
   }));
   app.save(activities);
 
-  const existingActivities = app.findRecordsByFilter('activities', '', '', 5000, 0);
-  for (const activity of existingActivities) {
-    activity.set('next_speaker_sequence', 1);
-    activity.set('next_listener_sequence', 1);
-    app.save(activity);
+  // 存量活动无数量上限；必须分页回填全量后才能收紧 required。
+  const pageSize = 500;
+  let offset = 0;
+  for (;;) {
+    const page = app.findRecordsByFilter('activities', '', 'id', pageSize, offset);
+    for (const activity of page) {
+      activity.set('next_speaker_sequence', 1);
+      activity.set('next_listener_sequence', 1);
+      app.save(activity);
+    }
+    if (page.length < pageSize) break;
+    offset += page.length;
   }
   activities.fields.getByName('next_speaker_sequence').required = true;
   activities.fields.getByName('next_listener_sequence').required = true;

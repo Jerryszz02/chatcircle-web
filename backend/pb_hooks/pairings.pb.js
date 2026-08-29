@@ -11,14 +11,15 @@
 // 放回队列并继续自动补配，锁定后只释放、不自动调整。
 
 // ---------------------------------------------------------------------------
-// 活动创建：两个编号计数器的服务端默认值。字段 required，客户端无需感知或传入。
+// 活动创建：所有现场字段都由服务端强制初始化，忽略客户端注入值。
 // ---------------------------------------------------------------------------
 onRecordCreate((e) => {
-  if (Number(e.record.get('next_speaker_sequence')) < 1) {
-    e.record.set('next_speaker_sequence', 1);
-  }
-  if (Number(e.record.get('next_listener_sequence')) < 1) {
-    e.record.set('next_listener_sequence', 1);
+  e.record.set('next_speaker_sequence', 1);
+  e.record.set('next_listener_sequence', 1);
+  for (const field of [
+    'pairing_started_at', 'pairing_started_by', 'onsite_locked_at', 'onsite_locked_by',
+  ]) {
+    e.record.set(field, '');
   }
   e.next();
 }, 'activities');
@@ -464,6 +465,9 @@ routerAdd('POST', '/api/cc/activities/{id}/pairings/reassign', (e) => {
       try {
         $app.runInTransaction((txApp) => {
           const activity = txApp.findRecordById('activities', activityId);
+          if (activity.get('status') !== 'published' && activity.get('status') !== 'closed') {
+            ccError(400, 'pairing_unavailable', '活动当前状态不可调整配对');
+          }
           if (String(activity.get('pairing_started_at') || '') === '') {
             ccError(409, 'pairing_not_started', '请先开始配对');
           }

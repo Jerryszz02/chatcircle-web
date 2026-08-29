@@ -96,6 +96,32 @@ run_migrate "migrate up（空库）成功" "$WORK/up1.log" up
 # --- 3. 单独回滚 seed 迁移，验证推文与审计成对清理 -------------------------------
 # T2 migration 位于 seed 之后；回滚 2 个迁移才能覆盖 seed，随后 migrate up 恢复二者。
 info "步骤 2/5：回滚 T2 + seed 迁移 → 校验无孤儿审计 → 再 migrate up"
+if command -v sqlite3 >/dev/null 2>&1; then
+  sqlite3 "$DATA_DIR/data.db" <<'SQL'
+INSERT INTO organizations
+  (id, name, status, require_activity_approval, allow_sensitive_export, remark, created, updated)
+VALUES
+  ('migpageorg00001', '迁移分页机构', 'active', 0, 0, '',
+   '2026-08-29 00:00:00.000Z', '2026-08-29 00:00:00.000Z');
+WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 501)
+INSERT INTO activities
+  (id, organization_id, title, activity_code, description, location,
+   start_time, end_time, status, capacity_total, capacity_speaker, capacity_listener,
+   registration_open, registration_start_at, registration_end_at, checkin_qr_token,
+   group_tag, form_config_json, created, updated,
+   pairing_started_at, pairing_started_by, onsite_locked_at, onsite_locked_by,
+   next_speaker_sequence, next_listener_sequence)
+SELECT printf('migpageact%05d', n), 'migpageorg00001', '迁移分页活动',
+       printf('CC_MIG_PAGE_%05d', n), '', '',
+       '2099-01-01 10:00:00.000Z', '2099-01-01 12:00:00.000Z', 'draft', 2, 1, 1,
+       0, '', '', printf('mig_page_token_%05d', n), '', '{}',
+       '2026-08-29 00:00:00.000Z', '2026-08-29 00:00:00.000Z',
+       '', '', '', '', 7, 8
+FROM seq;
+SQL
+  check_eq "T2 回滚前已造 501 条跨页存量活动" \
+    "$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM activities WHERE organization_id='migpageorg00001';")" "501"
+fi
 echo y | run_migrate "migrate down T2 + seed 迁移成功" "$WORK/down_seed.log" down 2
 if command -v sqlite3 >/dev/null 2>&1; then
   SEED_POSTS="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM posts WHERE id IN ('postreview00001','postreview00002');")"
@@ -107,6 +133,8 @@ else
 fi
 run_migrate "单独 down 后再次 migrate up 成功" "$WORK/up_seed.log" up
 if command -v sqlite3 >/dev/null 2>&1; then
+  BACKFILLED_ACTIVITIES="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM activities WHERE organization_id='migpageorg00001' AND next_speaker_sequence=1 AND next_listener_sequence=1;")"
+  check_eq "T2 分页回填覆盖全部 501 条存量活动" "$BACKFILLED_ACTIVITIES" "501"
   SEED_AUDITS="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM audit_logs WHERE action='post.create' AND target_type='post' AND target_id IN ('postreview00001','postreview00002') AND actor_id='system' AND actor_role='system';")"
   check_eq "再次 up 后恰有两条 system seed 审计" "$SEED_AUDITS" "2"
 fi
