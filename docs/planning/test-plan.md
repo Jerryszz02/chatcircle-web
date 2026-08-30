@@ -1,6 +1,6 @@
 # Chat Circles 测试计划（Test Plan）
 
-> **2026-08-29 T1/T2/T3 更新：**契约 `2026-08-28.t0-v1`、手机号验证码/存量绑定/换绑/冲突/并发消费/停用账号/provider 失败/未知用户名迁移拒绝、T2 配对后端与 T3 实时数据服务均`已验证`；`suite_pairings.py` 覆盖现场编号/配对、本人最小权限、提交后 Realtime 失效消息、并发与幂等，`suite_live_summary.py` 覆盖互补桶联合抑制，前端测试覆盖六类快照依赖订阅。T4 机构活动工作台（创建向导、复制活动、生命周期首页、现场工作台与配对管理）在 `agent/t4-org-workbench` `已验证`（`suite_activity_duplicate.py` + `workbench.test.ts`），尚未合并或部署；参与者配对 UI 与细粒度导出仍为`计划中`。
+> **2026-08-29 T1/T2/T3 更新：**契约 `2026-08-28.t0-v1`、手机号验证码/存量绑定/换绑/冲突/并发消费/停用账号/provider 失败/未知用户名迁移拒绝、T2 配对后端与 T3 实时数据服务均`已验证`；`suite_pairings.py` 覆盖现场编号/配对、本人最小权限、提交后 Realtime 失效消息、并发与幂等，`suite_live_summary.py` 覆盖互补桶联合抑制，前端测试覆盖六类快照依赖订阅。T4 机构活动工作台（创建向导、复制活动、生命周期首页、现场工作台与配对管理）已验证（`suite_activity_duplicate.py` + `workbench.test.ts`）并合并默认分支（#41）；T5 参与者配对 UI（pairingStatus 五态文案、myPairingLive 订阅服务、MyPairingCard 三入口页面）在 `agent/t5-participant-pairing` `已验证`，尚未合并；细粒度导出仍为`计划中`。
 
 > 版本：v0.3（原 V1 策略基线 + 2026-08-28 T0 契约门禁与 T1/T2/T3 验证）
 > 依据：PRD v0.3（评审修订版），见 `docs/Chat_Circles_活动与问卷平台_PRD_v0.3.docx`
@@ -84,6 +84,7 @@
 | 表单组件 | 必填/格式错误提示；提交中防重复点击的 UI 态（与 L3 幂等互为防线，不互相替代） | §13 无障碍 |
 | 报名表单模型与校验（registrationForm） | 按所选角色过滤适用字段（role_scope ∈ {both, 该角色}）；切换角色清除不再适用字段的已填值；必填与校验仅针对适用字段；提交 payload 只含适用字段 | 2026-08 分角色报名扩展（PRD 外） |
 | 状态展示组件 | 待审核只读并提示联系管理员；已提交答案只读 | FR-REG-004、FR-SUR-009 |
+| T5 参与者配对卡（`pairingStatus` / `myPairingLive` / `useMyPairing` / `MyPairingCard`） | §5.3 五态文案与状态图标（不只靠颜色）、点开卡片查看组号与搭档、签到撤销/未签到/无报名时隐藏；订阅先于快照、事件防抖合并、其它活动配对消息忽略、PB_CONNECT 重连强制重拉、订阅失败降级为一次性快照 + 离线提示、「我的」中心单订阅多活动且仅已通过报名拉取、后台刷新失败保留旧快照并显式提示陈旧 | 专项 PRD §5.3 |
 
 ### 3. PocketBase 服务端集成测试（业务规则）
 

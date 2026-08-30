@@ -2,11 +2,13 @@ import { Link, useParams } from 'react-router-dom';
 import { Button, Card, Loading } from '../../../shared/ui';
 import { usePublicActivity } from '../lib/usePublicActivity';
 import { formatTimeRange, registrationClosedReasonCopy } from '../lib/status';
+import { MyPairingCard } from '../components/MyPairingCard';
 import { PublicPageLayout } from '../components/PublicPageLayout';
 
 /**
  * 公开活动详情（/a/:activityId，FR-ACT-003：未登录可看，点击报名时才要求登录）。
  * 仅 published/closed 活动由服务端放行；展示报名开放状态与剩余名额口径。
+ * 已登录参与者签到后，本页同时作为活动现场页展示「我的现场编号」配对卡（T5，PRD §5.3）。
  * 2026-08 UI 重构：改用站点公共框架（导航 + 页脚），活动标题即页面主标题，
  * 顶部封面为图片占位块，待活动照片素材替换。
  */
@@ -58,6 +60,9 @@ export function ActivityDetailPage() {
           {data.activity.description ? (
             <p className="cc-activity-desc">{data.activity.description}</p>
           ) : null}
+
+          {/* T5 活动现场页入口：已登录且已签到时展示本人现场编号与配对状态 */}
+          <MyPairingCard activityId={activityId} />
 
           <Card title="活动报名">
             {data.registration.open ? (

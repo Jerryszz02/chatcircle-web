@@ -1,13 +1,14 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { clearAllSessions, stubApi, unstubApi } from '../../../test/mockApi';
+import { clearAllSessions, saveParticipantSession, stubApi, unstubApi } from '../../../test/mockApi';
 import { CheckinPage } from './CheckinPage';
 
 /**
  * 扫码签到页状态分支测试（FR-CHK-001~004、AC-09/AC-20 前端侧）。
  * 覆盖：签到成功（body 携带 checkin_qr_token）、幂等返回已签到、
- * 未开放/已结束/报名未通过分因展示、失败重试。
+ * 未开放/已结束/报名未通过分因展示、失败重试；
+ * T5：签到成功态展示「我的现场编号」配对卡（PRD §5.3 签到成功页入口）。
  */
 
 function renderCheckin(token = 'tok1') {
@@ -105,5 +106,41 @@ describe('CheckinPage 扫码签到', () => {
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     expect(await screen.findByText('签到成功')).toBeInTheDocument();
     expect(attempt).toBe(2);
+  });
+
+  it('签到成功态展示本人现场编号与配对状态（T5，PRD §5.3）', async () => {
+    saveParticipantSession();
+    stubApi({
+      'POST /api/cc/checkin/self': {
+        body: {
+          checkin: {
+            id: 'ck1',
+            activity_id: 'act1',
+            checked_in_at: '2026-08-05 12:30:00.000Z',
+            status: 'valid',
+          },
+        },
+      },
+      'GET /api/cc/activities/act1/my-pairing': {
+        body: {
+          contract_version: '2026-08-28.t0-v1',
+          activity_id: 'act1',
+          state: 'paired',
+          onsite_code: 'S01',
+          pair_code: 'P01',
+          partner: { onsite_code: 'L01', display_name: '王小明' },
+          updated_at: '2026-08-05T12:30:01Z',
+        },
+      },
+    });
+    renderCheckin();
+    expect(await screen.findByText('签到成功')).toBeInTheDocument();
+    // 配对卡使用同一 my-pairing 快照：本人编号 + 已配对状态
+    expect(await screen.findByText('我的现场编号')).toBeInTheDocument();
+    expect(screen.getByText('S01')).toBeInTheDocument();
+    expect(screen.getByText('已配对')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '查看组号与搭档' }));
+    expect(screen.getByText('P01')).toBeInTheDocument();
+    expect(screen.getByText('王小明')).toBeInTheDocument();
   });
 });

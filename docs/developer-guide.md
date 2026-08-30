@@ -9,7 +9,7 @@
 >
 > 各子目录另有聚焦手册，本文会引用而不是复制它们：`backend/README.md`（后端操作）、`deploy/README.md`（生产部署）、`mcp/README.md`（MCP 数据取送）、`e2e/`（端到端测试）。
 >
-> **专项升级边界（2026-08-30）**：`frontend/src/shared/api/accountEvent.ts` 已冻结手机号/配对/快照/细粒度导出契约；T1 手机号认证与参与者 UI、T2 现场编号与配对后端、T3 单活动实时数据服务均已实现并验证，T4 机构活动工作台（创建向导、复制活动、生命周期首页、现场工作台与配对管理）在 `agent/t4-org-workbench` 已实现并验证（尚未合并），T5~T6 仍是目标契约。本 T4 分支尚未合并或部署。
+> **专项升级边界（2026-08-30）**：`frontend/src/shared/api/accountEvent.ts` 已冻结手机号/配对/快照/细粒度导出契约；T1 手机号认证与参与者 UI、T2 现场编号与配对后端、T3 单活动实时数据服务、T4 机构活动工作台（创建向导、复制活动、生命周期首页、现场工作台与配对管理）均已实现并验证且已合并默认分支；T5 参与者配对体验（三入口共用 my-pairing 快照 + 本人 Realtime 失效订阅）已在 `agent/t5-participant-pairing` 验证、尚未合并，T6 仍是目标契约。
 
 ---
 
@@ -322,7 +322,8 @@ src/
 ├── features/{participant,admin,superadmin}/
 │   ├── pages.tsx          #   barrel，同时负责 import 本端 CSS
 │   ├── pages/  components/  lib/   # 页面 / 本端组件 / 纯函数领域逻辑（测试主要打 lib）
-│   └── api.ts(或 lib/api.ts)       # 自定义端点封装；admin/lib/activityLive.ts 负责 T3 Realtime 失效订阅与重取
+│   └── api.ts(或 lib/api.ts)       # 自定义端点封装；admin/lib/activityLive.ts 负责 T3 Realtime 失效订阅与重取，
+│                                   #   participant/lib/myPairingLive.ts 负责 T5 本人配对状态的失效订阅与重取
 └── test/                  # vitest setup + mockApi.ts（fetch stub 工具）
 ```
 
@@ -336,7 +337,7 @@ src/
 
 ### 6.4 数据获取与错误处理约定
 
-无请求库，两种模式：集合数据用 `collectionsForRole(role).xxx.getList(...)` 直接调 SDK；业务动作用各 feature 的 api 模块封装走 `shared/api/http.ts` 的 `apiGet/apiPost`（错误规范化为 `ApiError{status, code, details}`，业务错误码从 `details.code` 读）。页面级统一手写 `useState(data/error/loading) + useEffect(cancelled 标志) + useCallback(reload)`。导出下载是特例：原生 fetch + Authorization + blob。T3 的 `features/admin/lib/activityLive.ts` 先建立 Realtime 订阅再首取快照，事件仅触发防抖重取，并在断线/重连时更新连接状态与刷新快照。
+无请求库，两种模式：集合数据用 `collectionsForRole(role).xxx.getList(...)` 直接调 SDK；业务动作用各 feature 的 api 模块封装走 `shared/api/http.ts` 的 `apiGet/apiPost`（错误规范化为 `ApiError{status, code, details}`，业务错误码从 `details.code` 读）。页面级统一手写 `useState(data/error/loading) + useEffect(cancelled 标志) + useCallback(reload)`。导出下载是特例：原生 fetch + Authorization + blob。T3 的 `features/admin/lib/activityLive.ts` 先建立 Realtime 订阅再首取快照，事件仅触发防抖重取，并在断线/重连时更新连接状态与刷新快照。T5 的 `features/participant/lib/myPairingLive.ts` + `lib/useMyPairing.ts` 把同一模式用于参与者本人配对状态（订阅本人 `checkins` + `cc.participant.pairing.<participantId>` topic，重拉 `my-pairing`；订阅失败降级为一次性快照 + 离线提示；后台刷新失败保留旧快照并经 error 标记陈旧）：签到成功页/活动详情页用单活动容器 `components/MyPairingCard.tsx`（PRD §5.3 五态，文字 + 状态图标 + 颜色共同表达），「我的」中心用页面级 `useMyPairingMap` 单订阅多活动 + 纯展示 `MyPairingCardView`，且仅已通过审核的报名条目挂载配对卡。
 
 ### 6.5 路由清单
 
@@ -352,7 +353,7 @@ src/
 
 ### 6.7 前端测试
 
-Vitest + jsdom + Testing Library，47 个测试文件与源码 colocate，主力打**纯函数 lib**（状态机、文案、表单校验）与页面行为（`src/test/mockApi.ts` 的 `stubApi()` 按"METHOD 路径片段"stub fetch，`makeTestToken/saveParticipantSession` 注入登录态）；`router.test.tsx` 用 MemoryRouter 验证三分区守卫。运行 `npm test`。
+Vitest + jsdom + Testing Library，51 个测试文件与源码 colocate，主力打**纯函数 lib**（状态机、文案、表单校验）与页面行为（`src/test/mockApi.ts` 的 `stubApi()` 按"METHOD 路径片段"stub fetch，`makeTestToken/saveParticipantSession` 注入登录态）；`router.test.tsx` 用 MemoryRouter 验证三分区守卫。运行 `npm test`。
 
 ## 7. 端到端业务流程（前后端串起来）
 
@@ -399,7 +400,7 @@ MCP 是由 WorkBuddy、Kimi、Claude、Codex 等本地客户端启动的 STDIO �
 
 | 层 | 位置 | 运行 | 覆盖 |
 |---|---|---|---|
-| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 47 files / 340 tests：lib 纯逻辑、页面行为、路由守卫、T1 手机号交互、T3 Realtime 失效化与 T4 工作台口径（阶段推导/小样本抑制/完成率展示/视图导出） |
+| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 51 files / 373 tests：lib 纯逻辑、页面行为、路由守卫、T1 手机号交互、T3 Realtime 失效化、T4 工作台口径（阶段推导/小样本抑制/完成率展示/视图导出）与 T5 配对卡五态 |
 | 后端集成 + 迁移冒烟 | `backend/tests/` | `bash backend/tests/run_integration.sh`、`migration_smoke.sh` | 越权矩阵、状态机、并发名额、导出、限流、无硬删除……（AC-01~23 映射见 docs/planning/test-plan.md） |
 | E2E 主链路 | `e2e/` | `cd e2e && npm test`（环境全自动自举，与本地库隔离） | 报名→审核→签到→问卷→导出、培训链路（移动 viewport，少而精） |
 

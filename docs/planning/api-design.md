@@ -1,12 +1,12 @@
 # 手机号账号与活动现场 API 契约
 
-> 状态：T0 契约、T1 手机号认证与 T3 实时数据服务已在默认分支验证；T2 现场编号与配对后端在 `agent/t2-pairing-backend` `已验证`，尚未合并或部署；T4 机构活动工作台（含 §4.1 duplicate 端点）在 `agent/t4-org-workbench` `已验证`，尚未合并或部署；T5、T6 仍为`计划中`
+> 状态：T0 契约、T1 手机号认证、T2 现场编号与配对后端、T3 实时数据服务与 T4 机构活动工作台（含 §4.1 duplicate 端点）已在默认分支验证并合并；T5 参与者配对体验在 `agent/t5-participant-pairing` `已验证`，尚未合并或部署；T6 仍为`计划中`
 >
 > 契约版本：`2026-08-28.t0-v1`
 >
 > 适用范围：[account-event-workflow-prd.md](account-event-workflow-prd.md) 的手机号账号、现场编号/配对、实时工作台与细粒度导出
 >
-> 当前实现差距：T1 四个手机号端点已在 `phoneauth.pb.js` 落地并通过 mock provider 集成测试；T3 已提供 `live-summary`、Realtime topic 守卫和管理端失效化订阅服务；本 T2 分支已有 §4 的配对/锁定端点、现场 schema、本人最小快照与提交后失效消息。真实阿里云账号、费用与测试号码仍待部署环境联调，T4 机构活动工作台 UI 已在 `agent/t4-org-workbench` 实现并验证（尚未合并），T5 参与者 UI 和 §6 导出 v2 尚未实现；本分支尚未合并或部署。实际代码现状以 [developer-guide.md](../developer-guide.md) 和 `backend/pb_hooks/` 为准。
+> 当前实现差距：T1 四个手机号端点已在 `phoneauth.pb.js` 落地并通过 mock provider 集成测试；T2/T3 已提供配对/锁定端点、本人最小快照、`live-summary`、Realtime topic 守卫与失效化订阅服务；T4 机构活动工作台（含 §4.1 duplicate 端点）已合并默认分支；T5 参与者配对卡已在 `frontend/src/features/participant/`（`lib/myPairingLive.ts` + `components/MyPairingCard.tsx`）落地，签到成功页、「我的」报名条目与活动详情页三入口共用。真实阿里云账号、费用与测试号码仍待部署环境联调，§6 导出 v2 尚未实现；T5 分支尚未合并或部署。实际代码现状以 [developer-guide.md](../developer-guide.md) 和 `backend/pb_hooks/` 为准。
 
 ## 1. 权威边界
 
@@ -86,7 +86,7 @@
 
 ## 5. Realtime 契约
 
-T3 当前实现位于 `backend/pb_hooks/live.pb.js` 与 `frontend/src/features/admin/lib/activityLive.ts`。管理端严格先建立六类快照依赖订阅再拉快照，record event 仅防抖触发重拉；SDK 每次重新收到 `PB_CONNECT` 都强制刷新，连接状态轮询只用于离线提示。参与者 topic 的订阅与发送均按 auth id 二次过滤，非法 topic 被拒。
+T3 当前实现位于 `backend/pb_hooks/live.pb.js` 与 `frontend/src/features/admin/lib/activityLive.ts`。管理端严格先建立六类快照依赖订阅再拉快照，record event 仅防抖触发重拉；SDK 每次重新收到 `PB_CONNECT` 都强制刷新，连接状态轮询只用于离线提示。参与者 topic 的订阅与发送均按 auth id 二次过滤，非法 topic 被拒。T5 参与者侧实现位于 `frontend/src/features/participant/lib/myPairingLive.ts` 与 `lib/useMyPairing.ts`：同一“先订阅再拉快照”模式，订阅本人 `checkins`（按 participant_id 过滤）与 `cc.participant.pairing.{participantId}` topic，事件防抖后重拉 `my-pairing`；配对 topic 消息中与跟踪活动无关的 `activity_id` 直接忽略；一次调用可跟踪多个活动（「我的」中心单订阅多活动）；订阅失败时降级为一次性快照 + 离线提示。
 
 Realtime 不传输第二套指标或配对真相，只用 PocketBase record event 或受控的自定义消息使 HTTP 快照失效：
 
