@@ -477,6 +477,139 @@
   color: var(--cc-info-text);
 }
 
+/* T4 创建向导步骤条（PRD §4.1） */
+.admin-steps {
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.admin-step {
+  padding: 4px 12px;
+  border-radius: var(--cc-radius-pill);
+  font-size: 13px;
+  color: var(--cc-neutral-600);
+  background: var(--cc-neutral-100);
+  border: 1px solid var(--cc-neutral-300);
+}
+
+.admin-step-active {
+  color: var(--cc-brand-700);
+  border-color: var(--cc-brand-600);
+  font-weight: 600;
+}
+
+.admin-step-done {
+  color: var(--cc-brand-600);
+}
+
+/* 说明性清单（现场设置步、缺失项列表） */
+.admin-note-list {
+  margin: 8px 0;
+  padding-left: 20px;
+  color: var(--cc-neutral-900);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+/* 预览步：左活动详情、右报名表（窄屏堆叠） */
+.admin-preview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.admin-preview-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.admin-preview-form {
+  border: 1px solid var(--cc-neutral-300);
+  border-radius: var(--cc-radius-card-a);
+  padding: 12px;
+  background: var(--cc-neutral-50);
+}
+
+/* T4 现场工作台：卡片网格与卡片内更新时间脚注 */
+.admin-workbench-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.admin-workbench-grid .cc-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-card-foot {
+  margin-top: auto;
+  padding-top: 8px;
+  font-size: 12px;
+  color: var(--cc-neutral-600);
+}
+
+.admin-structure-group {
+  margin-bottom: 8px;
+}
+
+.admin-structure-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-structure-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.admin-structure-bar-fill {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--cc-brand-500);
+  min-width: 2px;
+}
+
+.admin-trend {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 64px;
+  margin-top: 8px;
+}
+
+.admin-trend-bar {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--cc-neutral-600);
+}
+
+.admin-trend-bar-fill {
+  width: 100%;
+  background: var(--cc-brand-300);
+  border-radius: 2px 2px 0 0;
+  min-height: 2px;
+}
+
+@media (max-width: 767px) {
+  .admin-preview {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* 窄屏：侧栏转为顶部横排导航（后台复杂工作建议桌面完成，此处保可读） */
 @media (max-width: 767px) {
   .admin-shell {

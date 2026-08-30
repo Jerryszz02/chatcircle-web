@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { ActivityRecord, ActivityStatus } from '../../../shared/api/types';
 import { normalizeApiError } from '../../../shared/api/http';
 import { Button, Card, Loading, Modal } from '../../../shared/ui';
 import { AdminLayout } from '../components/AdminLayout';
-import { ActivityForm } from '../components/ActivityForm';
 import { StatusTag, type StatusTone } from '../components/StatusTag';
-import { adminCollections } from '../lib/api';
+import { adminCollections, duplicateActivity } from '../lib/api';
 import { ACTIVITY_STATUS_LABELS } from '../lib/labels';
 import { formatDateTime } from '../lib/format';
 
@@ -24,12 +23,17 @@ const STATUS_TONES: Record<ActivityStatus, StatusTone> = {
  * 活动列表（/admin/activities）。
  * 本机构活动（机构隔离由服务端规则强制），含状态筛选与创建入口；
  * 列表不出现公开广场语义——活动仅链接/二维码可达（FR-ACT-002）。
+ * 创建走分步向导独立页（PRD §4.1）；「复制上一场活动」复制最近一场的配置，
+ * 服务端重新生成活动代码、签到 token 与问卷入口 token，不复制历史数据（PRD §4.1）。
  */
 export function AdminActivitiesPage() {
+  const navigate = useNavigate();
   const [items, setItems] = useState<ActivityRecord[] | null>(null);
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState<'' | ActivityStatus>('');
-  const [showCreate, setShowCreate] = useState(false);
+  const [dupSource, setDupSource] = useState<ActivityRecord | null>(null);
+  const [dupBusy, setDupBusy] = useState(false);
+  const [dupError, setDupError] = useState('');
 
   const loadSeq = useRef(0);
   const load = useCallback(async () => {
@@ -55,10 +59,39 @@ export function AdminActivitiesPage() {
     void load();
   }, [load]);
 
+  const confirmDuplicate = async () => {
+    if (!dupSource) return;
+    setDupBusy(true);
+    setDupError('');
+    try {
+      const res = await duplicateActivity(dupSource.id);
+      navigate(`/admin/activities/${res.activity.id}`);
+    } catch (err) {
+      setDupError(normalizeApiError(err).message);
+      setDupBusy(false);
+    }
+  };
+
   return (
     <AdminLayout
       title="活动列表"
-      actions={<Button onClick={() => setShowCreate(true)}>创建活动</Button>}
+      actions={
+        <div className="admin-row-actions">
+          <Button
+            variant="secondary"
+            disabled={!items || items.length === 0}
+            onClick={() => {
+              setDupError('');
+              setDupSource(items?.[0] ?? null);
+            }}
+          >
+            复制上一场活动
+          </Button>
+          <Link to="/admin/activities/new">
+            <Button>创建活动</Button>
+          </Link>
+        </div>
+      }
     >
       <div className="admin-toolbar">
         <div className="cc-field">
@@ -136,16 +169,33 @@ export function AdminActivitiesPage() {
         </div>
       ) : null}
 
-      <Modal open={showCreate} title="创建活动" onClose={() => setShowCreate(false)}>
-        <ActivityForm
-          mode="create"
-          approvedCounts={{ total: 0, speaker: 0, listener: 0 }}
-          onSaved={() => {
-            setShowCreate(false);
-            void load();
-          }}
-          onCancel={() => setShowCreate(false)}
-        />
+      <Modal
+        open={dupSource !== null}
+        title="复制上一场活动"
+        onClose={() => setDupSource(null)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDupSource(null)} disabled={dupBusy}>
+              取消
+            </Button>
+            <Button onClick={() => void confirmDuplicate()} loading={dupBusy}>
+              确认复制
+            </Button>
+          </>
+        }
+      >
+        {dupSource ? (
+          <p>
+            将复制「{dupSource.title}」（<code>{dupSource.activity_code}</code>）的基本信息、名额、
+            报名表配置与问卷为新的草稿活动；活动代码、签到二维码 token 与问卷入口 token 都会重新生成，
+            历史报名、签到、配对、答卷与审计记录不会复制（PRD §4.1）。
+          </p>
+        ) : null}
+        {dupError ? (
+          <p className="cc-error" role="alert">
+            {dupError}
+          </p>
+        ) : null}
       </Modal>
 
       <Card className="admin-section">

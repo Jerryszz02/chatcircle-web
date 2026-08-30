@@ -13,6 +13,8 @@ import { StatusTag, type StatusTone } from '../components/StatusTag';
 import { RegistrationPanel } from './detail/RegistrationPanel';
 import { CheckinPanel } from './detail/CheckinPanel';
 import { SurveyPanel } from './detail/SurveyPanel';
+import { LifecyclePanel } from './detail/LifecyclePanel';
+import { OnsitePanel } from './detail/OnsitePanel';
 import { adminCollections, runActivityAction } from '../lib/api';
 import { ACTIVITY_STATUS_LABELS } from '../lib/labels';
 import { formatDateTime } from '../lib/format';
@@ -36,12 +38,13 @@ const STATUS_TONES: Record<ActivityStatus, StatusTone> = {
   archived: 'neutral',
 };
 
-type DetailTab = 'registrations' | 'checkin' | 'surveys' | 'settings';
+type DetailTab = 'registrations' | 'checkin' | 'surveys' | 'onsite' | 'settings';
 
 const TAB_LABELS: Record<DetailTab, string> = {
   registrations: '报名审核',
   checkin: '签到管理',
   surveys: '问卷管理',
+  onsite: '现场工作台',
   settings: '活动设置',
 };
 
@@ -58,7 +61,9 @@ const ACTION_CONFIRM_TEXT: Record<AdminActivityAction, string> = {
 /**
  * 活动详情管理（/admin/activities/:activityId）。
  * 头部：状态 + 生命周期动作（按状态机与机构发布审核开关计算可用性，PRD §4.3、FR-ACT-004）；
- * 子页：报名审核 / 签到管理 / 问卷管理 / 活动设置（编辑 + 报名表配置）。
+ * 生命周期面板（T4，PRD §4.2）：按招募中/活动前/现场中/活动后展示下一步操作，位于标签页之上；
+ * 子页：报名审核 / 签到管理 / 问卷管理 / 现场工作台（T4，PRD §4.3 实时六区域 + 配对管理）/
+ * 活动设置（编辑 + 报名表配置）。
  */
 export function AdminActivityDetailPage() {
   const { activityId = '' } = useParams();
@@ -208,6 +213,10 @@ export function AdminActivityDetailPage() {
         ) : null}
       </Card>
 
+      {org ? (
+        <LifecyclePanel activity={activity} org={org} counts={counts} onOpenTab={setTab} />
+      ) : null}
+
       <div className="admin-tabs" role="tablist">
         {(Object.keys(TAB_LABELS) as DetailTab[]).map((key) => (
           <button
@@ -233,6 +242,7 @@ export function AdminActivityDetailPage() {
       ) : null}
       {tab === 'checkin' ? <CheckinPanel activity={activity} onChanged={load} /> : null}
       {tab === 'surveys' ? <SurveyPanel activity={activity} /> : null}
+      {tab === 'onsite' ? <OnsitePanel activity={activity} onOpenTab={setTab} /> : null}
       {tab === 'settings' ? (
         <Card title="编辑活动">
           <ActivityForm mode="edit" initial={activity} approvedCounts={counts} onSaved={() => void load()} />
