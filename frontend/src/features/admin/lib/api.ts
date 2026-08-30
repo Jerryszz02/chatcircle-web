@@ -1,7 +1,11 @@
 import {
   ACCOUNT_EVENT_ENDPOINTS,
   type ActivityLiveSummaryResponse,
+  type CreateExportV2Input,
+  type CreateExportV2Response,
   type DuplicateActivityResponse,
+  type ExportPreviewResponse,
+  type ExportSelectionV2,
   type PairingReassignInput,
   type PairingReassignResponse,
   type PairingsStartResponse,
@@ -185,6 +189,23 @@ export function createExport(input: {
   confirm: true;
 }): Promise<unknown> {
   return apiPost(adminClient(), '/api/cc/exports', input);
+}
+
+/**
+ * T6 细粒度导出预览（PRD §7 / api-design §6）：先预览后生成。
+ * 返回归一化 selection、分数据域预估行数、服务端判敏结果与权限检查；
+ * 不落库、不返回实际数据值。
+ */
+export function previewExportV2(input: ExportSelectionV2): Promise<ExportPreviewResponse> {
+  return apiPost(adminClient(), ACCOUNT_EVENT_ENDPOINTS.exportPreview, input);
+}
+
+/**
+ * T6 细粒度导出创建：敏感导出须 confirm_sensitive:true（服务端仍重算判敏，
+ * 前端布尔值不作数）；成功返回 export_job_id，文件经既有鉴权下载端点获取。
+ */
+export function createExportV2(input: CreateExportV2Input): Promise<CreateExportV2Response> {
+  return apiPost(adminClient(), ACCOUNT_EVENT_ENDPOINTS.createExport, input);
 }
 
 /** 看板筛选项（与约定 query 参数一致；organization_id 由服务端按身份注入，前端不传）。
