@@ -253,6 +253,165 @@ routerAdd('POST', '/api/cc/exports', (e) => {
   const scope = body.scope || {};
   const includePii = body.include_pii === true;
 
+  // --- 内联 lib/exportv2.pb.js 标准源（v1→v2 归一化与判敏；与 exports_v2.pb.js 同步，
+  //     T6 起 scope_json 存 StoredExportSelectionV2，include_pii 由服务端判敏派生）---
+  const EXPORT_V2_SENSITIVE_SYSTEM_COLUMNS = ['phone_full', 'partner_name'];
+  const exportV2OrgInClause = (orgIds) => {
+    const parts = [];
+    orgIds.forEach((id) => {
+      if (!/^[A-Za-z0-9_]+$/.test(id)) return;
+      parts.push("organization_id = '" + id + "'");
+    });
+    return parts.length ? '(' + parts.join(' || ') + ')' : "organization_id = '__no_such_org__'";
+  };
+  const exportV2ActivityInClause = (activityIds) => {
+    const parts = [];
+    activityIds.forEach((id) => {
+      if (!/^[A-Za-z0-9_]+$/.test(id)) return;
+      parts.push("activity_id = '" + id + "'");
+    });
+    return parts.length ? '(' + parts.join(' || ') + ')' : "activity_id = '__no_such_activity__'";
+  };
+  // 判敏（api-design §6.2）：账号敏感系统列 + is_sensitive 字段/题目；preview 与 create 同一函数
+  const exportV2AnalyzeSelection = (selection, scopeOrgIds, scopeActivityIds) => {
+    const reasons = [];
+    const unknown = [];
+    const fieldDefByCode = {};
+    const questionByKey = {};
+    const pushReason = (source, code) => {
+      for (let i = 0; i < reasons.length; i++) {
+        if (reasons[i].source === source && reasons[i].code === code) return;
+      }
+      reasons.push({ source, code });
+    };
+    selection.columns.system.forEach((col) => {
+      if (EXPORT_V2_SENSITIVE_SYSTEM_COLUMNS.indexOf(col) >= 0) pushReason('account_column', col);
+    });
+    selection.columns.registration_field_codes.forEach((code) => {
+      let def = null;
+      const found = $app.findRecordsByFilter(
+        'registration_field_defs',
+        "field_code = {:c} && (organization_id = '' || " + exportV2OrgInClause(scopeOrgIds) + ')',
+        '',
+        10,
+        0,
+        { c: code },
+      );
+      found.forEach((d) => {
+        if (d.get('organization_id') !== '') def = d;
+      });
+      if (!def && found.length > 0) def = found[0];
+      if (!def) {
+        unknown.push('registration_field:' + code);
+        return;
+      }
+      fieldDefByCode[code] = def;
+      if (def.get('is_sensitive')) pushReason('registration_field', code);
+    });
+    selection.columns.survey_questions.forEach((qs) => {
+      let survey = null;
+      try {
+        survey = $app.findRecordById('activity_surveys', qs.activity_survey_id);
+      } catch (_) {
+        survey = null;
+      }
+      if (!survey || scopeActivityIds.indexOf(survey.get('activity_id')) < 0) {
+        unknown.push('survey:' + qs.activity_survey_id);
+        return;
+      }
+      qs.question_codes.forEach((qc) => {
+        const found = $app.findRecordsByFilter(
+          'survey_questions',
+          'activity_survey_id = {:s} && question_code = {:q}',
+          '',
+          1,
+          0,
+          { s: qs.activity_survey_id, q: qc },
+        );
+        if (!found.length) {
+          unknown.push('survey_question:' + qs.activity_survey_id + ':' + qc);
+          return;
+        }
+        const q = found[0];
+        questionByKey[qs.activity_survey_id + ':' + qc] = q;
+        if (q.get('is_sensitive')) pushReason('survey_question', qc);
+      });
+    });
+    return { requiresSensitive: reasons.length > 0, reasons, unknown, fieldDefByCode, questionByKey };
+  };
+  // v1→v2 归一化（api-design §6.3）：全数据域 + 范围内全部旧列 + csv_zip；
+  // include_pii=false 只枚举非敏感字段/题目（与旧导出实际内容一致）
+  const exportV2NormalizeLegacy = (scopeJson, legacyIncludePii, scopeOrgIds, scopeActivityIds) => {
+    const fieldDefs = $app.findRecordsByFilter(
+      'registration_field_defs',
+      "(organization_id = '' || " + exportV2OrgInClause(scopeOrgIds) + ')',
+      'created',
+      500,
+      0,
+      {},
+    );
+    const orgFieldCodes = {};
+    fieldDefs.forEach((d) => {
+      if (d.get('organization_id') !== '') orgFieldCodes[d.get('field_code')] = true;
+    });
+    const fieldCodeSet = [];
+    fieldDefs.forEach((d) => {
+      const code = d.get('field_code');
+      const isOrg = d.get('organization_id') !== '';
+      if (!isOrg && orgFieldCodes[code]) return;
+      if (!legacyIncludePii && d.get('is_sensitive')) return;
+      if (fieldCodeSet.indexOf(code) < 0) fieldCodeSet.push(code);
+    });
+    const surveyQuestions = [];
+    if (scopeActivityIds.length > 0) {
+      queryAll('activity_surveys', exportV2ActivityInClause(scopeActivityIds), {}, 'created').forEach((s) => {
+        const questions = $app.findRecordsByFilter(
+          'survey_questions',
+          'activity_survey_id = {:s}',
+          'order_index',
+          500,
+          0,
+          { s: s.id },
+        );
+        const codes = [];
+        questions.forEach((q) => {
+          if (!legacyIncludePii && q.get('is_sensitive')) return;
+          codes.push(q.get('question_code'));
+        });
+        if (codes.length > 0) surveyQuestions.push({ activity_survey_id: s.id, question_codes: codes });
+      });
+    }
+    const normScope = { type: scopeJson.type };
+    if (scopeJson.organization_id) normScope.organization_id = scopeJson.organization_id;
+    if (scopeJson.activity_id) normScope.activity_id = scopeJson.activity_id;
+    if (scopeJson.date_range) {
+      normScope.date_range = {};
+      if (scopeJson.date_range.from) normScope.date_range.from = scopeJson.date_range.from;
+      if (scopeJson.date_range.to) normScope.date_range.to = scopeJson.date_range.to;
+    }
+    return {
+      schema_version: 2,
+      scope: normScope,
+      datasets: ['registrations', 'checkins', 'pairings', 'surveys'],
+      survey_ids: [],
+      filters: {
+        participant_ids: [],
+        activity_roles: [],
+        registration_statuses: [],
+        checkin: 'any',
+        pairing: 'any',
+        survey_completion: 'any',
+      },
+      columns: {
+        system: ['participant_id', 'activity_id', 'activity_role', 'registration_status', 'checked_in_at'],
+        registration_field_codes: fieldCodeSet,
+        survey_questions: surveyQuestions,
+      },
+      format: 'csv_zip',
+      timezone: 'UTC',
+    };
+  };
+
   // 敏感导出：二次确认（confirm:true，FR-EXP-003）
   if (includePii && body.confirm !== true) {
     return jsonError(e, 400, 'confirm_required', '敏感导出需要二次确认（confirm:true）');
@@ -344,6 +503,15 @@ routerAdd('POST', '/api/cc/exports', (e) => {
 
   // --- 组装全部 CSV ---
   const activityIds = activities.map((a) => a.id);
+
+  // v1→v2 归一化存储（api-design §6.3）：scope_json 写 StoredExportSelectionV2
+  // （source_schema_version=1），include_pii 由服务端判敏派生，不信任客户端布尔值；
+  // 旧敏感导出含 participants.csv username（账号层敏感列），include_pii=true 恒记该原因
+  const legacySelection = exportV2NormalizeLegacy(scopeJson, includePii, organizationIds, activityIds);
+  const legacyAnalysis = exportV2AnalyzeSelection(legacySelection, organizationIds, activityIds);
+  if (includePii) legacyAnalysis.reasons.push({ source: 'account_column', code: 'username' });
+  const derivedPii = legacyAnalysis.reasons.length > 0;
+  const storedSelection = Object.assign({}, legacySelection, { source_schema_version: 1 });
   const orgMap = {};
   organizationIds.forEach((oid) => {
     orgMap[oid] = $app.findRecordById('organizations', oid);
@@ -715,26 +883,37 @@ routerAdd('POST', '/api/cc/exports', (e) => {
     const jobsCol = txApp.findCollectionByNameOrId('export_jobs');
     job = new Record(jobsCol);
     if (orgIdForJob) job.set('organization_id', orgIdForJob);
-    job.set('scope_json', scopeJson);
-    job.set('include_pii', includePii);
+    job.set('scope_json', storedSelection);
+    job.set('include_pii', derivedPii);
     job.set('file_path', genError ? '-' : EXPORT_DIR + '/' + fileName);
     job.set('file_checksum', genError ? '' : checksum);
     job.set('status', genError ? 'failed' : 'done');
     job.set('created_by', auth.id);
     txApp.save(job);
 
-    // 审计：普通导出 / 敏感导出（security-privacy §8.1 数据类）
+    // 审计：普通导出 / 敏感导出（security-privacy §8.1 数据类）；
+    // metadata 只记范围/筛选/机器码/格式，不记完整手机号、姓名或答案值（api-design §6.2）
     writeAudit(txApp, {
       actorId: auth.id,
       actorRole: role === 'admin' ? 'admin' : 'super_admin',
       organizationId: orgIdForJob || undefined,
-      action: includePii ? 'export.sensitive' : 'export.normal',
+      action: derivedPii ? 'export.sensitive' : 'export.normal',
       targetType: 'export_job',
       targetId: job.id,
       result: genError ? 'failure' : 'success',
       metadata: {
-        scope: scopeJson,
-        include_pii: includePii,
+        schema_version: 2,
+        source_schema_version: 1,
+        scope: storedSelection.scope,
+        datasets: storedSelection.datasets,
+        format: storedSelection.format,
+        timezone: storedSelection.timezone,
+        filters: storedSelection.filters,
+        system_columns: storedSelection.columns.system,
+        field_codes: storedSelection.columns.registration_field_codes,
+        survey_questions: storedSelection.columns.survey_questions,
+        requires_sensitive_export: derivedPii,
+        sensitive_reasons: legacyAnalysis.reasons,
         confirm: body.confirm === true,
         activity_count: activities.length,
         error: genError ? String(genError) : undefined,
@@ -750,7 +929,7 @@ routerAdd('POST', '/api/cc/exports', (e) => {
       id: job.id,
       status: job.get('status'),
       scope: scopeJson,
-      include_pii: includePii,
+      include_pii: derivedPii,
       file_checksum: checksum,
       created: iso(job.get('created')),
     },
