@@ -16,6 +16,7 @@ import {
 } from './features/participant/pages';
 import {
   AdminActivitiesPage,
+  AdminActivityCreatePage,
   AdminActivityDetailPage,
   AdminAuditPage,
   AdminDashboardPage,
@@ -103,6 +104,14 @@ export function AppRoutes() {
         element={
           <RequireRole role="admin">
             <AdminActivitiesPage />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="/admin/activities/new"
+        element={
+          <RequireRole role="admin">
+            <AdminActivityCreatePage />
           </RequireRole>
         }
       />

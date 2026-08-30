@@ -9,7 +9,7 @@
 >
 > 各子目录另有聚焦手册，本文会引用而不是复制它们：`backend/README.md`（后端操作）、`deploy/README.md`（生产部署）、`mcp/README.md`（MCP 数据取送）、`e2e/`（端到端测试）。
 >
-> **专项升级边界（2026-08-30）**：`frontend/src/shared/api/accountEvent.ts` 已冻结手机号/配对/快照/细粒度导出契约；T1 手机号认证与参与者 UI、T2 现场编号与配对后端、T3 单活动实时数据服务均已实现并验证，T5 参与者配对体验（三入口共用 my-pairing 快照 + 本人 Realtime 失效订阅）已在 `agent/t5-participant-pairing` 验证、尚未合并，T4/T6 仍是目标契约。
+> **专项升级边界（2026-08-30）**：`frontend/src/shared/api/accountEvent.ts` 已冻结手机号/配对/快照/细粒度导出契约；T1 手机号认证与参与者 UI、T2 现场编号与配对后端、T3 单活动实时数据服务、T4 机构活动工作台（创建向导、复制活动、生命周期首页、现场工作台与配对管理）均已实现并验证且已合并默认分支；T5 参与者配对体验（三入口共用 my-pairing 快照 + 本人 Realtime 失效订阅）已在 `agent/t5-participant-pairing` 验证、尚未合并，T6 仍是目标契约。
 
 ---
 
@@ -184,7 +184,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 **培训 `trainings.status`（3 态）**：draft→published→closed；培训签到资格 = 全平台任一 approved listener 报名（否则 `listener_not_approved`）。
 
-### 5.4 自定义端点全集（54 个 `routerAdd`，统一 `/api/cc/*` 前缀）
+### 5.4 自定义端点全集（55 个 `routerAdd`，统一 `/api/cc/*` 前缀）
 
 鉴权标记：`anon` 无需登录 / `participant` / `admin`（机构管理员，requireAuth 同时校验账号与所属机构均 active）/ `super` / `admin|super`。
 
@@ -206,6 +206,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 | GET `/api/cc/public/activities` `/{id}` | anon | 活动广场/公开详情（仅 published/closed，其余 404），含报名开放状态与剩余名额；列表支持 `?scope=current`（未结束）/`past`（已结束或已关闭）服务端过滤，报名开放判定含活动 `end_time`（已结束即截止，reason=ended） |
 | POST `/api/cc/activities/{id}/submit-review` | admin | draft/rejected → pending_review |
 | POST `/api/cc/activities/{id}/publish` `/close` `/archive` | admin | 直发（机构开审核则拒绝）/ 关闭 / 归档 |
+| POST `/api/cc/activities/{id}/duplicate` | admin | T4 复制活动：配置与问卷/题目物化行复制为新草稿，活动代码、签到 token、问卷入口 token 重新生成，历史报名/签到/配对/答卷/审计不复制；写 `activity.duplicate` 审计 |
 | POST `/api/cc/activities/{id}/approve` `/reject` `/unpublish` | super | 审批 / 驳回（reason 必填）/ 下架（不走 approvals） |
 
 **报名**（`registrations.pb.js`）
@@ -292,7 +293,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 ### 5.7 后端测试体系（`backend/tests/`）
 
-- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 20 个 suite（535 断言）：越权矩阵 AC-03、名额并发 AC-08、状态机 AC-07、签到 AC-09/20、T1 手机号认证与存量登录防绕过、T2 配对、T3 实时汇总与 Realtime ACL、培训、问卷资格、导出 AC-16/17、限流 AC-21、备份告警 AC-23、无硬删除 AC-18、安全加固回归等。
+- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 21 个 suite（548 断言）：越权矩阵 AC-03、名额并发 AC-08、状态机 AC-07、签到 AC-09/20、T1 手机号认证与存量登录防绕过、T2 配对、T3 实时汇总与 Realtime ACL、T4 复制活动、培训、问卷资格、导出 AC-16/17、限流 AC-21、备份告警 AC-23、无硬删除 AC-18、安全加固回归等。
 - `migration_smoke.sh`：seed 及后续迁移局部回滚 → 全量 down → sqlite3 直查 26 个业务/内部集合清零 → 再 up，随后 serve 抽查，共 62 项。
 - **两条强制规则**：① authguard 对内置 auth-with-password 按 IP 限 25 次/10min，一轮全量当前使用 22 次（余量 3）——新增套件仍应避免消耗这项预算，管理员登录态用 impersonate，参与者走 `/api/cc/auth/participant`；② 新增带 `organization_id` 的接口，**必须同 PR 补机构越权用例**（通用端点放 `suite_acl.py`，领域聚合端点可放对应 suite）。
 
@@ -343,7 +344,7 @@ src/
 | 区 | 路由 |
 |---|---|
 | 参与者 `/`（公开页不要求登录） | `/` 落地页（现有活动最近 2 场、往期活动公开推文最近 2 篇）、`/activities` 现有活动（仅未结束场次）、`/activities/past` 全部公开推文、`/a/:activityId` 详情、`/a/:activityId/register` 报名、`/login`；需会话：`/me` 我的、`/checkin/:token` 扫码签到、`/survey/:qrToken` 填问卷、`/trainings`、`/training-checkin/:token` |
-| 机构 `/admin` | 公开：`/admin/login`、`/admin/register`（邀请码）；守卫：`/admin/activities`(+`/:activityId` 四 tab 详情)、`/admin/trainings`(+`/:id`)、`/admin/dashboard`、`/admin/exports`、`/admin/audit` |
+| 机构 `/admin` | 公开：`/admin/login`、`/admin/register`（邀请码）；守卫：`/admin/activities`（+`/new` T4 分步创建向导、`/:activityId` 生命周期面板 + 五 tab 详情含「现场工作台」）、`/admin/trainings`(+`/:id`)、`/admin/dashboard`、`/admin/exports`、`/admin/audit` |
 | 超管 `/super` | 公开：`/super/login`；守卫：`/super/organizations`（机构+邀请码+开关）、`/super/approvals`、`/super/activities`、`/super/posts`（内容推文）、`/super/dashboard`、`/super/exports`、`/super/audit`、`/super/system`（备份告警+模板管理） |
 
 ### 6.6 样式体系
@@ -352,7 +353,7 @@ src/
 
 ### 6.7 前端测试
 
-Vitest + jsdom + Testing Library，40 个测试文件与源码 colocate，主力打**纯函数 lib**（状态机、文案、表单校验）与页面行为（`src/test/mockApi.ts` 的 `stubApi()` 按"METHOD 路径片段"stub fetch，`makeTestToken/saveParticipantSession` 注入登录态）；`router.test.tsx` 用 MemoryRouter 验证三分区守卫。运行 `npm test`。
+Vitest + jsdom + Testing Library，51 个测试文件与源码 colocate，主力打**纯函数 lib**（状态机、文案、表单校验）与页面行为（`src/test/mockApi.ts` 的 `stubApi()` 按"METHOD 路径片段"stub fetch，`makeTestToken/saveParticipantSession` 注入登录态）；`router.test.tsx` 用 MemoryRouter 验证三分区守卫。运行 `npm test`。
 
 ## 7. 端到端业务流程（前后端串起来）
 
@@ -399,7 +400,7 @@ MCP 是由 WorkBuddy、Kimi、Claude、Codex 等本地客户端启动的 STDIO �
 
 | 层 | 位置 | 运行 | 覆盖 |
 |---|---|---|---|
-| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 50 files / 350 tests：lib 纯逻辑、页面行为、路由守卫、T1 手机号交互、T3 Realtime 失效化与 T5 配对卡五态 |
+| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 51 files / 373 tests：lib 纯逻辑、页面行为、路由守卫、T1 手机号交互、T3 Realtime 失效化、T4 工作台口径（阶段推导/小样本抑制/完成率展示/视图导出）与 T5 配对卡五态 |
 | 后端集成 + 迁移冒烟 | `backend/tests/` | `bash backend/tests/run_integration.sh`、`migration_smoke.sh` | 越权矩阵、状态机、并发名额、导出、限流、无硬删除……（AC-01~23 映射见 docs/planning/test-plan.md） |
 | E2E 主链路 | `e2e/` | `cd e2e && npm test`（环境全自动自举，与本地库隔离） | 报名→审核→签到→问卷→导出、培训链路（移动 viewport，少而精） |
 

@@ -1,6 +1,7 @@
 import type {
   ActiveStatus,
   ActivityRole,
+  ActivityRecord,
   BaseRecord,
   CheckinRecord,
   RegistrationStatus,
@@ -334,6 +335,19 @@ export interface OnsiteLockResponse {
   onsite: ActivityOnsiteStateFields;
 }
 
+// ---------- T4 机构活动工作台：复制活动 ----------
+
+/**
+ * 复制活动响应（PRD §4.1）。服务端只复制配置（基本信息/名额/报名窗口/报名表配置/
+ * 问卷与题目物化行），重新生成活动代码、签到 token 与问卷入口 token；新活动恒为
+ * draft，历史报名、签到、配对、答卷与审计记录不随复制产生。
+ */
+export interface DuplicateActivityResponse {
+  contract_version: typeof ACCOUNT_EVENT_CONTRACT_VERSION;
+  activity: ActivityRecord;
+  duplicated_surveys: number;
+}
+
 // ---------- 细粒度导出 ----------
 
 export type ExportDataset = 'registrations' | 'checkins' | 'pairings' | 'surveys';
@@ -451,6 +465,7 @@ export const ACCOUNT_EVENT_ENDPOINTS = {
   reassignPairing: (activityId: string) => activityPath(activityId, '/pairings/reassign'),
   myPairing: (activityId: string) => activityPath(activityId, '/my-pairing'),
   lockOnsite: (activityId: string) => activityPath(activityId, '/onsite/lock'),
+  duplicateActivity: (activityId: string) => activityPath(activityId, '/duplicate'),
 } as const;
 
 /**

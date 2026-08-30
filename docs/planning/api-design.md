@@ -1,12 +1,12 @@
 # 手机号账号与活动现场 API 契约
 
-> 状态：T0 契约、T1 手机号认证、T2 现场编号与配对后端与 T3 实时数据服务已在默认分支验证；T5 参与者配对体验在 `agent/t5-participant-pairing` `已验证`，尚未合并或部署；T4/T6 仍为`计划中`
+> 状态：T0 契约、T1 手机号认证、T2 现场编号与配对后端、T3 实时数据服务与 T4 机构活动工作台（含 §4.1 duplicate 端点）已在默认分支验证并合并；T5 参与者配对体验在 `agent/t5-participant-pairing` `已验证`，尚未合并或部署；T6 仍为`计划中`
 >
 > 契约版本：`2026-08-28.t0-v1`
 >
 > 适用范围：[account-event-workflow-prd.md](account-event-workflow-prd.md) 的手机号账号、现场编号/配对、实时工作台与细粒度导出
 >
-> 当前实现差距：T1 四个手机号端点已在 `phoneauth.pb.js` 落地并通过 mock provider 集成测试；T2/T3 已提供配对/锁定端点、本人最小快照、`live-summary`、Realtime topic 守卫与失效化订阅服务；T5 参与者配对卡已在 `frontend/src/features/participant/`（`lib/myPairingLive.ts` + `components/MyPairingCard.tsx`）落地，签到成功页、「我的」报名条目与活动详情页三入口共用。真实阿里云账号、费用与测试号码仍待部署环境联调，T4 UI 和 §6 导出 v2 尚未实现；T5 分支尚未合并或部署。实际代码现状以 [developer-guide.md](../developer-guide.md) 和 `backend/pb_hooks/` 为准。
+> 当前实现差距：T1 四个手机号端点已在 `phoneauth.pb.js` 落地并通过 mock provider 集成测试；T2/T3 已提供配对/锁定端点、本人最小快照、`live-summary`、Realtime topic 守卫与失效化订阅服务；T4 机构活动工作台（含 §4.1 duplicate 端点）已合并默认分支；T5 参与者配对卡已在 `frontend/src/features/participant/`（`lib/myPairingLive.ts` + `components/MyPairingCard.tsx`）落地，签到成功页、「我的」报名条目与活动详情页三入口共用。真实阿里云账号、费用与测试号码仍待部署环境联调，§6 导出 v2 尚未实现；T5 分支尚未合并或部署。实际代码现状以 [developer-guide.md](../developer-guide.md) 和 `backend/pb_hooks/` 为准。
 
 ## 1. 权威边界
 
@@ -72,6 +72,7 @@
 | `POST /api/cc/activities/{activityId}/pairings/reassign` | admin(本机构) / super | `{speaker_checkin_id, listener_checkin_id, reason}`；原子释放涉及的 active pair 并新建一组，reason 必填 |
 | `GET /api/cc/activities/{activityId}/my-pairing` | participant | 只返本人 `MyPairingResponse`；搭档姓名只来自该场报名 `FULL_NAME` |
 | `POST /api/cc/activities/{activityId}/onsite/lock` | admin(本机构) / super | 幂等写 `onsite_locked_at/by`；锁定后撤销签到/调整只能经管理员并要求原因 |
+| `POST /api/cc/activities/{activityId}/duplicate` | admin(本机构) | T4 复制活动：复制配置与问卷/题目物化行为新草稿，重新生成活动代码、签到 token 与问卷入口 token，不复制历史报名、签到、配对、答卷与审计记录；写 `activity.duplicate` 审计 |
 
 `onsite_code` 由服务端按 `onsite_role + onsite_sequence` 派生：`speaker → S01`，`listener → L01`；`pair_code` 由 `pair_sequence` 派生为 `P01`。代码只用于展示，数据库唯一约束使用数值字段。
 
