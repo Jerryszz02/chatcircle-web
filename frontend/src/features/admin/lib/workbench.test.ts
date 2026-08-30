@@ -11,6 +11,7 @@ import {
   formatPercent,
   suppressSmallBuckets,
   validateWizardBasics,
+  validateWizardRegistration,
   type CompletenessInput,
   type LifecycleActivity,
   type RegistrationLike,
@@ -74,6 +75,15 @@ describe('deriveActivityStage 生命周期阶段', () => {
     expect(
       deriveActivityStage(makeActivity({ onsite_locked_at: '2026-09-01 09:30:00.000Z' }), NOW_BEFORE, 5),
     ).toBe('onsite');
+  });
+
+  it('结束时间已过即进入活动后，即使配对已开始（Codex review 回归）', () => {
+    expect(
+      deriveActivityStage(makeActivity({ pairing_started_at: '2026-09-01 09:30:00.000Z' }), NOW_AFTER, 5),
+    ).toBe('post_event');
+    expect(
+      deriveActivityStage(makeActivity({ onsite_locked_at: '2026-09-01 09:30:00.000Z' }), NOW_AFTER, 5),
+    ).toBe('post_event');
   });
 });
 
@@ -219,6 +229,23 @@ describe('validateWizardBasics 创建向导基本信息校验', () => {
     expect(errors.activity_code).toBeTruthy();
     expect(errors.end_time).toBeTruthy();
     expect(errors.capacity_total).toBeTruthy();
+  });
+});
+
+describe('validateWizardRegistration 报名窗口校验', () => {
+  it('窗口留空或先后有序时通过', () => {
+    expect(validateWizardRegistration({ regStart: '', regEnd: '' })).toEqual({});
+    expect(
+      validateWizardRegistration({ regStart: '2026-08-01T09:00', regEnd: '2026-08-31T18:00' }),
+    ).toEqual({});
+  });
+
+  it('结束不晚于开始时报错（与编辑表单口径一致，Codex review 回归）', () => {
+    const errors = validateWizardRegistration({
+      regStart: '2026-08-31T18:00',
+      regEnd: '2026-08-01T09:00',
+    });
+    expect(errors.registration_end_at).toBeTruthy();
   });
 });
 

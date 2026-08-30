@@ -28,7 +28,9 @@ import {
 import {
   findMissingItems,
   validateWizardBasics,
+  validateWizardRegistration,
   type WizardBasicsErrors,
+  type WizardRegistrationErrors,
 } from '../lib/workbench';
 
 /**
@@ -89,6 +91,7 @@ export function ActivityCreateWizard() {
   // 预览与发布
   const [org, setOrg] = useState<OrganizationRecord | null>(null);
   const [basicsErrors, setBasicsErrors] = useState<WizardBasicsErrors>({});
+  const [regErrors, setRegErrors] = useState<WizardRegistrationErrors>({});
   const [previewRole, setPreviewRole] = useState<'speaker' | 'listener'>('speaker');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
@@ -176,6 +179,11 @@ export function ActivityCreateWizard() {
       setBasicsErrors(errors);
       if (Object.values(errors).some(Boolean)) return;
     }
+    if (step === 'registration') {
+      const errors = validateWizardRegistration({ regStart, regEnd });
+      setRegErrors(errors);
+      if (Object.values(errors).some(Boolean)) return;
+    }
     const next = STEPS[stepIndex + 1];
     if (next) setStep(next.key);
   };
@@ -201,7 +209,17 @@ export function ActivityCreateWizard() {
   const submitCreate = async () => {
     const errors = validateWizardBasics({ title, activityCode, startTime, endTime, capacityTotal });
     setBasicsErrors(errors);
-    if (Object.values(errors).some(Boolean) || !defsReady) {
+    const regWindowErrors = validateWizardRegistration({ regStart, regEnd });
+    setRegErrors(regWindowErrors);
+    if (Object.values(errors).some(Boolean)) {
+      setStep('basics');
+      return;
+    }
+    if (Object.values(regWindowErrors).some(Boolean)) {
+      setStep('registration');
+      return;
+    }
+    if (!defsReady) {
       setStep('basics');
       return;
     }
@@ -343,8 +361,20 @@ export function ActivityCreateWizard() {
             报名时间留空表示不限；超时后不能新提交（FR-ACT-005）。
           </p>
           <div className="admin-form-grid">
-            <Input label="报名开始时间" type="datetime-local" value={regStart} onChange={(e) => setRegStart(e.target.value)} />
-            <Input label="报名结束时间" type="datetime-local" value={regEnd} onChange={(e) => setRegEnd(e.target.value)} />
+            <Input
+              label="报名开始时间"
+              type="datetime-local"
+              value={regStart}
+              onChange={(e) => setRegStart(e.target.value)}
+              error={regErrors.registration_start_at}
+            />
+            <Input
+              label="报名结束时间"
+              type="datetime-local"
+              value={regEnd}
+              onChange={(e) => setRegEnd(e.target.value)}
+              error={regErrors.registration_end_at}
+            />
           </div>
           <label className="admin-checkbox-row admin-section">
             <input type="checkbox" checked={registrationOpen} onChange={(e) => setRegistrationOpen(e.target.checked)} />

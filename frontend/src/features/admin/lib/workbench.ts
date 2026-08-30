@@ -49,8 +49,9 @@ export type LifecycleActivity = Pick<
 /**
  * 活动生命周期阶段（体验层推导，PRD §4.2）：
  * - setup：草稿/待审核/已驳回（尚未发布）；
- * - post_event：已关闭/已下架/已归档，或已发布但结束时间已过；
- * - onsite：已发布且（配对已开始 / 现场已锁定 / 当前处于活动起止时间内）；
+ * - post_event：已关闭/已下架/已归档，或已发布但结束时间已过（即使配对已开始，
+ *   结束时间过后也进入活动后，否则复盘/催办/归档引导会被永久隐藏）；
+ * - onsite：已发布且未过结束时间，且（配对已开始 / 现场已锁定 / 当前处于活动起止时间内）；
  * - recruiting：已发布、活动未开始且报名仍在接受（开关开 + 窗口内 + 名额未满）；
  * - pre_event：已发布、活动未开始但报名已不再接受。
  */
@@ -63,11 +64,11 @@ export function deriveActivityStage(
   if (status === 'draft' || status === 'pending_review' || status === 'rejected') return 'setup';
   if (status === 'closed' || status === 'taken_down' || status === 'archived') return 'post_event';
   // published
-  if (activity.pairing_started_at || activity.onsite_locked_at) return 'onsite';
   const start = parsePbDate(activity.start_time);
   const end = parsePbDate(activity.end_time);
-  if (start && end && now >= start && now <= end) return 'onsite';
   if (end && now > end) return 'post_event';
+  if (activity.pairing_started_at || activity.onsite_locked_at) return 'onsite';
+  if (start && end && now >= start && now <= end) return 'onsite';
   const regStart = parsePbDate(activity.registration_start_at);
   const regEnd = parsePbDate(activity.registration_end_at);
   const withinWindow = (!regStart || now >= regStart) && (!regEnd || now <= regEnd);
@@ -280,6 +281,25 @@ export function validateWizardBasics(input: WizardBasicsInput): WizardBasicsErro
 }
 
 const ZERO_APPROVED = { total: 0, speaker: 0, listener: 0 };
+
+export interface WizardRegistrationErrors {
+  registration_start_at?: string;
+  registration_end_at?: string;
+}
+
+/** 创建向导「角色与报名」步校验（规则与 ActivityForm 编辑路径保持一致：窗口可空，两者都有序）。 */
+export function validateWizardRegistration(input: {
+  regStart: string;
+  regEnd: string;
+}): WizardRegistrationErrors {
+  const errors: WizardRegistrationErrors = {};
+  const start = fromInputDateTime(input.regStart);
+  const end = fromInputDateTime(input.regEnd);
+  if (input.regStart && !start) errors.registration_start_at = '报名开始时间格式不正确';
+  if (input.regEnd && !end) errors.registration_end_at = '报名结束时间格式不正确';
+  if (start && end && start >= end) errors.registration_end_at = '报名结束须晚于报名开始';
+  return errors;
+}
 
 export interface CompletenessInput {
   title: string;
