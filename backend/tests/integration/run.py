@@ -113,6 +113,7 @@ def main():
     import suite_trainings
     import suite_surveys
     import suite_exports
+    import suite_exports_v2
     import suite_auth
     import suite_admin_email
     import suite_posts
@@ -127,7 +128,7 @@ def main():
 
     for mod in (suite_flow, suite_acl, suite_capacity, suite_transitions, suite_checkins, suite_pairings,
                 suite_activity_duplicate,
-                suite_trainings, suite_surveys, suite_exports, suite_auth, suite_admin_email,
+                suite_trainings, suite_surveys, suite_exports, suite_exports_v2, suite_auth, suite_admin_email,
                 suite_posts, suite_outcome, suite_backup,
                 suite_nodelete, suite_templates, suite_hardening, suite_reports,
                 suite_live_summary, suite_phone_auth):
