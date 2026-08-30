@@ -1,6 +1,6 @@
 # Chat Circles 测试计划（Test Plan）
 
-> **2026-08-29 T1/T2/T3 更新：**契约 `2026-08-28.t0-v1`、手机号验证码/存量绑定/换绑/冲突/并发消费/停用账号/provider 失败/未知用户名迁移拒绝、T2 配对后端与 T3 实时数据服务均`已验证`；`suite_pairings.py` 覆盖现场编号/配对、本人最小权限、提交后 Realtime 失效消息、并发与幂等，`suite_live_summary.py` 覆盖互补桶联合抑制，前端测试覆盖六类快照依赖订阅。工作台/参与者配对 UI 与细粒度导出仍为`计划中`。
+> **2026-08-29 T1/T2/T3 更新：**契约 `2026-08-28.t0-v1`、手机号验证码/存量绑定/换绑/冲突/并发消费/停用账号/provider 失败/未知用户名迁移拒绝、T2 配对后端与 T3 实时数据服务均`已验证`；`suite_pairings.py` 覆盖现场编号/配对、本人最小权限、提交后 Realtime 失效消息、并发与幂等，`suite_live_summary.py` 覆盖互补桶联合抑制，前端测试覆盖六类快照依赖订阅。T4 机构活动工作台（创建向导、复制活动、生命周期首页、现场工作台与配对管理）在 `agent/t4-org-workbench` `已验证`（`suite_activity_duplicate.py` + `workbench.test.ts`），尚未合并或部署；参与者配对 UI 与细粒度导出仍为`计划中`。
 
 > 版本：v0.3（原 V1 策略基线 + 2026-08-28 T0 契约门禁与 T1/T2/T3 验证）
 > 依据：PRD v0.3（评审修订版），见 `docs/Chat_Circles_活动与问卷平台_PRD_v0.3.docx`
@@ -108,6 +108,7 @@
 | 手机号登录/绑定（T1，`suite_phone_auth.py`，`已验证`） | 新号建号、旧号登录、存量账号绑定、号码冲突、并发验证、停用账号、provider 失败 | 验证码一次消费；hash 唯一；重试不重复建号；冲突不覆盖；响应不泄露内部 username、完整手机号或 hash | 专项 PRD §3/§11 |
 | 现场编号/配对（T2） | 同时签到（刻意使用相同时间戳和逆序预生成 ID）、撤销后重签、重复开始配对、迟到补配、两管理员并发配对/调整、锁定前后撤销 | 角色计数器原子递增；序号/组号唯一且不复用；编号不声称按时间/ID 排序；已有组不重排；一人至多一个 active pair；原因/审计完整 | 专项 PRD §5/§11 |
 | 实时快照（T3，`已验证`） | `suite_live_summary.py`：撤销签到、回退报名、作废答卷、分母为 0、互补桶推断、机构越权、参与者伪造他人 pairing topic/直订 `activity_pairs`；`activityLive.test.ts`：六类依赖订阅顺序、活动/问卷事件防抖与重连 | 两个完成率分子/分母取同一人群交集，rate 不超 1；分母 0 返 null；任一桶 <5 时同维度全抑制；活动现场字段/问卷清单变化后快照自校正；越权订阅被拒 | 专项 PRD §4.3/§11 |
+| 复制活动（T4，`已验证`） | `suite_activity_duplicate.py`：配置/问卷/题目随复制、代码与签到/问卷 token 重新生成、现场计数器重置、历史报名/签到/配对/答卷不复制、审计写入、跨机构 404、参与者/匿名拒绝 | 新活动恒为草稿且代码递增唯一；复制不产生任何历史业务记录 | 专项 PRD §4.1/§11 |
 | 管理员邮箱认证（`suite_admin_email.py`，2026-08 改版） | 带邮箱注册、验证门控、找回拦截、OTP 登录、邮件类端点限流 | 带 email 注册成功、`verified=false`、email 落库小写；缺 email → 400 INVALID_EMAIL；重复 email → 400 EMAIL_TAKEN；非法格式 → 400；未验证账号找回 → 204 静默拦截且审计有 `auth.password_reset.suppressed`（测试环境无 SMTP，不断言投递）；置 verified 后找回不被拦截；同 email 第 4 次 request-verification → 静默 204 且审计 `auth.mail.throttled`；邮箱作 identity 的 auth-with-password 登录成功 | AC-24 |
 | 公开活动列表 | 未登录调用 `GET /api/cc/public/activities`（活动广场页 `/activities`） | 仅 published/closed 下发且按开始时间倒序；报名 `open`/`reason` 与剩余名额口径同公开详情端点一致（suite_flow D3b） | AC-05 |
 | 答卷生命周期 | 草稿编辑、正式提交后修改、作废 | 草稿可改；提交后锁定；作废保留记录且被统计与导出排除 | AC-12 |
