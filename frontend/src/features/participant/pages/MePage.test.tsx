@@ -151,17 +151,9 @@ describe('MePage 我的中心', () => {
     expect(screen.queryByText('聆听者培训')).not.toBeInTheDocument();
   });
 
-  it('已签到的报名条目内嵌「我的现场编号」配对卡（T5，PRD §5.3 我的活动入口）', async () => {
-    stubApi({
+  it('已通过的报名条目内嵌「我的现场编号」配对卡（T5，PRD §5.3 我的活动入口）', async () => {
+    const mock = stubApi({
       'GET /api/cc/me/overview': { body: overviewBody() },
-      'GET /api/cc/activities/act1/my-pairing': {
-        body: {
-          contract_version: '2026-08-28.t0-v1',
-          activity_id: 'act1',
-          state: 'not_checked_in',
-          updated_at: '2026-08-29T08:00:00Z',
-        },
-      },
       'GET /api/cc/activities/act2/my-pairing': {
         body: {
           contract_version: '2026-08-28.t0-v1',
@@ -175,12 +167,14 @@ describe('MePage 我的中心', () => {
       },
     });
     renderMe();
-    // 未签到的活动不渲染配对卡；已签到且已配对的展示编号、组号与搭档
+    // 已签到且已配对的展示编号、组号与搭档；共用一路订阅，不逐条各建
     expect(await screen.findByText('已配对')).toBeInTheDocument();
     expect(screen.getByText('我的现场编号')).toBeInTheDocument();
     expect(screen.getByText('L02')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '查看组号与搭档' }));
     expect(screen.getByText('P02')).toBeInTheDocument();
     expect(screen.getByText('陈搭档')).toBeInTheDocument();
+    // 待审核报名（act1）不可能有现场签到与配对，不应发起 my-pairing 请求
+    expect(mock.calls.filter((call) => call.url.includes('act1/my-pairing'))).toHaveLength(0);
   });
 });

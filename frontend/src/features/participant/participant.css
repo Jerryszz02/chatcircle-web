@@ -1085,3 +1085,7 @@ a.cc-btn {
 .ccp-pairing-offline {
   margin-top: 8px;
 }
+
+.ccp-pairing-stale {
+  margin: 12px 0 0;
+}

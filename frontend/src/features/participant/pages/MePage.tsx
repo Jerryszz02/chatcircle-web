@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { normalizeApiError, type ApiError } from '../../../shared/api/http';
 import { participantAuth } from '../../../shared/auth';
 import type { ParticipantAccountRecord } from '../../../shared/api/types';
 import { Button, Card, Loading, PageLayout } from '../../../shared/ui';
 import { getMeOverview, isUnauthorized, type MeOverview } from '../api';
-import { MyPairingCard } from '../components/MyPairingCard';
+import { MyPairingCardView } from '../components/MyPairingCard';
 import { PhoneBindingForm } from '../components/PhoneBindingForm';
 import { PhoneChangeForm } from '../components/PhoneChangeForm';
+import { useMyPairingMap } from '../lib/useMyPairing';
 import {
   activityRoleLabel,
   activityStatusLabel,
@@ -20,6 +21,8 @@ import {
  * 「我的」中心（/me，FR-PAR-001/002，AC-22）：
  * 本人报名状态列表、开放中问卷入口、已提交答卷索引（答案只读）。
  * 跨机构展示、仅本人数据（服务端按登录身份过滤）。
+ * T5：已通过的报名条目内嵌「我的现场编号」配对卡（PRD §5.3），全部条目共用
+ * 一路 Realtime 订阅（useMyPairingMap），不逐条各建订阅。
  */
 export function MePage() {
   const navigate = useNavigate();
@@ -28,6 +31,16 @@ export function MePage() {
   const [loading, setLoading] = useState(true);
   const [phoneForm, setPhoneForm] = useState<'none' | 'bind' | 'change'>('none');
   const [, setAccountVersion] = useState(0);
+
+  // 仅已通过的报名可能有现场签到与配对（服务端签到前置校验），其余条目不拉取。
+  const pairingActivityIds = useMemo(
+    () =>
+      (data?.registrations ?? [])
+        .filter(({ registration }) => registration.status === 'approved')
+        .map(({ activity }) => activity.id),
+    [data],
+  );
+  const pairing = useMyPairingMap(pairingActivityIds);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,8 +161,16 @@ export function MePage() {
                       {registration.status_reason ? (
                         <p className="cc-item-meta">原因：{registration.status_reason}</p>
                       ) : null}
-                      {/* T5：已签到后在此展示本人现场编号与配对状态（PRD §5.3「我的活动」入口） */}
-                      <MyPairingCard activityId={activity.id} />
+                      {/* T5「我的活动」入口：仅已通过报名挂载配对卡，共用页面级单订阅 */}
+                      {registration.status === 'approved' ? (
+                        <MyPairingCardView
+                          snapshot={pairing.entries[activity.id]?.snapshot ?? null}
+                          status={pairing.status}
+                          error={pairing.entries[activity.id]?.error ?? null}
+                          loading={pairing.loading}
+                          onRetry={pairing.reload}
+                        />
+                      ) : null}
                     </li>
                   );
                 })}

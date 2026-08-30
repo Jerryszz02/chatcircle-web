@@ -85,7 +85,7 @@
 
 ## 5. Realtime 契约
 
-T3 当前实现位于 `backend/pb_hooks/live.pb.js` 与 `frontend/src/features/admin/lib/activityLive.ts`。管理端严格先建立六类快照依赖订阅再拉快照，record event 仅防抖触发重拉；SDK 每次重新收到 `PB_CONNECT` 都强制刷新，连接状态轮询只用于离线提示。参与者 topic 的订阅与发送均按 auth id 二次过滤，非法 topic 被拒。T5 参与者侧实现位于 `frontend/src/features/participant/lib/myPairingLive.ts`：同一“先订阅再拉快照”模式，订阅本人 `checkins`（按 participant_id + activity_id 过滤）与 `cc.participant.pairing.{participantId}` topic，事件防抖后重拉 `my-pairing`；配对 topic 消息中与本活动无关的 `activity_id` 直接忽略；订阅失败时降级为一次性快照 + 离线提示。
+T3 当前实现位于 `backend/pb_hooks/live.pb.js` 与 `frontend/src/features/admin/lib/activityLive.ts`。管理端严格先建立六类快照依赖订阅再拉快照，record event 仅防抖触发重拉；SDK 每次重新收到 `PB_CONNECT` 都强制刷新，连接状态轮询只用于离线提示。参与者 topic 的订阅与发送均按 auth id 二次过滤，非法 topic 被拒。T5 参与者侧实现位于 `frontend/src/features/participant/lib/myPairingLive.ts` 与 `lib/useMyPairing.ts`：同一“先订阅再拉快照”模式，订阅本人 `checkins`（按 participant_id 过滤）与 `cc.participant.pairing.{participantId}` topic，事件防抖后重拉 `my-pairing`；配对 topic 消息中与跟踪活动无关的 `activity_id` 直接忽略；一次调用可跟踪多个活动（「我的」中心单订阅多活动）；订阅失败时降级为一次性快照 + 离线提示。
 
 Realtime 不传输第二套指标或配对真相，只用 PocketBase record event 或受控的自定义消息使 HTTP 快照失效：
 

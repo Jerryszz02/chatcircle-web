@@ -336,7 +336,7 @@ src/
 
 ### 6.4 数据获取与错误处理约定
 
-无请求库，两种模式：集合数据用 `collectionsForRole(role).xxx.getList(...)` 直接调 SDK；业务动作用各 feature 的 api 模块封装走 `shared/api/http.ts` 的 `apiGet/apiPost`（错误规范化为 `ApiError{status, code, details}`，业务错误码从 `details.code` 读）。页面级统一手写 `useState(data/error/loading) + useEffect(cancelled 标志) + useCallback(reload)`。导出下载是特例：原生 fetch + Authorization + blob。T3 的 `features/admin/lib/activityLive.ts` 先建立 Realtime 订阅再首取快照，事件仅触发防抖重取，并在断线/重连时更新连接状态与刷新快照。T5 的 `features/participant/lib/myPairingLive.ts` 把同一模式用于参与者本人配对状态（订阅本人 `checkins` + `cc.participant.pairing.<participantId>` topic，重拉 `my-pairing`；订阅失败降级为一次性快照 + 离线提示），签到成功页、「我的」报名条目与活动详情页三入口共用 `components/MyPairingCard.tsx`（PRD §5.3 五态，文字 + 状态图标 + 颜色共同表达）。
+无请求库，两种模式：集合数据用 `collectionsForRole(role).xxx.getList(...)` 直接调 SDK；业务动作用各 feature 的 api 模块封装走 `shared/api/http.ts` 的 `apiGet/apiPost`（错误规范化为 `ApiError{status, code, details}`，业务错误码从 `details.code` 读）。页面级统一手写 `useState(data/error/loading) + useEffect(cancelled 标志) + useCallback(reload)`。导出下载是特例：原生 fetch + Authorization + blob。T3 的 `features/admin/lib/activityLive.ts` 先建立 Realtime 订阅再首取快照，事件仅触发防抖重取，并在断线/重连时更新连接状态与刷新快照。T5 的 `features/participant/lib/myPairingLive.ts` + `lib/useMyPairing.ts` 把同一模式用于参与者本人配对状态（订阅本人 `checkins` + `cc.participant.pairing.<participantId>` topic，重拉 `my-pairing`；订阅失败降级为一次性快照 + 离线提示；后台刷新失败保留旧快照并经 error 标记陈旧）：签到成功页/活动详情页用单活动容器 `components/MyPairingCard.tsx`（PRD §5.3 五态，文字 + 状态图标 + 颜色共同表达），「我的」中心用页面级 `useMyPairingMap` 单订阅多活动 + 纯展示 `MyPairingCardView`，且仅已通过审核的报名条目挂载配对卡。
 
 ### 6.5 路由清单
 
@@ -399,7 +399,7 @@ MCP 是由 WorkBuddy、Kimi、Claude、Codex 等本地客户端启动的 STDIO �
 
 | 层 | 位置 | 运行 | 覆盖 |
 |---|---|---|---|
-| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 49 files / 346 tests：lib 纯逻辑、页面行为、路由守卫、T1 手机号交互、T3 Realtime 失效化与 T5 配对卡五态 |
+| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 50 files / 350 tests：lib 纯逻辑、页面行为、路由守卫、T1 手机号交互、T3 Realtime 失效化与 T5 配对卡五态 |
 | 后端集成 + 迁移冒烟 | `backend/tests/` | `bash backend/tests/run_integration.sh`、`migration_smoke.sh` | 越权矩阵、状态机、并发名额、导出、限流、无硬删除……（AC-01~23 映射见 docs/planning/test-plan.md） |
 | E2E 主链路 | `e2e/` | `cd e2e && npm test`（环境全自动自举，与本地库隔离） | 报名→审核→签到→问卷→导出、培训链路（移动 viewport，少而精） |
 

@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearAllSessions, saveParticipantSession, stubApi, unstubApi } from '../../../test/mockApi';
-import { MyPairingCard } from './MyPairingCard';
+import { ApiError } from '../../../shared/api/http';
+import type { MyPairingResponse } from '../../../shared/api/accountEvent';
+import { MyPairingCard, MyPairingCardView } from './MyPairingCard';
 
 /**
  * 「我的现场编号」配对卡测试（T5，PRD §5.3 前端侧）。
@@ -9,7 +11,7 @@ import { MyPairingCard } from './MyPairingCard';
  * 测试环境（jsdom）无 EventSource，Realtime 订阅走降级路径：一次性快照 + 离线提示。
  */
 
-function myPairingBody(overrides: Record<string, unknown> = {}) {
+function myPairingBody(overrides: Partial<MyPairingResponse> = {}): MyPairingResponse {
   return {
     contract_version: '2026-08-28.t0-v1',
     activity_id: 'act1',
@@ -149,5 +151,29 @@ describe('MyPairingCard 我的现场编号卡片（T5）', () => {
     render(<MyPairingCard activityId="act1" />);
     expect(await screen.findByText('S01')).toBeInTheDocument();
     expect(screen.getByText(/实时连接已断开/)).toBeInTheDocument();
+  });
+
+  it('后台刷新失败：保留旧快照并明确提示可能不是最新，提供重试入口', () => {
+    const onRetry = vi.fn();
+    render(
+      <MyPairingCardView
+        snapshot={myPairingBody({
+          state: 'paired',
+          pair_code: 'P03',
+          onsite_code: 'S02',
+          partner: { onsite_code: 'L05', display_name: '王小明' },
+        })}
+        status="online"
+        error={new ApiError('无法连接服务器，请检查网络后重试', 0, 'NETWORK_ERROR')}
+        loading={false}
+        onRetry={onRetry}
+      />,
+    );
+    // 旧配对内容仍可见，但带明确的陈旧提示与重试入口，不静默展示过期配对
+    expect(screen.getByText('已配对')).toBeInTheDocument();
+    expect(screen.getByText('S02')).toBeInTheDocument();
+    expect(screen.getByText(/可能不是最新状态/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });

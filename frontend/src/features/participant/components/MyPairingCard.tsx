@@ -1,7 +1,10 @@
 import { useState } from 'react';
+import type { MyPairingResponse } from '../../../shared/api/accountEvent';
 import { participantAuth } from '../../../shared/auth';
+import type { ApiError } from '../../../shared/api/http';
 import { Button, Card } from '../../../shared/ui';
 import { myPairingStateMeta, type PairingStatusIcon } from '../lib/pairingStatus';
+import type { MyPairingConnectionStatus } from '../lib/myPairingLive';
 import { useMyPairing } from '../lib/useMyPairing';
 
 /**
@@ -12,6 +15,7 @@ import { useMyPairing } from '../lib/useMyPairing';
  * 卡片默认展示本人现场编号与状态标签；已配对/已调整时点开卡片查看组号与搭档。
  * 等待、已配对、已调整均用文字 + 状态图标 + 颜色共同表达，不只依赖颜色。
  * 搭档手机号不展示（服务端也不会下发）。
+ * 后台刷新失败时保留旧快照并明确提示“可能不是最新”，同时给出重试入口。
  */
 
 function StatusIcon({ icon }: { icon: PairingStatusIcon }) {
@@ -51,12 +55,23 @@ function StatusIcon({ icon }: { icon: PairingStatusIcon }) {
   }
 }
 
-export function MyPairingCard({ activityId }: { activityId: string }) {
-  const authed = participantAuth.isValid();
-  const { snapshot, status, error, loading, reload } = useMyPairing(authed ? activityId : null);
-  const [expanded, setExpanded] = useState(false);
+export interface MyPairingCardViewProps {
+  snapshot: MyPairingResponse | null;
+  status: MyPairingConnectionStatus;
+  error: ApiError | null;
+  loading: boolean;
+  onRetry: () => void;
+}
 
-  if (!authed) return null;
+/** 纯展示层：容器（MyPairingCard / MePage）负责取数，本组件只按 props 渲染。 */
+export function MyPairingCardView({
+  snapshot,
+  status,
+  error,
+  loading,
+  onRetry,
+}: MyPairingCardViewProps) {
+  const [expanded, setExpanded] = useState(false);
 
   if (loading && !snapshot) {
     return (
@@ -76,7 +91,7 @@ export function MyPairingCard({ activityId }: { activityId: string }) {
     return (
       <Card title="我的现场编号" className="ccp-pairing-card">
         <p className="cc-hint">{error.message}</p>
-        <Button variant="secondary" block onClick={reload}>
+        <Button variant="secondary" block onClick={onRetry}>
           重试
         </Button>
       </Card>
@@ -137,10 +152,33 @@ export function MyPairingCard({ activityId }: { activityId: string }) {
             ) : null}
           </>
         ) : null}
-        {status === 'offline' ? (
+        {error ? (
+          <div className="cc-notice ccp-pairing-stale" role="alert">
+            <p className="cc-hint">配对信息刷新失败，显示的可能不是最新状态。</p>
+            <Button variant="secondary" block onClick={onRetry}>
+              重新获取
+            </Button>
+          </div>
+        ) : status === 'offline' ? (
           <p className="cc-hint ccp-pairing-offline">实时连接已断开，恢复后会自动更新。</p>
         ) : null}
       </div>
     </Card>
+  );
+}
+
+/** 单活动容器（签到成功页 / 活动详情页）：未登录不渲染。 */
+export function MyPairingCard({ activityId }: { activityId: string }) {
+  const authed = participantAuth.isValid();
+  const { snapshot, status, error, loading, reload } = useMyPairing(authed ? activityId : null);
+  if (!authed) return null;
+  return (
+    <MyPairingCardView
+      snapshot={snapshot}
+      status={status}
+      error={error}
+      loading={loading}
+      onRetry={reload}
+    />
   );
 }
