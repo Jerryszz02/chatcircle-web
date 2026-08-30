@@ -412,6 +412,892 @@ routerAdd('POST', '/api/cc/exports', (e) => {
     };
   };
 
+  // ===== 细粒度导出 v2 分支（schema_version:2，PRD §7 / api-design §6）=====
+  // 归一化 + 判敏 + 行域与 preview 端点同一套内联标准源；正式创建重算敏感性，
+  // 不信任 preview 旧结果或前端布尔值。
+  if (body.schema_version === 2) {
+    try {
+      const EXPORT_V2_DATASETS = ['registrations', 'checkins', 'pairings', 'surveys'];
+      const EXPORT_V2_FORMATS = ['xlsx', 'csv_zip'];
+      const EXPORT_V2_SYSTEM_COLUMNS = [
+        'participant_id', 'activity_id', 'activity_role', 'registration_status',
+        'checked_in_at', 'onsite_code', 'pair_code', 'partner_name',
+        'phone_masked', 'phone_full',
+      ];
+      const EXPORT_V2_CHECKIN_FILTERS = ['any', 'valid', 'not_checked_in', 'revoked'];
+      const EXPORT_V2_PAIRING_FILTERS = ['any', 'paired', 'waiting', 'unpaired'];
+      const EXPORT_V2_SURVEY_COMPLETION_FILTERS = ['any', 'submitted', 'not_submitted'];
+      const EXPORT_V2_ROLES = ['speaker', 'listener'];
+      const EXPORT_V2_REGISTRATION_STATUSES = ['pending', 'approved', 'rejected', 'cancelled'];
+      const EXPORT_V2_CONTRACT_VERSION = '2026-08-28.t0-v1';
+      const EXPORT_V2_FORMAT_VERSION = '2.0';
+      const EXPORT_V2_TIMEZONES = { 'UTC': 0, 'Asia/Shanghai': 480 };
+
+      const v2StringArray = (v, maxLen) => {
+        if (v === undefined || v === null) return [];
+        if (!Array.isArray(v)) return null;
+        const out = [];
+        for (let i = 0; i < v.length; i++) {
+          if (typeof v[i] !== 'string' || v[i] === '') return null;
+          if (out.indexOf(v[i]) < 0) out.push(v[i]);
+        }
+        if (maxLen && out.length > maxLen) return null;
+        return out;
+      };
+      const v2EnumArray = (v, allowed) => {
+        const arr = v2StringArray(v, 0);
+        if (arr === null) return null;
+        for (let i = 0; i < arr.length; i++) {
+          if (allowed.indexOf(arr[i]) < 0) return null;
+        }
+        return arr;
+      };
+      const v2TimezoneOffset = (tz) => {
+        if (typeof tz !== 'string' || tz === '') return null;
+        if (tz in EXPORT_V2_TIMEZONES) return EXPORT_V2_TIMEZONES[tz];
+        const m = /^UTC([+-])(\d{1,2})(?::?(\d{2}))?$/.exec(tz);
+        if (!m) return null;
+        const sign = m[1] === '-' ? -1 : 1;
+        const hh = parseInt(m[2], 10);
+        const mm = m[3] ? parseInt(m[3], 10) : 0;
+        if (hh > 14 || mm > 59) return null;
+        return sign * (hh * 60 + mm);
+      };
+      const v2NormalizeSelection = () => {
+        if (body.schema_version !== 2) ccError(400, 'validation_failed', '细粒度导出请求须带 schema_version:2');
+        const scopeV2 = exportV2NormalizeScopeV2(body.scope);
+        const datasets = v2EnumArray(body.datasets, EXPORT_V2_DATASETS);
+        if (datasets === null || datasets.length === 0) {
+          ccError(400, 'validation_failed', 'datasets 须为 registrations/checkins/pairings/surveys 的非空子集');
+        }
+        const surveyIds = v2StringArray(body.survey_ids, 200);
+        if (surveyIds === null) ccError(400, 'validation_failed', 'survey_ids 须为活动问卷 id 数组（≤200）');
+        const filtersIn = body.filters || {};
+        if (typeof filtersIn !== 'object') ccError(400, 'validation_failed', 'filters 须为对象');
+        const participantIds = v2StringArray(filtersIn.participant_ids, 500);
+        if (participantIds === null) {
+          ccError(400, 'validation_failed', 'filters.participant_ids 须为参与者 id 数组（≤500）');
+        }
+        const roles = v2EnumArray(filtersIn.activity_roles, EXPORT_V2_ROLES);
+        if (roles === null) ccError(400, 'validation_failed', 'filters.activity_roles 非法');
+        const statuses = v2EnumArray(filtersIn.registration_statuses, EXPORT_V2_REGISTRATION_STATUSES);
+        if (statuses === null) ccError(400, 'validation_failed', 'filters.registration_statuses 非法');
+        const checkin = filtersIn.checkin === undefined ? 'any' : filtersIn.checkin;
+        if (EXPORT_V2_CHECKIN_FILTERS.indexOf(checkin) < 0) {
+          ccError(400, 'validation_failed', 'filters.checkin 须为 any/valid/not_checked_in/revoked');
+        }
+        const pairing = filtersIn.pairing === undefined ? 'any' : filtersIn.pairing;
+        if (EXPORT_V2_PAIRING_FILTERS.indexOf(pairing) < 0) {
+          ccError(400, 'validation_failed', 'filters.pairing 须为 any/paired/waiting/unpaired');
+        }
+        const surveyCompletion = filtersIn.survey_completion === undefined ? 'any' : filtersIn.survey_completion;
+        if (EXPORT_V2_SURVEY_COMPLETION_FILTERS.indexOf(surveyCompletion) < 0) {
+          ccError(400, 'validation_failed', 'filters.survey_completion 须为 any/submitted/not_submitted');
+        }
+        const columnsIn = body.columns || {};
+        if (typeof columnsIn !== 'object') ccError(400, 'validation_failed', 'columns 须为对象');
+        const systemColumns = v2EnumArray(columnsIn.system, EXPORT_V2_SYSTEM_COLUMNS);
+        if (systemColumns === null) ccError(400, 'validation_failed', 'columns.system 含非法系统列');
+        const fieldCodes = v2StringArray(columnsIn.registration_field_codes, 200);
+        if (fieldCodes === null || fieldCodes.indexOf('*') >= 0) {
+          ccError(400, 'validation_failed', 'columns.registration_field_codes 须为显式字段代码数组（≤200）');
+        }
+        const questionSelections = [];
+        if (columnsIn.survey_questions !== undefined) {
+          if (!Array.isArray(columnsIn.survey_questions)) {
+            ccError(400, 'validation_failed', 'columns.survey_questions 须为数组');
+          }
+          for (let i = 0; i < columnsIn.survey_questions.length; i++) {
+            const qs = columnsIn.survey_questions[i];
+            if (!qs || typeof qs !== 'object' || typeof qs.activity_survey_id !== 'string' || !qs.activity_survey_id) {
+              ccError(400, 'validation_failed', 'columns.survey_questions[].activity_survey_id 必填');
+            }
+            const codes = v2StringArray(qs.question_codes, 200);
+            if (codes === null || codes.length === 0 || codes.indexOf('*') >= 0) {
+              ccError(400, 'validation_failed', 'columns.survey_questions[].question_codes 须为显式题目代码非空数组');
+            }
+            questionSelections.push({ activity_survey_id: qs.activity_survey_id, question_codes: codes });
+          }
+        }
+        if (datasets.indexOf('surveys') < 0 && questionSelections.length > 0) {
+          ccError(400, 'validation_failed', '未选 surveys 数据域时不能选择问卷题目列');
+        }
+        const format = body.format === undefined ? 'xlsx' : body.format;
+        if (EXPORT_V2_FORMATS.indexOf(format) < 0) ccError(400, 'validation_failed', 'format 须为 xlsx 或 csv_zip');
+        const timezone = body.timezone === undefined ? 'Asia/Shanghai' : body.timezone;
+        if (v2TimezoneOffset(timezone) === null) {
+          ccError(400, 'validation_failed', 'timezone 仅支持 UTC / Asia/Shanghai / UTC±HH:MM');
+        }
+        return {
+          schema_version: 2,
+          scope: scopeV2,
+          datasets,
+          survey_ids: surveyIds,
+          filters: {
+            participant_ids: participantIds,
+            activity_roles: roles,
+            registration_statuses: statuses,
+            checkin,
+            pairing,
+            survey_completion: surveyCompletion,
+          },
+          columns: {
+            system: systemColumns,
+            registration_field_codes: fieldCodes,
+            survey_questions: questionSelections,
+          },
+          format,
+          timezone,
+        };
+      };
+      const exportV2NormalizeScopeV2 = (scopeV2raw) => {
+        if (!scopeV2raw || typeof scopeV2raw !== 'object') ccError(400, 'validation_failed', 'scope 必填');
+        const typeV2 = scopeV2raw.type;
+        if (['platform', 'organization', 'activity'].indexOf(typeV2) < 0) {
+          ccError(400, 'validation_failed', 'scope.type 必须为 platform / organization / activity');
+        }
+        const outScope = { type: typeV2 };
+        if (typeV2 === 'organization') {
+          if (scopeV2raw.organization_id !== undefined && typeof scopeV2raw.organization_id !== 'string') {
+            ccError(400, 'validation_failed', 'scope.organization_id 须为字符串');
+          }
+          if (scopeV2raw.organization_id) outScope.organization_id = scopeV2raw.organization_id;
+        }
+        if (typeV2 === 'activity') {
+          if (!scopeV2raw.activity_id || typeof scopeV2raw.activity_id !== 'string') {
+            ccError(400, 'validation_failed', '单活动导出须指定 scope.activity_id');
+          }
+          outScope.activity_id = scopeV2raw.activity_id;
+        }
+        const DATE_RE_V2 = /^\d{4}-\d{2}-\d{2}$/;
+        const dr = scopeV2raw.date_range || {};
+        if (dr.from !== undefined && (typeof dr.from !== 'string' || !DATE_RE_V2.test(dr.from))) {
+          ccError(400, 'validation_failed', 'scope.date_range.from 须为 YYYY-MM-DD 格式');
+        }
+        if (dr.to !== undefined && (typeof dr.to !== 'string' || !DATE_RE_V2.test(dr.to))) {
+          ccError(400, 'validation_failed', 'scope.date_range.to 须为 YYYY-MM-DD 格式');
+        }
+        if (dr.from || dr.to) outScope.date_range = { from: dr.from || undefined, to: dr.to || undefined };
+        return outScope;
+      };
+      const exportV2ResolveScopeV2 = (scopeV2) => {
+        let orgConstraintV2 = null;
+        if (role === 'admin') {
+          orgConstraintV2 = auth.get('organization_id');
+          if (scopeV2.type !== 'organization' && scopeV2.type !== 'activity') {
+            ccError(403, 'scope_forbidden', '机构管理员仅可导出本机构全部或指定单活动');
+          }
+        } else if (scopeV2.type === 'organization') {
+          if (!scopeV2.organization_id) ccError(400, 'validation_failed', '机构范围导出须指定 scope.organization_id');
+          try {
+            $app.findRecordById('organizations', scopeV2.organization_id);
+          } catch (_) {
+            ccError(400, 'validation_failed', 'scope.organization_id 无效');
+          }
+          orgConstraintV2 = scopeV2.organization_id;
+        }
+        let acts;
+        if (scopeV2.type === 'activity') {
+          let activity;
+          try {
+            activity = $app.findRecordById('activities', scopeV2.activity_id);
+          } catch (_) {
+            ccError(404, 'not_found', '活动不存在');
+          }
+          if (orgConstraintV2 && activity.get('organization_id') !== orgConstraintV2) {
+            ccError(403, 'scope_forbidden', '无权导出其他机构的活动');
+          }
+          acts = [activity];
+        } else if (orgConstraintV2) {
+          acts = queryAll('activities', 'organization_id = {:o}', { o: orgConstraintV2 }, 'created');
+        } else {
+          acts = queryAll('activities', '', {}, 'created');
+        }
+        const dr = scopeV2.date_range || {};
+        if (dr.from) {
+          acts = acts.filter((a) => (iso(a.get('end_time')) || iso(a.get('start_time'))) >= dr.from);
+        }
+        if (dr.to) {
+          acts = acts.filter((a) => iso(a.get('start_time')) <= dr.to + 'T23:59:59.999Z');
+        }
+        const orgIds = [];
+        acts.forEach((a) => {
+          const o = a.get('organization_id');
+          if (orgIds.indexOf(o) < 0) orgIds.push(o);
+        });
+        return { orgConstraint: orgConstraintV2, activities: acts, organizationIds: orgIds };
+      };
+      const exportV2BuildUniverseV2 = (selection, acts) => {
+        const filters = selection.filters;
+        const actIds = acts.map((a) => a.id);
+        const emptyU = {
+          registrations: [], checkins: [], validCheckinByReg: {}, pairs: [], activePairByReg: {},
+          surveys: [], submissions: [],
+          counts: { registrations: 0, checkins: 0, pairings: 0, surveys: 0 },
+        };
+        if (actIds.length === 0) return emptyU;
+        const actClause = exportV2ActivityInClause(actIds);
+        let regs = queryAll('registrations', actClause, {}, 'created');
+        const allCheckins = queryAll('checkins', actClause, {}, 'created');
+        const allPairs = queryAll('activity_pairs', actClause, {}, 'pair_sequence');
+        let svs = queryAll('activity_surveys', actClause, {}, 'created');
+        if (selection.survey_ids.length > 0) {
+          svs = svs.filter((s) => selection.survey_ids.indexOf(s.id) >= 0);
+        }
+        const svIds = svs.map((s) => s.id);
+        let subs = [];
+        if (svIds.length > 0) {
+          const clause = [];
+          svIds.forEach((id) => {
+            if (/^[A-Za-z0-9_]+$/.test(id)) clause.push("activity_survey_id = '" + id + "'");
+          });
+          // 作废答卷不计入导出口径（database-design §5.2.16）
+          subs = queryAll('submissions', '(' + clause.join(' || ') + ") && status != 'voided'", {}, 'created');
+        }
+        if (filters.participant_ids.length > 0) {
+          regs = regs.filter((r) => filters.participant_ids.indexOf(r.get('participant_id')) >= 0);
+        }
+        if (filters.activity_roles.length > 0) {
+          regs = regs.filter((r) => filters.activity_roles.indexOf(r.get('activity_role')) >= 0);
+        }
+        if (filters.registration_statuses.length > 0) {
+          regs = regs.filter((r) => filters.registration_statuses.indexOf(r.get('status')) >= 0);
+        }
+        const validCk = {};
+        const revokedCk = {};
+        allCheckins.forEach((c) => {
+          if (c.get('status') === 'valid') validCk[c.get('registration_id')] = c;
+          if (c.get('status') === 'revoked') revokedCk[c.get('registration_id')] = c;
+        });
+        const activePair = {};
+        allPairs.forEach((p) => {
+          if (p.get('status') !== 'active') return;
+          activePair[p.get('speaker_registration_id')] = p;
+          activePair[p.get('listener_registration_id')] = p;
+        });
+        const submittedByReg = {};
+        subs.forEach((s) => {
+          if (s.get('status') === 'submitted') submittedByReg[s.get('registration_id')] = true;
+        });
+        if (filters.checkin === 'valid') {
+          regs = regs.filter((r) => !!validCk[r.id]);
+        } else if (filters.checkin === 'not_checked_in') {
+          regs = regs.filter((r) => !validCk[r.id]);
+        } else if (filters.checkin === 'revoked') {
+          regs = regs.filter((r) => !!revokedCk[r.id] && !validCk[r.id]);
+        }
+        if (filters.pairing === 'paired') {
+          regs = regs.filter((r) => !!activePair[r.id]);
+        } else if (filters.pairing === 'waiting') {
+          regs = regs.filter((r) => !!validCk[r.id] && !activePair[r.id]);
+        } else if (filters.pairing === 'unpaired') {
+          regs = regs.filter((r) => !activePair[r.id]);
+        }
+        if (filters.survey_completion === 'submitted') {
+          regs = regs.filter((r) => !!submittedByReg[r.id]);
+        } else if (filters.survey_completion === 'not_submitted') {
+          regs = regs.filter((r) => !submittedByReg[r.id]);
+        }
+        const regIds = regs.map((r) => r.id);
+        const inU = (rid) => regIds.indexOf(rid) >= 0;
+        const uCheckins = allCheckins.filter((c) => inU(c.get('registration_id')));
+        const uPairs = allPairs.filter(
+          (p) => inU(p.get('speaker_registration_id')) || inU(p.get('listener_registration_id')),
+        );
+        const uSubs = subs.filter((s) => inU(s.get('registration_id')));
+        return {
+          registrations: regs,
+          checkins: uCheckins,
+          validCheckinByReg: validCk,
+          pairs: uPairs,
+          activePairByReg: activePair,
+          surveys: svs,
+          submissions: uSubs,
+          counts: {
+            registrations: regs.length,
+            checkins: uCheckins.length,
+            pairings: uPairs.length,
+            surveys: uSubs.length,
+          },
+        };
+      };
+      // 时间渲染：PB 日期串 → 导出时区 'YYYY-MM-DD HH:mm:ss±HH:MM'
+      const v2FormatTime = (value, offsetMinutes) => {
+        if (!value) return '';
+        const d = new Date(String(value).replace(' ', 'T'));
+        if (isNaN(d.getTime())) return '';
+        const shifted = new Date(d.getTime() + offsetMinutes * 60000);
+        const pad = (n) => String(n).padStart(2, '0');
+        const sign = offsetMinutes < 0 ? '-' : '+';
+        const abs = Math.abs(offsetMinutes);
+        return (
+          shifted.getUTCFullYear() + '-' + pad(shifted.getUTCMonth() + 1) + '-' + pad(shifted.getUTCDate()) +
+          ' ' + pad(shifted.getUTCHours()) + ':' + pad(shifted.getUTCMinutes()) + ':' + pad(shifted.getUTCSeconds()) +
+          sign + pad(Math.floor(abs / 60)) + ':' + pad(abs % 60)
+        );
+      };
+      const onsiteCodeOf = (c) => {
+        if (!c) return '';
+        const letter = c.get('onsite_role') === 'speaker' ? 'S' : c.get('onsite_role') === 'listener' ? 'L' : '';
+        const seq = c.get('onsite_sequence');
+        if (!letter || !seq) return '';
+        return letter + String(seq).padStart(2, '0');
+      };
+      const pairCodeOf = (p) => 'P' + String(p.get('pair_sequence')).padStart(2, '0');
+      const maskPhone = (e164) => {
+        if (!e164) return '';
+        const s = String(e164);
+        if (s.indexOf('+86') === 0 && s.length === 14) return '+86 ' + s.slice(3, 6) + '****' + s.slice(10);
+        if (s.length > 6) return s.slice(0, 4) + '****' + s.slice(-2);
+        return '****';
+      };
+      // XML 安全：转义 + 剔除 XML 1.0 非法控制字符（保留合法代理项对）
+      const xmlSafe = (v) => {
+        const s = v === null || v === undefined ? '' : String(v);
+        let out = '';
+        for (let i = 0; i < s.length; i++) {
+          const c = s.charCodeAt(i);
+          if (c === 9 || c === 10 || c === 13 || (c >= 32 && c < 0xd800) || (c >= 0xe000 && c < 0xfffe)) {
+            out += s[i];
+            continue;
+          }
+          if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+            const lo = s.charCodeAt(i + 1);
+            if (lo >= 0xdc00 && lo <= 0xdfff) {
+              out += s[i] + s[i + 1];
+              i++;
+            }
+          }
+        }
+        return out.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      };
+      const colName = (idx) => {
+        let n = idx + 1;
+        let s = '';
+        while (n > 0) {
+          const m = (n - 1) % 26;
+          s = String.fromCharCode(65 + m) + s;
+          n = Math.floor((n - 1) / 26);
+        }
+        return s;
+      };
+      const buildSheetXml = (rows) => {
+        let xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+          '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
+        rows.forEach((row, ri) => {
+          xml += '<row r="' + (ri + 1) + '">';
+          row.forEach((cell, ci) => {
+            if (cell === null || cell === undefined || cell === '') return;
+            const ref = colName(ci) + (ri + 1);
+            if (typeof cell === 'number' && isFinite(cell)) {
+              xml += '<c r="' + ref + '"><v>' + cell + '</v></c>';
+            } else {
+              xml += '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + xmlSafe(cell) + '</t></is></c>';
+            }
+          });
+          xml += '</row>';
+        });
+        return xml + '</sheetData></worksheet>';
+      };
+      // 手写最小 XLSX（OOXML 电子表格 = ZIP 内一组 XML；JSVM 无三方库，复用 buildZip）
+      const buildXlsx = (sheets) => {
+        const used = [];
+        const names = sheets.map((sh, i) => {
+          let n = String(sh.name).replace(/[\\/*?\[\]:]/g, '_').slice(0, 31) || ('sheet' + (i + 1));
+          const baseN = n;
+          let k = 1;
+          while (used.indexOf(n) >= 0) {
+            n = baseN.slice(0, 28) + '_' + k;
+            k++;
+          }
+          used.push(n);
+          return n;
+        });
+        let contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+          '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+          '<Default Extension="xml" ContentType="application/xml"/>' +
+          '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>';
+        names.forEach((_, i) => {
+          contentTypes += '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ' +
+            'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+        });
+        contentTypes += '</Types>';
+        let workbook = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+          '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
+          'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>';
+        names.forEach((n, i) => {
+          workbook += '<sheet name="' + xmlSafe(n) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>';
+        });
+        workbook += '</sheets></workbook>';
+        let wbRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+        names.forEach((_, i) => {
+          wbRels += '<Relationship Id="rId' + (i + 1) + '" ' +
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" ' +
+            'Target="worksheets/sheet' + (i + 1) + '.xml"/>';
+        });
+        wbRels += '</Relationships>';
+        const files = [
+          { name: '[Content_Types].xml', text: contentTypes },
+          {
+            name: '_rels/.rels',
+            text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+              '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+              '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+              '</Relationships>',
+          },
+          { name: 'xl/workbook.xml', text: workbook },
+          { name: 'xl/_rels/workbook.xml.rels', text: wbRels },
+        ];
+        sheets.forEach((sh, i) => {
+          files.push({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', text: buildSheetXml(sh.rows) });
+        });
+        return buildZip(files);
+      };
+
+      const selection = v2NormalizeSelection();
+      const scopeResolved = exportV2ResolveScopeV2(selection.scope);
+      // 管理员的机构范围由身份注入，忽略客户端越权参数（FR-EXP-004）
+      if (role === 'admin' && selection.scope.type === 'organization') {
+        selection.scope.organization_id = scopeResolved.orgConstraint;
+      }
+      const v2activities = scopeResolved.activities;
+      const v2OrgIds = scopeResolved.organizationIds;
+      const v2ActivityIds = v2activities.map((a) => a.id);
+
+      // 判敏（与 preview 同一函数）；未知代码直接 400
+      const analysis = exportV2AnalyzeSelection(selection, v2OrgIds, v2ActivityIds);
+      if (analysis.unknown.length > 0) {
+        ccError(400, 'validation_failed', '存在未知字段/题目/问卷代码：' + analysis.unknown.join('、'));
+      }
+      // 敏感导出：二次确认（confirm_sensitive:true）+ 机构开关（FR-EXP-003、AC-17）
+      if (analysis.requiresSensitive) {
+        if (body.confirm_sensitive !== true) {
+          ccError(400, 'confirm_required', '敏感导出需要显式确认（confirm_sensitive:true）');
+        }
+        if (role === 'admin') {
+          const org = $app.findRecordById('organizations', auth.get('organization_id'));
+          if (!org.get('allow_sensitive_export')) {
+            ccError(403, 'sensitive_export_disabled', '本机构未开启敏感导出开关');
+          }
+        }
+      }
+
+      const universe = exportV2BuildUniverseV2(selection, v2activities);
+      const tzOffset = v2TimezoneOffset(selection.timezone);
+      const fmtT = (v) => v2FormatTime(v, tzOffset);
+      const sysCols = selection.columns.system;
+
+      // --- 取值辅助索引 ---
+      const allScopeRegs = queryAll('registrations', exportV2ActivityInClause(v2ActivityIds), {}, 'created');
+      const regById = {};
+      allScopeRegs.forEach((r) => {
+        regById[r.id] = r;
+      });
+      // 搭档姓名只取自该场报名的 FULL_NAME（不从账号层复用，与配对快照同口径）
+      let fullNameDefId = '';
+      if (sysCols.indexOf('partner_name') >= 0) {
+        const fnd = $app.findRecordsByFilter(
+          'registration_field_defs',
+          "field_code = 'FULL_NAME' && (organization_id = '' || " + exportV2OrgInClause(v2OrgIds) + ')',
+          '',
+          10,
+          0,
+          {},
+        );
+        fnd.forEach((d) => {
+          if (d.get('organization_id') !== '') fullNameDefId = d.id;
+        });
+        if (!fullNameDefId && fnd.length > 0) fullNameDefId = fnd[0].id;
+      }
+      const fullNameByReg = {};
+      if (fullNameDefId && allScopeRegs.length > 0) {
+        const fna = inFilter('registration_id', allScopeRegs.map((r) => r.id));
+        queryAll(
+          'registration_answers',
+          '(' + fna.filter + ') && field_def_id = {:fd}',
+          Object.assign({}, fna.params, { fd: fullNameDefId }),
+          'created',
+        ).forEach((a) => {
+          fullNameByReg[a.get('registration_id')] = decodeJson(a.get('value_json'));
+        });
+      }
+      // 手机号列仅在选择时加载账号（account 层 phone_e164；masked/full 两档）
+      const accountById = {};
+      if (sysCols.indexOf('phone_masked') >= 0 || sysCols.indexOf('phone_full') >= 0) {
+        const pids = [];
+        universe.registrations.forEach((r) => {
+          const pid = r.get('participant_id');
+          if (pids.indexOf(pid) < 0) pids.push(pid);
+        });
+        pids.forEach((pid) => {
+          try {
+            accountById[pid] = $app.findRecordById('participant_accounts', pid);
+          } catch (_) {
+            /* 账号缺失时留空 */
+          }
+        });
+      }
+      // 报名答案：仅取所选字段代码
+      const regAnswerMap = {};
+      if (selection.columns.registration_field_codes.length > 0 && universe.registrations.length > 0) {
+        const defIdToCode = {};
+        Object.keys(analysis.fieldDefByCode).forEach((code) => {
+          defIdToCode[analysis.fieldDefByCode[code].id] = code;
+        });
+        const f = inFilter('registration_id', universe.registrations.map((r) => r.id));
+        queryAll('registration_answers', f.filter, f.params, 'created').forEach((a) => {
+          const code = defIdToCode[a.get('field_def_id')];
+          if (!code) return;
+          (regAnswerMap[a.get('registration_id')] = regAnswerMap[a.get('registration_id')] || {})[code] =
+            decodeJson(a.get('value_json'));
+        });
+      }
+
+      // --- 组装数据表（{name, headers, rows, dict}；xlsx=逐表 sheet，csv_zip=逐表 CSV）---
+      const SYSTEM_COL_DESC = {
+        participant_id: ['参与者 ID（跨表关联键）', 'no'],
+        activity_id: ['活动 ID', 'no'],
+        activity_role: ['活动内角色（speaker=倾诉者, listener=聆听者）', 'no'],
+        registration_status: ['报名状态（pending/approved/rejected/cancelled）', 'no'],
+        checked_in_at: ['有效签到时间（导出时区）', 'no'],
+        onsite_code: ['现场编号（S/L+序号；发出后不复用）', 'no'],
+        pair_code: ['配对编号（P+序号）', 'no'],
+        partner_name: ['搭档姓名（取自搭档当场报名 FULL_NAME，敏感）', 'yes'],
+        phone_masked: ['掩码手机号（现场联系用）', 'no'],
+        phone_full: ['完整手机号（敏感）', 'yes'],
+      };
+      const tables = [];
+
+      if (selection.datasets.indexOf('registrations') >= 0) {
+        const headers = ['registration_id'].concat(sysCols).concat(selection.columns.registration_field_codes);
+        const dict = [{ column: 'registration_id', description: '报名 ID（参与者×活动唯一）', sensitive: 'no' }];
+        sysCols.forEach((col) => {
+          const d = SYSTEM_COL_DESC[col] || [col, 'no'];
+          dict.push({ column: col, description: d[0], sensitive: d[1] });
+        });
+        selection.columns.registration_field_codes.forEach((code) => {
+          const def = analysis.fieldDefByCode[code];
+          dict.push({
+            column: code,
+            description: '报名字段「' + (def ? def.get('label') : code) + '」',
+            sensitive: def && def.get('is_sensitive') ? 'yes' : 'no',
+          });
+        });
+        const rows = universe.registrations.map((r) => {
+          const vc = universe.validCheckinByReg[r.id];
+          const pair = universe.activePairByReg[r.id];
+          const account = accountById[r.get('participant_id')];
+          const row = [r.id];
+          sysCols.forEach((col) => {
+            if (col === 'participant_id') row.push(r.get('participant_id'));
+            else if (col === 'activity_id') row.push(r.get('activity_id'));
+            else if (col === 'activity_role') row.push(r.get('activity_role'));
+            else if (col === 'registration_status') row.push(r.get('status'));
+            else if (col === 'checked_in_at') row.push(vc ? fmtT(vc.get('checked_in_at')) : '');
+            else if (col === 'onsite_code') row.push(onsiteCodeOf(vc));
+            else if (col === 'pair_code') row.push(pair ? pairCodeOf(pair) : '');
+            else if (col === 'partner_name') {
+              if (!pair) {
+                row.push('');
+              } else {
+                const partnerRegId =
+                  pair.get('speaker_registration_id') === r.id
+                    ? pair.get('listener_registration_id')
+                    : pair.get('speaker_registration_id');
+                row.push(fullNameByReg[partnerRegId] || '');
+              }
+            } else if (col === 'phone_masked') row.push(account ? maskPhone(account.get('phone_e164')) : '');
+            else if (col === 'phone_full') row.push(account ? account.get('phone_e164') || '' : '');
+          });
+          selection.columns.registration_field_codes.forEach((code) => {
+            const m = regAnswerMap[r.id] || {};
+            const v = m[code];
+            row.push(v === null || v === undefined ? '' : v);
+          });
+          return row;
+        });
+        tables.push({ name: 'registrations', headers, rows, dict });
+      }
+
+      if (selection.datasets.indexOf('checkins') >= 0) {
+        const headers = [
+          'checkin_id', 'registration_id', 'participant_id', 'activity_id', 'source', 'status',
+          'checked_in_at', 'onsite_role', 'onsite_code', 'revoked_at', 'reason',
+        ];
+        const dict = [
+          { column: 'checkin_id', description: '签到记录 ID', sensitive: 'no' },
+          { column: 'registration_id', description: '报名 ID', sensitive: 'no' },
+          { column: 'participant_id', description: '参与者 ID', sensitive: 'no' },
+          { column: 'activity_id', description: '活动 ID', sensitive: 'no' },
+          { column: 'source', description: '签到来源（self_scan=自助扫码, manual=管理员补签）', sensitive: 'no' },
+          { column: 'status', description: '签到状态（valid=有效, revoked=已撤销）', sensitive: 'no' },
+          { column: 'checked_in_at', description: '签到时间（导出时区）', sensitive: 'no' },
+          { column: 'onsite_role', description: '现场角色（speaker/listener）', sensitive: 'no' },
+          { column: 'onsite_code', description: '现场编号（S/L+序号）', sensitive: 'no' },
+          { column: 'revoked_at', description: '撤销时间（导出时区）', sensitive: 'no' },
+          { column: 'reason', description: '补签/撤销原因', sensitive: 'no' },
+        ];
+        const rows = universe.checkins.map((c) => [
+          c.id, c.get('registration_id'), c.get('participant_id'), c.get('activity_id'),
+          c.get('source'), c.get('status'), fmtT(c.get('checked_in_at')),
+          c.get('onsite_role') || '', onsiteCodeOf(c), fmtT(c.get('revoked_at')), c.get('reason') || '',
+        ]);
+        tables.push({ name: 'checkins', headers, rows, dict });
+      }
+
+      if (selection.datasets.indexOf('pairings') >= 0) {
+        const withNames = sysCols.indexOf('partner_name') >= 0;
+        const headers = [
+          'pair_id', 'activity_id', 'pair_code', 'status',
+          'speaker_registration_id', 'speaker_participant_id', 'speaker_onsite_code',
+          'listener_registration_id', 'listener_participant_id', 'listener_onsite_code',
+          'paired_at', 'released_at', 'completed_at', 'adjustment_reason', 'release_reason',
+        ];
+        if (withNames) headers.push('speaker_name', 'listener_name');
+        const dict = [
+          { column: 'pair_id', description: '配对记录 ID', sensitive: 'no' },
+          { column: 'activity_id', description: '活动 ID', sensitive: 'no' },
+          { column: 'pair_code', description: '配对编号（P+序号）', sensitive: 'no' },
+          { column: 'status', description: '配对状态（active/released/completed）', sensitive: 'no' },
+          { column: 'speaker_registration_id', description: '倾诉者报名 ID', sensitive: 'no' },
+          { column: 'speaker_participant_id', description: '倾诉者参与者 ID', sensitive: 'no' },
+          { column: 'speaker_onsite_code', description: '倾诉者现场编号', sensitive: 'no' },
+          { column: 'listener_registration_id', description: '聆听者报名 ID', sensitive: 'no' },
+          { column: 'listener_participant_id', description: '聆听者参与者 ID', sensitive: 'no' },
+          { column: 'listener_onsite_code', description: '聆听者现场编号', sensitive: 'no' },
+          { column: 'paired_at', description: '配对时间（导出时区）', sensitive: 'no' },
+          { column: 'released_at', description: '释放时间', sensitive: 'no' },
+          { column: 'completed_at', description: '完成时间', sensitive: 'no' },
+          { column: 'adjustment_reason', description: '手工调整原因', sensitive: 'no' },
+          { column: 'release_reason', description: '释放原因', sensitive: 'no' },
+        ];
+        if (withNames) {
+          dict.push({ column: 'speaker_name', description: '倾诉者姓名（当场报名 FULL_NAME，敏感）', sensitive: 'yes' });
+          dict.push({ column: 'listener_name', description: '聆听者姓名（当场报名 FULL_NAME，敏感）', sensitive: 'yes' });
+        }
+        const rows = universe.pairs.map((p) => {
+          const spReg = regById[p.get('speaker_registration_id')];
+          const liReg = regById[p.get('listener_registration_id')];
+          let spCk = null;
+          let liCk = null;
+          try {
+            spCk = $app.findRecordById('checkins', p.get('speaker_checkin_id'));
+          } catch (_) {
+            /* 签到记录缺失时留空 */
+          }
+          try {
+            liCk = $app.findRecordById('checkins', p.get('listener_checkin_id'));
+          } catch (_) {
+            /* 同上 */
+          }
+          const row = [
+            p.id, p.get('activity_id'), pairCodeOf(p), p.get('status'),
+            p.get('speaker_registration_id'), spReg ? spReg.get('participant_id') : '', onsiteCodeOf(spCk),
+            p.get('listener_registration_id'), liReg ? liReg.get('participant_id') : '', onsiteCodeOf(liCk),
+            fmtT(p.get('paired_at')), fmtT(p.get('released_at')), fmtT(p.get('completed_at')),
+            p.get('adjustment_reason') || '', p.get('release_reason') || '',
+          ];
+          if (withNames) {
+            row.push(fullNameByReg[p.get('speaker_registration_id')] || '');
+            row.push(fullNameByReg[p.get('listener_registration_id')] || '');
+          }
+          return row;
+        });
+        tables.push({ name: 'pairings', headers, rows, dict });
+      }
+
+      if (selection.datasets.indexOf('surveys') >= 0) {
+        const selectedBySurvey = {};
+        selection.columns.survey_questions.forEach((qs) => {
+          selectedBySurvey[qs.activity_survey_id] = qs.question_codes;
+        });
+        universe.surveys.forEach((sv) => {
+          const qcodes = selectedBySurvey[sv.id] || [];
+          const subs = universe.submissions.filter((s) => s.get('activity_survey_id') === sv.id);
+          const ansMap = {};
+          if (qcodes.length > 0 && subs.length > 0) {
+            const f = inFilter('submission_id', subs.map((s) => s.id));
+            queryAll('answers', f.filter, f.params, 'created').forEach((a) => {
+              ansMap[a.get('submission_id') + ':' + a.get('question_code')] = decodeJson(a.get('value_json'));
+            });
+          }
+          const headers = ['submission_id', 'registration_id', 'participant_id', 'activity_id', 'status', 'submitted_at']
+            .concat(qcodes);
+          const dict = [
+            { column: 'submission_id', description: '答卷 ID', sensitive: 'no' },
+            { column: 'registration_id', description: '报名 ID', sensitive: 'no' },
+            { column: 'participant_id', description: '参与者 ID', sensitive: 'no' },
+            { column: 'activity_id', description: '活动 ID', sensitive: 'no' },
+            { column: 'status', description: '答卷状态（draft/submitted；作废已排除）', sensitive: 'no' },
+            { column: 'submitted_at', description: '正式提交时间（导出时区）', sensitive: 'no' },
+          ];
+          qcodes.forEach((qc) => {
+            const q = analysis.questionByKey[sv.id + ':' + qc];
+            dict.push({
+              column: qc,
+              description: '问卷题目「' + (q ? q.get('title') : qc) + '」',
+              sensitive: q && q.get('is_sensitive') ? 'yes' : 'no',
+            });
+          });
+          const rows = subs.map((s) => {
+            const row = [
+              s.id, s.get('registration_id'), s.get('participant_id'), sv.get('activity_id'),
+              s.get('status'), fmtT(s.get('submitted_at')),
+            ];
+            qcodes.forEach((qc) => {
+              const v = ansMap[s.id + ':' + qc];
+              row.push(v === null || v === undefined ? '' : v);
+            });
+            return row;
+          });
+          tables.push({ name: 'survey_' + sv.get('survey_code'), headers, rows, dict });
+        });
+      }
+
+      // data_dictionary：字段说明与敏感标记（下游可复现过滤口径，AC-16）
+      const dictRows = [];
+      tables.forEach((t) => {
+        t.dict.forEach((d) => {
+          dictRows.push([t.name, d.column, d.description, d.sensitive]);
+        });
+      });
+      dictRows.push(['manifest', 'key', '清单项', 'no']);
+      dictRows.push(['manifest', 'value', '清单值', 'no']);
+      tables.push({
+        name: 'data_dictionary',
+        headers: ['table', 'column', 'description', 'is_sensitive'],
+        rows: dictRows,
+        dict: [],
+      });
+
+      // manifest：筛选摘要、字段清单、生成时间与时区（PRD §7「导出结果必须带…确保可复现」）
+      const manifestRows = [
+        ['export_format_version', EXPORT_V2_FORMAT_VERSION],
+        ['contract_version', EXPORT_V2_CONTRACT_VERSION],
+        ['generated_at', new Date().toISOString()],
+        ['timezone', selection.timezone],
+        ['scope_type', selection.scope.type],
+        ['scope_organization_id', selection.scope.organization_id || ''],
+        ['scope_activity_id', selection.scope.activity_id || ''],
+        ['scope_date_from', (selection.scope.date_range && selection.scope.date_range.from) || ''],
+        ['scope_date_to', (selection.scope.date_range && selection.scope.date_range.to) || ''],
+        ['datasets', selection.datasets.join(';')],
+        ['survey_ids', selection.survey_ids.join(';')],
+        ['format', selection.format],
+        ['filters', JSON.stringify(selection.filters)],
+        ['system_columns', sysCols.join(';')],
+        ['registration_field_codes', selection.columns.registration_field_codes.join(';')],
+        [
+          'survey_questions',
+          selection.columns.survey_questions
+            .map((qs) => qs.activity_survey_id + ':' + qs.question_codes.join(','))
+            .join(';'),
+        ],
+        ['requires_sensitive_export', String(analysis.requiresSensitive)],
+        [
+          'sensitive_reasons',
+          analysis.reasons.map((r) => r.source + ':' + r.code).join(';'),
+        ],
+        ['source_schema_version', '2'],
+        ['created_by', auth.id],
+        ['voided_submissions_excluded', 'yes'],
+      ];
+      tables.forEach((t) => {
+        manifestRows.push(['rows.' + t.name, String(t.rows.length)]);
+      });
+      tables.push({ name: 'manifest', headers: ['key', 'value'], rows: manifestRows, dict: [] });
+
+      // --- 渲染：xlsx=多 sheet 工作簿；csv_zip=每表一个 CSV（UTF-8 BOM + 公式注入防护）---
+      let outBytes;
+      let outExt;
+      try {
+        if (selection.format === 'xlsx') {
+          outBytes = buildXlsx(tables.map((t) => ({ name: t.name, rows: [t.headers].concat(t.rows) })));
+          outExt = 'xlsx';
+        } else {
+          outBytes = buildZip(tables.map((t) => ({ name: t.name + '.csv', text: buildCsv(t.headers, t.rows) })));
+          outExt = 'zip';
+        }
+      } catch (err) {
+        ccError(500, 'internal_error', '导出文件渲染失败：' + String(err));
+      }
+
+      // --- 写文件 + job + 审计（同事务；审计只记机器码不记敏感值）---
+      const storedSelection = Object.assign({}, selection, { source_schema_version: 2 });
+      let fileName2;
+      let checksum2;
+      let genError2 = null;
+      try {
+        fileName2 = 'cc_export_' + $security.randomString(24) + '.' + outExt;
+        checksum2 = $security.sha256(outBytes);
+        $os.mkdirAll(EXPORT_DIR, 0o700);
+        $os.writeFile(EXPORT_DIR + '/' + fileName2, outBytes, 0o600);
+      } catch (err) {
+        genError2 = err;
+      }
+      const jobOrg = scopeResolved.orgConstraint;
+      let job2 = null;
+      $app.runInTransaction((txApp) => {
+        const jobsCol = txApp.findCollectionByNameOrId('export_jobs');
+        job2 = new Record(jobsCol);
+        if (jobOrg) job2.set('organization_id', jobOrg);
+        job2.set('scope_json', storedSelection);
+        job2.set('include_pii', analysis.requiresSensitive);
+        job2.set('file_path', genError2 ? '-' : EXPORT_DIR + '/' + fileName2);
+        job2.set('file_checksum', genError2 ? '' : checksum2);
+        job2.set('status', genError2 ? 'failed' : 'done');
+        job2.set('created_by', auth.id);
+        txApp.save(job2);
+        writeAudit(txApp, {
+          actorId: auth.id,
+          actorRole: role === 'admin' ? 'admin' : 'super_admin',
+          organizationId: jobOrg || undefined,
+          action: analysis.requiresSensitive ? 'export.sensitive' : 'export.normal',
+          targetType: 'export_job',
+          targetId: job2.id,
+          result: genError2 ? 'failure' : 'success',
+          metadata: {
+            schema_version: 2,
+            source_schema_version: 2,
+            scope: storedSelection.scope,
+            datasets: storedSelection.datasets,
+            format: storedSelection.format,
+            timezone: storedSelection.timezone,
+            filters: storedSelection.filters,
+            system_columns: storedSelection.columns.system,
+            field_codes: storedSelection.columns.registration_field_codes,
+            survey_questions: storedSelection.columns.survey_questions,
+            requires_sensitive_export: analysis.requiresSensitive,
+            sensitive_reasons: analysis.reasons,
+            confirm_sensitive: body.confirm_sensitive === true,
+            activity_count: v2activities.length,
+            row_counts: universe.counts,
+            error: genError2 ? String(genError2) : undefined,
+          },
+        });
+      });
+      if (genError2) {
+        return jsonError(e, 500, 'internal_error', '导出文件生成失败，请稍后重试');
+      }
+      // 契约 CreateExportV2Response：status 恒为 'running'（冻结契约字面量；
+      // 本实现同步生成，实际状态以下载端点/job 记录为准）
+      return e.json(200, {
+        contract_version: EXPORT_V2_CONTRACT_VERSION,
+        export_job_id: job2.id,
+        status: 'running',
+        requires_sensitive_export: analysis.requiresSensitive,
+        normalized_selection: selection,
+      });
+    } catch (err) {
+      if (err && err.__ccError === true) {
+        return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+      }
+      throw err;
+    }
+  }
+
   // 敏感导出：二次确认（confirm:true，FR-EXP-003）
   if (includePii && body.confirm !== true) {
     return jsonError(e, 400, 'confirm_required', '敏感导出需要二次确认（confirm:true）');
@@ -1036,6 +1922,10 @@ routerAdd('GET', '/api/cc/exports/{id}/download', (e) => {
     return jsonError(e, 404, 'file_missing', '导出文件不存在或已被移除');
   }
 
+  // v2 任务的格式从存储的 scope_json 派生（xlsx 或 zip；v1 任务恒为 zip）
+  const storedScope = decodeJson(job.get('scope_json'), null);
+  const isXlsx = storedScope && storedScope.schema_version === 2 && storedScope.format === 'xlsx';
+
   // 审计：导出文件下载成功（security-privacy §8.1 数据类，留痕下载动作）
   writeAudit($app, {
     actorId: auth.id,
@@ -1045,9 +1935,16 @@ routerAdd('GET', '/api/cc/exports/{id}/download', (e) => {
     targetType: 'export_job',
     targetId: job.id,
     result: 'success',
-    metadata: { export_job_id: job.id, scope: decodeJson(job.get('scope_json'), null) },
+    metadata: { export_job_id: job.id, scope: storedScope },
   });
 
-  e.response.header().set('Content-Disposition', 'attachment; filename="chatcircles_export_' + job.id + '.zip"');
-  return e.blob(200, 'application/zip', bytes);
+  e.response.header().set(
+    'Content-Disposition',
+    'attachment; filename="chatcircles_export_' + job.id + (isXlsx ? '.xlsx' : '.zip') + '"',
+  );
+  return e.blob(
+    200,
+    isXlsx ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/zip',
+    bytes,
+  );
 });
