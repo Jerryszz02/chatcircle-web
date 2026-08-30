@@ -7,6 +7,7 @@ import './admin.css';
 export { AdminLoginPage } from './pages/AdminLoginPage';
 export { AdminRegisterPage } from './pages/AdminRegisterPage';
 export { AdminActivitiesPage } from './pages/AdminActivitiesPage';
+export { AdminActivityCreatePage } from './pages/AdminActivityCreatePage';
 export { AdminActivityDetailPage } from './pages/AdminActivityDetailPage';
 export { AdminDashboardPage } from './pages/AdminDashboardPage';
 export { AdminExportsPage } from './pages/AdminExportsPage';

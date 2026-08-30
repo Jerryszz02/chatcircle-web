@@ -1,4 +1,11 @@
-import { ACCOUNT_EVENT_ENDPOINTS, type ActivityLiveSummaryResponse } from '../../../shared/api/accountEvent';
+import {
+  ACCOUNT_EVENT_ENDPOINTS,
+  type ActivityLiveSummaryResponse,
+  type DuplicateActivityResponse,
+  type PairingReassignInput,
+  type PairingReassignResponse,
+  type PairingsStartResponse,
+} from '../../../shared/api/accountEvent';
 import type { ActivityRole, ExportScope, RegistrationStatus, RoleScope } from '../../../shared/api/types';
 import type { MetricKey } from '../../../shared/metrics/registry';
 import type { MetricCardData } from '../../../shared/metrics/MetricRenderer';
@@ -38,6 +45,27 @@ export function transitionRegistration(
 /** 活动生命周期动作：submit-review / publish / close / archive。 */
 export function runActivityAction(id: string, action: AdminActivityAction): Promise<unknown> {
   return apiPost(adminClient(), `/api/cc/activities/${id}/${action}`);
+}
+
+/**
+ * 复制活动（PRD §4.1）：服务端重新生成活动代码、签到 token 与问卷入口 token，
+ * 不复制历史报名/签到/配对/答卷/审计；新活动恒为 draft。
+ */
+export function duplicateActivity(activityId: string): Promise<DuplicateActivityResponse> {
+  return apiPost(adminClient(), ACCOUNT_EVENT_ENDPOINTS.duplicateActivity(activityId));
+}
+
+/** 开始配对（幂等，重复调用只补齐等待队列，不重排旧组，api-design §4.1）。 */
+export function startActivityPairings(activityId: string): Promise<PairingsStartResponse> {
+  return apiPost(adminClient(), ACCOUNT_EVENT_ENDPOINTS.startPairings(activityId));
+}
+
+/** 手工调整配对（reason 必填，原子释放涉及的 active pair 并新建一组）。 */
+export function reassignActivityPairing(
+  activityId: string,
+  input: PairingReassignInput,
+): Promise<PairingReassignResponse> {
+  return apiPost(adminClient(), ACCOUNT_EVENT_ENDPOINTS.reassignPairing(activityId), input);
 }
 
 /** 开放签到（FR-CHK-002；可重复开放/关闭）。 */

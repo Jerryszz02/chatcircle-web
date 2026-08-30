@@ -109,6 +109,7 @@ def main():
     import suite_transitions
     import suite_checkins
     import suite_pairings
+    import suite_activity_duplicate
     import suite_trainings
     import suite_surveys
     import suite_exports
@@ -125,6 +126,7 @@ def main():
     import suite_phone_auth
 
     for mod in (suite_flow, suite_acl, suite_capacity, suite_transitions, suite_checkins, suite_pairings,
+                suite_activity_duplicate,
                 suite_trainings, suite_surveys, suite_exports, suite_auth, suite_admin_email,
                 suite_posts, suite_outcome, suite_backup,
                 suite_nodelete, suite_templates, suite_hardening, suite_reports,

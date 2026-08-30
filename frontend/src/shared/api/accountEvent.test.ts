@@ -42,6 +42,9 @@ describe('account-event T0 共享契约', () => {
       '/api/cc/activities/act%201/pairings/start',
     );
     expect(ACCOUNT_EVENT_ENDPOINTS.myPairing('act1')).toBe('/api/cc/activities/act1/my-pairing');
+    expect(ACCOUNT_EVENT_ENDPOINTS.duplicateActivity('act/1')).toBe(
+      '/api/cc/activities/act%2F1/duplicate',
+    );
   });
 
   it('实时事件只作为快照无效化信号', () => {

@@ -1,16 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import type {
   ActivityRecord,
-  FieldType,
   RegistrationFieldDefRecord,
-  RoleScope,
 } from '../../../shared/api/types';
 import { adminAuth } from '../../../shared/auth';
 import { normalizeApiError } from '../../../shared/api/http';
 import type { AdminAccountRecord } from '../../../shared/api/types';
-import { Button, Input, Loading } from '../../../shared/ui';
-import { FIELD_TYPE_LABELS, ROLE_SCOPE_LABELS, SOURCE_TYPE_LABELS } from '../lib/labels';
+import { Button, Input } from '../../../shared/ui';
 import { fromInputDateTime, toInputDateTime } from '../lib/format';
 import {
   mergeFormConfig,
@@ -22,7 +19,7 @@ import {
   type CapacityEditErrors,
 } from '../lib/rules';
 import { adminCollections } from '../lib/api';
-import { StatusTag } from './StatusTag';
+import { RegistrationFieldsEditor } from './RegistrationFieldsEditor';
 
 /**
  * 活动创建/编辑表单（FR-ACT-001/005/006）。
@@ -52,25 +49,6 @@ export interface ActivityFormProps {
 
 const ZERO_COUNTS: ApprovedCounts = { total: 0, speaker: 0, listener: 0 };
 
-/** 选择题选项输入解析：每行一条，格式 `机器值,显示文本` 或仅 `显示文本`（机器值同文本）。 */
-function parseOptionsInput(text: string): { options: { value: string; label: string }[] } | undefined {
-  const options = text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [value, label] = line.split(/[,，]/).map((s) => s.trim());
-      return { value: value || '', label: label || value || '' };
-    })
-    .filter((o) => o.value !== '');
-  return options.length > 0 ? { options } : undefined;
-}
-
-/** 生成自定义字段机器码（机构内唯一即可；稳定后不可改，FR-REG-001 同型约束）。 */
-function generateCustomFieldCode(): string {
-  return `CUS_${Date.now().toString(36).toUpperCase()}`;
-}
-
 export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel }: ActivityFormProps) {
   const counts = mode === 'edit' ? approvedCounts : ZERO_COUNTS;
 
@@ -89,15 +67,6 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
   const [fieldDefs, setFieldDefs] = useState<RegistrationFieldDefRecord[] | null>(null);
   const [fieldConfigs, setFieldConfigs] = useState<ActivityFormFieldConfig[]>([]);
   const [defsError, setDefsError] = useState('');
-
-  // 自定义字段新增小表单
-  const [newLabel, setNewLabel] = useState('');
-  const [newType, setNewType] = useState<FieldType>('text');
-  const [newSensitive, setNewSensitive] = useState(false);
-  const [newRequiredDefault, setNewRequiredDefault] = useState(false);
-  const [newOptions, setNewOptions] = useState('');
-  const [newRoleScope, setNewRoleScope] = useState<RoleScope>('both');
-  const [roleScopeError, setRoleScopeError] = useState('');
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitError, setSubmitError] = useState('');
@@ -131,72 +100,22 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const defById = useMemo(
-    () => new Map((fieldDefs ?? []).map((d) => [d.id, d])),
-    [fieldDefs],
-  );
-
   const patchField = (fieldDefId: string, patch: { enabled?: boolean; required?: boolean }) => {
     setFieldConfigs((prev) => setFormFieldConfig(prev, fieldDefId, patch));
   };
 
-  const addCustomField = async () => {
-    const label = newLabel.trim();
-    if (!label) {
-      setErrors((prev) => ({ ...prev, new_field_label: '请输入字段名称' }));
-      return;
-    }
-    if ((newType === 'single_choice' || newType === 'multi_choice') && !parseOptionsInput(newOptions)) {
-      setErrors((prev) => ({ ...prev, new_field_label: '选择题需填写选项（每行一条）' }));
-      return;
-    }
-    setErrors((prev) => ({ ...prev, new_field_label: '' }));
-    const admin = adminAuth.record as AdminAccountRecord | null;
-    if (!admin) return;
-    try {
-      const created = await adminCollections().registrationFieldDefs.create({
-        organization_id: admin.organization_id,
-        field_code: generateCustomFieldCode(),
-        field_type: newType,
-        label,
-        source_type: 'custom',
-        is_sensitive: newSensitive,
-        options_json: parseOptionsInput(newOptions),
-        required_default: newRequiredDefault,
-        role_scope: newRoleScope,
-        status: 'active',
-      });
-      setFieldDefs((prev) => [...(prev ?? []), created]);
-      setFieldConfigs((prev) => [
-        ...prev,
-        { field_def_id: created.id, enabled: true, required: newRequiredDefault },
-      ]);
-      setNewLabel('');
-      setNewType('text');
-      setNewSensitive(false);
-      setNewRequiredDefault(false);
-      setNewOptions('');
-      setNewRoleScope('both');
-    } catch (err) {
-      setErrors((prev) => ({ ...prev, new_field_label: normalizeApiError(err).message }));
-    }
+  /** 自定义字段创建成功：并入定义列表与表单配置（默认启用、采用其默认必填）。 */
+  const handleFieldCreated = (created: RegistrationFieldDefRecord) => {
+    setFieldDefs((prev) => [...(prev ?? []), created]);
+    setFieldConfigs((prev) => [
+      ...prev,
+      { field_def_id: created.id, enabled: true, required: created.required_default },
+    ]);
   };
 
-  /** 修改自定义字段的适用角色（仅本机构 custom 字段可改，由服务端 guards 强制；标准字段只读）。 */
-  const changeRoleScope = async (def: RegistrationFieldDefRecord, roleScope: RoleScope) => {
-    setRoleScopeError('');
-    const prevScope = def.role_scope;
-    setFieldDefs((prev) =>
-      (prev ?? []).map((d) => (d.id === def.id ? { ...d, role_scope: roleScope } : d)),
-    );
-    try {
-      await adminCollections().registrationFieldDefs.update(def.id, { role_scope: roleScope });
-    } catch (err) {
-      setFieldDefs((prev) =>
-        (prev ?? []).map((d) => (d.id === def.id ? { ...d, role_scope: prevScope } : d)),
-      );
-      setRoleScopeError(`「${def.label}」适用角色保存失败：${normalizeApiError(err).message}`);
-    }
+  /** 字段定义变更（适用角色乐观更新/回滚由编辑器发起）。 */
+  const handleDefChanged = (def: RegistrationFieldDefRecord) => {
+    setFieldDefs((prev) => (prev ?? []).map((d) => (d.id === def.id ? def : d)));
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -268,8 +187,6 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
       setSubmitting(false);
     }
   };
-
-  const isChoiceType = newType === 'single_choice' || newType === 'multi_choice';
 
   // 字段定义加载中（null）或加载失败（defsError 非空）时未就绪：
   // 此时提交会以空 fieldConfigs 覆盖既有 form_config_json，必须阻止
@@ -369,142 +286,14 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
         />
       </div>
 
-      <fieldset className="admin-section">
-        <legend>报名表配置（标准字段启用/必填；自定义字段含敏感标记与适用角色）</legend>
-        {defsError ? (
-          <p className="cc-error" role="alert">
-            字段定义加载失败：{defsError}
-          </p>
-        ) : null}
-        {roleScopeError ? (
-          <p className="cc-error" role="alert">
-            {roleScopeError}
-          </p>
-        ) : null}
-        {fieldDefs === null && !defsError ? <Loading label="字段定义加载中…" /> : null}
-        {fieldConfigs.map((config) => {
-          const def = defById.get(config.field_def_id);
-          if (!def) return null;
-          return (
-            <div key={config.field_def_id} className="admin-field-row">
-              <span className="admin-field-label">
-                {def.label}
-                <span className="admin-muted">
-                  （{SOURCE_TYPE_LABELS[def.source_type]} · {FIELD_TYPE_LABELS[def.field_type]}）
-                </span>
-              </span>
-              {def.is_sensitive ? <StatusTag label="敏感" tone="danger" /> : null}
-              {def.source_type === 'custom' ? (
-                <select
-                  className="admin-select"
-                  aria-label={`${def.label} 适用角色`}
-                  value={def.role_scope}
-                  onChange={(e) => void changeRoleScope(def, e.target.value as RoleScope)}
-                >
-                  {Object.entries(ROLE_SCOPE_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="admin-muted">适用：{ROLE_SCOPE_LABELS[def.role_scope]}</span>
-              )}
-              <label className="admin-checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={config.enabled}
-                  onChange={(e) => patchField(config.field_def_id, { enabled: e.target.checked })}
-                />
-                启用
-              </label>
-              <label className="admin-checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={config.required}
-                  disabled={!config.enabled}
-                  onChange={(e) => patchField(config.field_def_id, { required: e.target.checked })}
-                />
-                必填
-              </label>
-            </div>
-          );
-        })}
-
-        <div className="admin-section">
-          <h3>新增自定义字段</h3>
-          <div className="admin-form-grid">
-            <Input label="字段名称" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} error={errors.new_field_label} />
-            <div className="cc-field">
-              <label className="cc-label" htmlFor="new-field-type">
-                字段类型
-              </label>
-              <select
-                id="new-field-type"
-                className="admin-select"
-                value={newType}
-                onChange={(e) => setNewType(e.target.value as FieldType)}
-              >
-                {Object.entries(FIELD_TYPE_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="cc-field">
-              <label className="cc-label" htmlFor="new-field-role-scope">
-                适用角色
-              </label>
-              <select
-                id="new-field-role-scope"
-                className="admin-select"
-                value={newRoleScope}
-                onChange={(e) => setNewRoleScope(e.target.value as RoleScope)}
-              >
-                {Object.entries(ROLE_SCOPE_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          {isChoiceType ? (
-            <div className="cc-field">
-              <label className="cc-label" htmlFor="new-field-options">
-                选项（每行一条，格式：机器值,显示文本 或仅显示文本）
-              </label>
-              <textarea
-                id="new-field-options"
-                className="cc-input cc-textarea"
-                rows={3}
-                value={newOptions}
-                onChange={(e) => setNewOptions(e.target.value)}
-              />
-            </div>
-          ) : null}
-          <label className="admin-checkbox-row">
-            <input
-              type="checkbox"
-              checked={newSensitive}
-              onChange={(e) => setNewSensitive(e.target.checked)}
-            />
-            标记为敏感字段（普通导出将排除/掩码，FR-EXP-002）
-          </label>
-          <label className="admin-checkbox-row">
-            <input
-              type="checkbox"
-              checked={newRequiredDefault}
-              onChange={(e) => setNewRequiredDefault(e.target.checked)}
-            />
-            默认必填（活动级可再调整）
-          </label>
-          <Button variant="secondary" onClick={addCustomField}>
-            添加字段
-          </Button>
-        </div>
-      </fieldset>
+      <RegistrationFieldsEditor
+        fieldDefs={fieldDefs}
+        defsError={defsError}
+        fieldConfigs={fieldConfigs}
+        onPatchField={patchField}
+        onFieldCreated={handleFieldCreated}
+        onDefChanged={handleDefChanged}
+      />
 
       {submitError ? (
         <p className="cc-error" role="alert">

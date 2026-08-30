@@ -10,6 +10,9 @@
 //     仅 published/closed 可见，含报名开放状态（open + 未开放 reason）与剩余名额口径、
 //     活动级生效报名字段 registration_fields（form_config_json 数组版解析）；下架后公开入口不可访问）
 // - POST /api/cc/activities/{id}/submit-review|publish|close|archive   管理员生命周期操作
+// - POST /api/cc/activities/{id}/duplicate                            复制活动（PRD §4.1）：复制配置
+//     （基本信息/名额/报名窗口/报名表配置/问卷与题目物化行），重新生成活动代码、签到 token
+//     与问卷入口 token；不复制历史报名、签到、配对、答卷与审计记录；新活动恒为 draft。
 // - POST /api/cc/activities/{id}/approve|reject {reason}|unpublish     超管审批/驳回/下架
 //     活动状态机（PRD §4.3）：draft →（机构开启审核时 pending_review →）published → closed → archived；
 //     published → taken_down（仅超管）；pending_review → rejected → 修改后可重提。
@@ -606,6 +609,209 @@ routerAdd('POST', '/api/cc/activities/{id}/archive', (e) => {
   });
 
   return e.json(200, { activity: $app.findRecordById('activities', activity.id), already: false });
+  } catch (err) {
+    // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
+    if (err && err.__ccError === true) {
+      return e.json(err.status, { code: err.status, message: err.message, data: { code: err.code } });
+    }
+    throw err;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/cc/activities/{id}/duplicate — 复制活动（PRD §4.1「复制上一场活动」）
+// 仅复制配置类内容：基本信息、名额、报名窗口、报名表配置、活动问卷与题目物化行；
+// 重新生成活动代码（<源代码>_CP<n> 递增）、签到 token（onRecordCreate 模型钩子
+// 强制生成）与每份问卷的 qr_token；现场编号/配对字段由 pairings.pb.js 模型钩子
+// 重置（计数器归 1、pairing/lock 字段清空）；新活动恒为 draft，问卷恒重置为 draft。
+// 不复制历史报名、签到、配对、答卷与审计记录（只新建 activities/activity_surveys/
+// survey_questions 行，业务记录天然不随复制产生）。写 activity.duplicate 审计。
+// ---------------------------------------------------------------------------
+routerAdd('POST', '/api/cc/activities/{id}/duplicate', (e) => {
+  try {
+  const ccIsNoRows = (err) => !!err && typeof err.message === 'string' && err.message.indexOf('no rows') >= 0;
+  const ccById = (app, collection, id) => {
+    try { return app.findRecordById(collection, id); } catch (err) { if (ccIsNoRows(err)) return null; throw err; }
+  };
+  // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
+  // （new ApiError 的第三参数会被当作字段错误映射转换，无法携带自定义 data，0.28.4 实测）
+  const ccError = (status, code, message) => { throw { __ccError: true, status: status, code: code, message: message }; };
+  // 身份守卫（与 lib/http.pb.js 同源）；admin 同时校验账号与所属机构 status（FR-ORG-001）
+  const requireAuth = (e, role) => {
+    const auth = e.auth;
+    if (!auth) ccError(401, 'UNAUTHORIZED', '请先登录');
+    const collectionName = auth.collection().name;
+    if (role === 'participant') {
+      if (collectionName !== 'participant_accounts') ccError(403, 'FORBIDDEN', '无权限：需要参与者身份');
+      if (auth.get('status') !== 'active') ccError(403, 'ACCOUNT_DISABLED', '账号已停用');
+      return auth;
+    }
+    if (role === 'admin') {
+      if (collectionName !== 'admin_accounts') ccError(403, 'FORBIDDEN', '无权限：需要机构管理员身份');
+      if (auth.get('status') !== 'active') ccError(403, 'ACCOUNT_DISABLED', '账号已停用');
+      const org = ccById(e.app, 'organizations', auth.get('organization_id'));
+      if (!org || org.get('status') !== 'active') ccError(403, 'ORG_DISABLED', '所属机构已停用');
+      return auth;
+    }
+    if (role === 'super') {
+      if (collectionName !== '_superusers') ccError(403, 'FORBIDDEN', '无权限：需要超级管理员身份');
+      return auth;
+    }
+    ccError(500, 'INVALID_ROLE', '内部错误：未知的身份角色要求');
+  };
+  // 写一条审计日志（与 lib/audit.pb.js 同源；事务内传 txApp，同事务提交）
+  const writeAudit = (app, entry) => {
+    const collection = app.findCollectionByNameOrId('audit_logs');
+    const record = new Record(collection);
+    record.set('actor_id', entry.actorId);
+    record.set('actor_role', entry.actorRole);
+    record.set('organization_id', entry.organizationId || '');
+    record.set('action', entry.action);
+    record.set('target_type', entry.targetType);
+    record.set('target_id', entry.targetId);
+    record.set('result', entry.result);
+    record.set('reason', entry.reason || '');
+    record.set('metadata', entry.metadata || null);
+    app.save(record);
+    return record;
+  };
+  // json 字段读取解码（0.28.4 实测 JSVM 返回原始 JSON 字节数组，与 surveys.pb.js 同实现）
+  const decodeJson = (v) => {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'string') {
+      try { return JSON.parse(v); } catch (_) { return v; }
+    }
+    if (Array.isArray(v) && (v.length === 0 || typeof v[0] === 'number')) {
+      let s = '';
+      let i = 0;
+      while (i < v.length) {
+        const b = v[i];
+        if (b < 0x80) {
+          s += String.fromCharCode(b);
+          i += 1;
+        } else if (b < 0xe0) {
+          s += String.fromCharCode(((b & 0x1f) << 6) | (v[i + 1] & 0x3f));
+          i += 2;
+        } else if (b < 0xf0) {
+          s += String.fromCharCode(((b & 0x0f) << 12) | ((v[i + 1] & 0x3f) << 6) | (v[i + 2] & 0x3f));
+          i += 3;
+        } else {
+          let cp = ((b & 0x07) << 18) | ((v[i + 1] & 0x3f) << 12) | ((v[i + 2] & 0x3f) << 6) | (v[i + 3] & 0x3f);
+          cp -= 0x10000;
+          s += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff));
+          i += 4;
+        }
+      }
+      try { return JSON.parse(s); } catch (_) { return v; }
+    }
+    return v;
+  };
+  // 生成全局唯一代码：base + 递增序号（同 surveys.pb.js survey_code 分配模式）
+  const allocUniqueCode = (app, collection, field, base) => {
+    for (let i = 1; i < 100; i++) {
+      const candidate = base + i;
+      try {
+        app.findFirstRecordByFilter(collection, field + ' = {:c}', { c: candidate });
+      } catch (err) {
+        if (ccIsNoRows(err)) return candidate;
+        throw err;
+      }
+    }
+    ccError(500, 'INTERNAL_ERROR', '无法分配唯一代码');
+  };
+
+  const admin = requireAuth(e, 'admin');
+  const orgId = admin.get('organization_id');
+  const source = ccById($app, 'activities', e.request.pathValue('id'));
+  if (!source || source.get('organization_id') !== orgId) {
+    ccError(404, 'ACTIVITY_NOT_FOUND', '活动不存在');
+  }
+
+  let created = null;
+  let surveyCount = 0;
+  $app.runInTransaction((txApp) => {
+    const fresh = txApp.findRecordById('activities', source.id);
+    const activityCode = allocUniqueCode(txApp, 'activities', 'activity_code', fresh.get('activity_code') + '_CP');
+
+    const copy = new Record(txApp.findCollectionByNameOrId('activities'));
+    copy.set('organization_id', fresh.get('organization_id'));
+    copy.set('title', String(fresh.get('title') || '') + '（副本）');
+    copy.set('activity_code', activityCode);
+    copy.set('description', fresh.get('description') || '');
+    copy.set('location', fresh.get('location') || '');
+    copy.set('start_time', String(fresh.get('start_time') || ''));
+    copy.set('end_time', String(fresh.get('end_time') || ''));
+    copy.set('status', 'draft');
+    copy.set('capacity_total', Number(fresh.get('capacity_total')));
+    copy.set('capacity_speaker', Number(fresh.get('capacity_speaker')));
+    copy.set('capacity_listener', Number(fresh.get('capacity_listener')));
+    copy.set('registration_open', !!fresh.get('registration_open'));
+    copy.set('registration_start_at', String(fresh.get('registration_start_at') || ''));
+    copy.set('registration_end_at', String(fresh.get('registration_end_at') || ''));
+    copy.set('group_tag', fresh.get('group_tag') || '');
+    copy.set('form_config_json', decodeJson(fresh.get('form_config_json')) || null);
+    // checkin_qr_token 由 onRecordCreate 模型钩子强制生成（客户端/调用方传入一律忽略）
+    txApp.save(copy);
+
+    // 复制活动问卷与题目物化行（问卷状态重置 draft、入口 token 重新生成）；
+    // 复制的是源问卷当前题目行而非模板重取，保留机构对自定义题的编辑。
+    const surveys = txApp.findRecordsByFilter(
+      'activity_surveys', 'activity_id = {:a}', 'created', 500, 0, { a: fresh.id },
+    );
+    const surveysCol = txApp.findCollectionByNameOrId('activity_surveys');
+    const questionsCol = txApp.findCollectionByNameOrId('survey_questions');
+    for (const srcSurvey of surveys) {
+      const surveyCode = allocUniqueCode(txApp, 'activity_surveys', 'survey_code', activityCode + '_S');
+      const surveyCopy = new Record(surveysCol);
+      surveyCopy.set('activity_id', copy.id);
+      surveyCopy.set('template_version_id', srcSurvey.get('template_version_id'));
+      surveyCopy.set('survey_code', surveyCode);
+      surveyCopy.set('title', srcSurvey.get('title'));
+      surveyCopy.set('role_scope', srcSurvey.get('role_scope') || 'both');
+      surveyCopy.set('status', 'draft');
+      surveyCopy.set('qr_token', $security.randomString(24));
+      txApp.save(surveyCopy);
+      surveyCount += 1;
+
+      const questions = txApp.findRecordsByFilter(
+        'survey_questions', 'activity_survey_id = {:s}', 'order_index', 500, 0, { s: srcSurvey.id },
+      );
+      for (const srcQ of questions) {
+        const q = new Record(questionsCol);
+        q.set('activity_survey_id', surveyCopy.id);
+        q.set('question_code', srcQ.get('question_code'));
+        q.set('source_type', srcQ.get('source_type'));
+        q.set('question_type', srcQ.get('question_type'));
+        q.set('title', srcQ.get('title'));
+        q.set('required', !!srcQ.get('required'));
+        q.set('options_json', decodeJson(srcQ.get('options_json')) || null);
+        q.set('locked', !!srcQ.get('locked'));
+        q.set('is_sensitive', !!srcQ.get('is_sensitive'));
+        // PB 实测 required number 字段把 0 视为空值拒绝；存量均 ≥1（surveys.pb.js +1 存储）
+        q.set('order_index', Number(srcQ.get('order_index')) || 1);
+        q.set('validation_json', decodeJson(srcQ.get('validation_json')) || null);
+        txApp.save(q);
+      }
+    }
+
+    writeAudit(txApp, {
+      actorId: admin.id, actorRole: 'admin', organizationId: orgId,
+      action: 'activity.duplicate', targetType: 'activity', targetId: copy.id,
+      result: 'success',
+      metadata: {
+        source_activity_id: fresh.id,
+        source_activity_code: fresh.get('activity_code'),
+        duplicated_surveys: surveyCount,
+      },
+    });
+    created = copy;
+  });
+
+  return e.json(200, {
+    contract_version: '2026-08-28.t0-v1',
+    activity: $app.findRecordById('activities', created.id),
+    duplicated_surveys: surveyCount,
+  });
   } catch (err) {
     // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）
     if (err && err.__ccError === true) {
