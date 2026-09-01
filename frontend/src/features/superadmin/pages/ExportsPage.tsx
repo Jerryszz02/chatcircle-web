@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { collectionsForRole } from '../../../shared/api/collections';
+import { readExportJobScope } from '../../../shared/api/exportJobScope';
 import { normalizeApiError } from '../../../shared/api/http';
 import type {
   ActivityRecord,
@@ -26,9 +27,9 @@ const PER_PAGE = 20;
 /** 活动下拉选项上限：全平台活动可能很多，只取最近创建的若干条（超出时给提示）。 */
 const ACTIVITY_OPTION_LIMIT = 200;
 
-/** 导出范围的可读摘要（确认框与记录列表共用）。 */
+/** 导出范围的可读摘要（确认框与记录列表共用；入参用最小结构以兼容 v2 归一化视图）。 */
 function scopeSummary(
-  scope: ExportScope,
+  scope: Pick<ExportScope, 'type' | 'activity_id'>,
   orgName?: string,
   activityTitle?: string,
 ): string {
@@ -300,14 +301,17 @@ export function SuperExportsPage() {
                 </tr>
               </thead>
               <tbody>
-                {jobs.map((job) => (
+                {jobs.map((job) => {
+                  // T6 起 scope_json 为 StoredExportSelectionV2（scope 内嵌）；兼容旧扁平形状
+                  const jobScope = readExportJobScope(job.scope_json);
+                  return (
                   <tr key={job.id}>
                     <td>{formatDateTime(job.created)}</td>
                     <td className="sa-cell-wrap">
                       {scopeSummary(
-                        job.scope_json,
+                        jobScope,
                         job.expand?.organization_id?.name ?? orgNameOf(job.organization_id),
-                        activityTitleOf(job.scope_json.activity_id),
+                        activityTitleOf(jobScope.activity_id),
                       )}
                     </td>
                     <td>
@@ -340,14 +344,15 @@ export function SuperExportsPage() {
                           loading={downloadingId === job.id}
                           onClick={() => void onDownload(job)}
                         >
-                          下载 ZIP
+                          下载
                         </Button>
                       ) : (
                         <span className="sa-muted">—</span>
                       )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

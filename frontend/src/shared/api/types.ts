@@ -323,11 +323,27 @@ export interface ExportScope {
   date_range?: { from: string; to: string };
 }
 
+/**
+ * export_jobs.scope_json 的读取形状（T6 起）：服务端统一存 StoredExportSelectionV2
+ * （schema_version=2，scope 内嵌；api-design §6.3）；历史任务可能是旧扁平 ExportScope。
+ * 读取一律经 readExportJobScope（shared/api/exportJobScope.ts）兼容两种形状。
+ */
+export type ExportJobScopeJson =
+  | ExportScope
+  | {
+      schema_version: number;
+      source_schema_version?: 1 | 2;
+      scope: ExportScope;
+      format?: 'xlsx' | 'csv_zip';
+      datasets?: string[];
+      [key: string]: unknown;
+    };
+
 export interface ExportJobRecord extends BaseRecord {
   /** 导出主机构；超级管理员全平台导出时为 null。 */
   organization_id?: string;
-  scope_json: ExportScope;
-  /** 是否敏感导出；true 需机构开关 + 二次确认 + 审计（FR-EXP-003、AC-17）。 */
+  scope_json: ExportJobScopeJson;
+  /** 是否敏感导出（T6 起由服务端判敏派生）；true 需机构开关 + 二次确认 + 审计（FR-EXP-003、AC-17）。 */
   include_pii: boolean;
   /** ZIP 存放路径（受保护目录，仅鉴权后下载，FR-EXP-005）。 */
   file_path: string;
