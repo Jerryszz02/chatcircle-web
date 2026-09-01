@@ -286,6 +286,8 @@ routerAdd('POST', '/api/cc/exports/preview', (e) => {
     const reasons = [];
     const unknown = [];
     const fieldDefByCode = {};
+    // 每个 field_code 的全部 scoped definition id（机构覆盖标准同码/超管跨机构时不止一个；取值反查遍实用）
+    const fieldDefIdsByCode = {};
     const questionByKey = {};
     const pushReason = (source, code) => {
       for (let i = 0; i < reasons.length; i++) {
@@ -306,7 +308,9 @@ routerAdd('POST', '/api/cc/exports/preview', (e) => {
         0,
         { c: code },
       );
+      fieldDefIdsByCode[code] = [];
       found.forEach((d) => {
+        fieldDefIdsByCode[code].push(d.id);
         if (d.get('organization_id') !== '') def = d;
       });
       if (!def && found.length > 0) def = found[0];
@@ -346,7 +350,7 @@ routerAdd('POST', '/api/cc/exports/preview', (e) => {
         if (q.get('is_sensitive')) pushReason('survey_question', qc);
       });
     });
-    return { requiresSensitive: reasons.length > 0, reasons, unknown, fieldDefByCode, questionByKey };
+    return { requiresSensitive: reasons.length > 0, reasons, unknown, fieldDefByCode, fieldDefIdsByCode, questionByKey };
   };
   const exportV2BuildUniverse = (selection, activities) => {
     const filters = selection.filters;

@@ -77,6 +77,32 @@ describe('ExportWizard 五步流转与校验', () => {
     expect(screen.queryByText(/预设模板/)).not.toBeInTheDocument();
   });
 
+  it('预设按钮：元数据加载完成前禁用（模板加载中占位），完成后恢复可点（review #3900982144）', async () => {
+    // defs/surveys/questions 三个列表都拿到才解锁；先让 questions 挂起以验证「未完成」态
+    let releaseQuestions: (v: unknown[]) => void;
+    const questionsGate = new Promise<unknown[]>((r) => (releaseQuestions = r));
+    vi.mocked(apiModule.adminCollections).mockReturnValue({
+      registrationFieldDefs: { getFullList: () => Promise.resolve([]) },
+      activitySurveys: { getFullList: () => Promise.resolve([]) },
+      surveyQuestions: { getFullList: () => questionsGate },
+    } as unknown as ReturnType<typeof apiModule.adminCollections>);
+
+    render(<ExportWizard org={org} activities={activities} onCreated={() => {}} />);
+    fireEvent.click(nextBtn()); // →2，触发元数据加载
+
+    expect(screen.getByText('模板加载中…')).toBeVisible();
+    const presetBtn = () => screen.getByRole('button', { name: '联系名单' });
+    expect(presetBtn()).toBeDisabled();
+
+    releaseQuestions!([]); // 加载完成
+    await waitFor(() => expect(presetBtn()).toBeEnabled());
+    expect(screen.queryByText('模板加载中…')).not.toBeInTheDocument();
+
+    fireEvent.click(presetBtn()); // 应用预设（空元数据下仅填系统列）→ 进入下一步应通过
+    fireEvent.click(nextBtn());
+    await screen.findByLabelText('指定参与者 ID');
+  }, 15_000);
+
   it('指定参与者含非法 ID 时第 3 步被拦截并列出坏值', async () => {
     renderWizard();
     fireEvent.click(nextBtn()); // →2

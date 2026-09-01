@@ -277,6 +277,8 @@ routerAdd('POST', '/api/cc/exports', (e) => {
     const reasons = [];
     const unknown = [];
     const fieldDefByCode = {};
+    // 每个 field_code 的全部 scoped definition id（机构覆盖标准同码/超管跨机构时不止一个；取值反查遍实用）
+    const fieldDefIdsByCode = {};
     const questionByKey = {};
     const pushReason = (source, code) => {
       for (let i = 0; i < reasons.length; i++) {
@@ -297,7 +299,9 @@ routerAdd('POST', '/api/cc/exports', (e) => {
         0,
         { c: code },
       );
+      fieldDefIdsByCode[code] = [];
       found.forEach((d) => {
+        fieldDefIdsByCode[code].push(d.id);
         if (d.get('organization_id') !== '') def = d;
       });
       if (!def && found.length > 0) def = found[0];
@@ -337,7 +341,7 @@ routerAdd('POST', '/api/cc/exports', (e) => {
         if (q.get('is_sensitive')) pushReason('survey_question', qc);
       });
     });
-    return { requiresSensitive: reasons.length > 0, reasons, unknown, fieldDefByCode, questionByKey };
+    return { requiresSensitive: reasons.length > 0, reasons, unknown, fieldDefByCode, fieldDefIdsByCode, questionByKey };
   };
   // v1→v2 归一化（api-design §6.3）：全数据域 + 范围内全部旧列 + csv_zip；
   // include_pii=false 只枚举非敏感字段/题目（与旧导出实际内容一致）
@@ -942,9 +946,12 @@ routerAdd('POST', '/api/cc/exports', (e) => {
       // 报名答案：仅取所选字段代码
       const regAnswerMap = {};
       if (selection.columns.registration_field_codes.length > 0 && universe.registrations.length > 0) {
+        // def id → field_code；同一代码在组织覆盖/平台多定义下会有多个 scoped 的 def，需全部收录
         const defIdToCode = {};
-        Object.keys(analysis.fieldDefByCode).forEach((code) => {
-          defIdToCode[analysis.fieldDefByCode[code].id] = code;
+        Object.keys(analysis.fieldDefIdsByCode).forEach((code) => {
+          analysis.fieldDefIdsByCode[code].forEach((id) => {
+            defIdToCode[id] = code;
+          });
         });
         const f = inFilter('registration_id', universe.registrations.map((r) => r.id));
         queryAll('registration_answers', f.filter, f.params, 'created').forEach((a) => {
@@ -1214,7 +1221,19 @@ routerAdd('POST', '/api/cc/exports', (e) => {
       let outExt;
       try {
         if (selection.format === 'xlsx') {
-          outBytes = buildXlsx(tables.map((t) => ({ name: t.name, rows: [t.headers].concat(t.rows) })));
+          // XLSX 单元格统一走 inlineStr：结构化值（多选/对象）JSON.stringify，口径与 CSV csvCell 一致；
+          // 数字若以文本进格避免 Excel 二次解析歧义（如年份/编号前导零）
+          const xlsxCells = (v) => {
+            if (v === null || v === undefined || v === '') return '';
+            if (typeof v === 'object') return JSON.stringify(v);
+            return String(v);
+          };
+          outBytes = buildXlsx(
+            tables.map((t) => ({
+              name: t.name,
+              rows: [t.headers].concat(t.rows).map((r) => r.map(xlsxCells)),
+            })),
+          );
           outExt = 'xlsx';
         } else {
           outBytes = buildZip(tables.map((t) => ({ name: t.name + '.csv', text: buildCsv(t.headers, t.rows) })));

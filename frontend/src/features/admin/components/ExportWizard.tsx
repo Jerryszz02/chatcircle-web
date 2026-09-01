@@ -56,6 +56,8 @@ export function ExportWizard({
   const [surveys, setSurveys] = useState<ActivitySurveyRecord[]>([]);
   const [questions, setQuestions] = useState<SurveyQuestionRecord[]>([]);
   const [metaLoading, setMetaLoading] = useState(false);
+  // useCallback 供 effect 的依赖引用（避免 exhaustive-deps 误判函数身份变化）
+  const clearMetaLoading = useCallback(() => setMetaLoading(false), []);
 
   const [preview, setPreview] = useState<ExportPreviewResponse | null>(null);
   const [previewKey, setPreviewKey] = useState('');
@@ -81,7 +83,15 @@ export function ExportWizard({
 
   // 进入第 2 步时按范围加载字段/问卷元数据（预设展开与字段步骤共用）
   useEffect(() => {
-    if (step < 2 || metaLoading) return;
+    if (step < 2) {
+      clearMetaLoading();
+      return undefined;
+    } else if (metaLoading && step >= 4) {
+      // 加载在途中离开第3步以下步骤后返回：deps([step,scopeKey])不变时effect不会重跑、
+      // 已cancel的请求也不会再解锁守护(metaLoading恒true)，须在此同步复位供下次进入重新加载。
+      clearMetaLoading();
+      return undefined;
+    }
     let cancelled = false;
     setMetaLoading(true);
     const cc = adminCollections();
@@ -297,10 +307,17 @@ export function ExportWizard({
         <>
           <span className="cc-label">预设模板（可选，自动填充数据域与字段）</span>
           <div className="admin-toolbar" style={{ flexWrap: 'wrap' }}>
+            {metaLoading ? (
+              <Button variant="secondary" disabled>
+                模板加载中…
+              </Button>
+            ) : null}
+            {/* preset 按钮依赖字段/题目元数据，加载完成前禁用（review #3900982144） */}
             {EXPORT_PRESETS.map((p) => (
               <Button
                 key={p.code}
                 variant={state.preset === p.code ? 'primary' : 'secondary'}
+                disabled={metaLoading}
                 onClick={() => handlePreset(p.code)}
                 title={p.description}
               >

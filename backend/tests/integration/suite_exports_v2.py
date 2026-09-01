@@ -372,8 +372,56 @@ def run(ctx):
         zf = zipfile.ZipFile(io.BytesIO(blob))
         rep.check('EXP2-39 v1 产物仍为 13 个 CSV', len(zf.namelist()) == 13, zf.namelist())
 
+    # ---------- review P1 回归：多个同码 def（机构覆盖标准）取值完整 ----------
+    # A 机构自定义字段与平台标准 nick2_code 同码且敏感关闭 → analyzeSelection 的 scoped def
+    # 集合含两条，答案反查须把「挂在标准 def 上的答案」也归位到该列
+    s, ov = call(base, 'POST', '/api/collections/registration_field_defs/records', {
+        'organization_id': org_a, 'field_code': 'nickname', 'field_type': 'text',
+        'label': '昵称（机构自定义同码）', 'source_type': 'custom', 'is_sensitive': False,
+        'required_default': False, 'status': 'active'}, AT_A)
+    assert s == 200, '创建机构同码 override 失败：%s' % ov
+    p3, pt3, _ = fx.create_participant(base, '%s_u3' % 'CC_IT_EXP2_A'.lower())
+    reg3 = fx.register(base, pt3, act_a, 'listener', [
+        {'field_def_id': fields['nickname'], 'value': '同码多def昵称'},  # 交在标准 def 上（旧口径漏取）
+        {'field_def_id': full_name_id, 'value': 'CC_IT_EXP2_A姓名3'}])
+    fx.transition(base, AT_A, reg3, 'approved')
+
+    sel_multi = _base_selection(act_a, columns={'registration_field_codes': ['nickname']})
+    s, r = call(base, 'POST', '/api/cc/exports', sel_multi, AT_A)
+    rep.check('EXP2-41 机构同码 override 下 v2 create 200', s == 200 and bool(r.get('export_job_id')), r)
+    if s == 200:
+        s, blob = call(base, 'GET', '/api/cc/exports/%s/download' % r['export_job_id'], token=AT_A, raw=True)
+        files = _unzip(blob)
+        sheet_names = _xlsx_sheet_names(files)
+        reg_xml = files['xl/worksheets/sheet%d.xml' % (sheet_names.index('registrations') + 1)].decode('utf-8')
+        rep.check('EXP2-41b 「多 def 同 code」两来源答案均归位该列（override 优先不丢值）',
+                  'CC_IT_EXP2_A昵称1' in reg_xml and '同码多def昵称' in reg_xml, None)
+
+    # standard def 上的 channel 多选：value_json 标准 JSON 数组 → xlsx 单元格须为 JSON 字符串
+    p3b, pt3b, _ = fx.create_participant(base, '%s_u4' % 'CC_IT_EXP2_A'.lower())
+    reg_c = fx.register(base, pt3b, act_a, 'speaker', [
+        {'field_def_id': fields['nickname'], 'value': '渠道昵称B'},
+        {'field_def_id': full_name_id, 'value': 'CC_IT_EXP2_A姓名4'},
+        {'field_def_id': fields['channel'], 'value': ['friend', 'poster']}])
+    fx.transition(base, AT_A, reg_c, 'approved')
+
+    sel_mc = _base_selection(act_a, columns={'registration_field_codes': ['nickname', 'channel']})
+    s, r = call(base, 'POST', '/api/cc/exports', sel_mc, AT_A)
+    rep.check('EXP2-42 multi_choice 列 v2 create 200', s == 200 and bool(r.get('export_job_id')), r)
+    if s == 200:
+        s, blob = call(base, 'GET', '/api/cc/exports/%s/download' % r['export_job_id'], token=AT_A, raw=True)
+        zf = zipfile.ZipFile(io.BytesIO(blob))
+        # registrations.csv（csv_zip 口径）用 data_dictionary 之外的成员判断不便，这里取 xlsx 断言：
+        files2 = _unzip(blob)
+        sheet_names2 = _xlsx_sheet_names(files2)
+        reg_xml2 = files2['xl/worksheets/sheet%d.xml' % (sheet_names2.index('registrations') + 1)].decode('utf-8')
+        # JSON 数组经 xmlSafe 后引号转义为 &quot;；断言「friend」与「poster」同格出现 → 原样字符串未拆列
+        rep.check('EXP2-42b multi_choice XLSX 单元格为标准 JSON 字符串（双选项完整、未展开为多列）',
+                  '"friend"' in reg_xml2.replace('&quot;', '"') and 'poster' in reg_xml2
+                  and reg_xml2.count('渠道昵称B') == 1, None)
+
     # 超管 platform v2
     s, r = call(base, 'POST', '/api/cc/exports/preview',
                 _base_selection(act_a, scope={'type': 'platform'}), st)
     rep.check('EXP2-40 超管 platform preview 200 且行数覆盖多机构',
-              s == 200 and (r.get('estimated_rows') or {}).get('registrations', 0) >= 4, r)
+              s == 200 and (r.get('estimated_rows') or {}).get('registrations', 0) >= 6, r)

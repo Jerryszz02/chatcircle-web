@@ -355,6 +355,7 @@ function exportV2ResolveScope(app, scope, role, authOrgId, queryAll, ccError) {
  *   reasons: Array<{source:'account_column'|'registration_field'|'survey_question', code:string}>,
  *   unknown: string[],
  *   fieldDefByCode: Object<string, object>,
+ *   fieldDefIdsByCode: Object<string, string[]>,
  *   questionByKey: Object<string, object>,
  * }}
  */
@@ -362,6 +363,8 @@ function exportV2AnalyzeSelection(app, selection, scopeOrgIds, scopeActivityIds)
   const reasons = [];
   const unknown = [];
   const fieldDefByCode = {};
+  // 每个 field_code 的全部 scoped definition id（机构覆盖标准同码/超管跨机构时不止一个；取值反查遍实用）
+  const fieldDefIdsByCode = {};
   const questionByKey = {};
   const pushReason = (source, code) => {
     for (let i = 0; i < reasons.length; i++) {
@@ -389,7 +392,9 @@ function exportV2AnalyzeSelection(app, selection, scopeOrgIds, scopeActivityIds)
       0,
       { c: code },
     );
+    fieldDefIdsByCode[code] = [];
     found.forEach((d) => {
+      fieldDefIdsByCode[code].push(d.id);
       if (d.get('organization_id') !== '') def = d; // 机构定义优先
     });
     if (!def && found.length > 0) def = found[0];
@@ -432,7 +437,14 @@ function exportV2AnalyzeSelection(app, selection, scopeOrgIds, scopeActivityIds)
     });
   });
 
-  return { requiresSensitive: reasons.length > 0, reasons, unknown, fieldDefByCode, questionByKey };
+  return {
+    requiresSensitive: reasons.length > 0,
+    reasons,
+    unknown,
+    fieldDefByCode,
+    fieldDefIdsByCode,
+    questionByKey,
+  };
 }
 
 /** 机构 id 列表 → "organization_id = '...' || ..." 过滤片段（id 白名单校验；空列表恒假）。 */
