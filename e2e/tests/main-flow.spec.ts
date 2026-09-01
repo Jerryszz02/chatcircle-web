@@ -13,11 +13,9 @@ const state = readState();
 const { webUrl, fixture } = state;
 const VIEWPORT = { width: 360, height: 740 };
 
-/** 导出 ZIP 应有的 13 个 CSV（PRD §10.1，与 exports.pb.js 注释一致）。 */
+/** 导出 ZIP 应有的 v2 CSV（细粒度导出；registrations.csv 等系统/报名字段已拆为列）。 */
 const EXPECTED_CSVS = [
-  'organizations.csv', 'activities.csv', 'participants.csv', 'registrations.csv',
-  'registration_answers.csv', 'checkins.csv', 'survey_templates.csv', 'surveys.csv',
-  'submissions.csv', 'answers.csv', 'custom_fields.csv', 'data_dictionary.csv', 'manifest.csv',
+  'registrations.csv', 'checkins.csv', 'pairings.csv', 'data_dictionary.csv', 'manifest.csv',
 ];
 
 /** 以独立浏览器上下文打开管理端页面（三类会话 storage key 隔离，双角色互不干扰）。 */
@@ -144,14 +142,29 @@ test.describe.serial('V1 主链路', () => {
       await expect(page.getByText('已通过').first()).toBeVisible();
     });
 
-    // ---------- 10. 管理员普通导出并下载 ZIP；校验内容（AC-16） ----------
-    await test.step('管理员导出 ZIP 并校验内容', async () => {
+    // ---------- 10. 管理员细粒度导出：五步向导 → 生成 CSV ZIP 并校验内容（AC-16） ----------
+    await test.step('管理员经向导导出 CSV ZIP 并校验内容', async () => {
       await adminPage.goto(`${webUrl}/admin/exports`);
+      // 第 1 步（范围）：默认机构全部 → 下一步
+      await adminPage.getByRole('button', { name: '下一步' }).click();
+      // 第 2 步（数据域）：元数据加载期间预设按钮 disabled，待其 enabled 即代表元数据就绪
+      const fullPreset = adminPage.getByRole('button', { name: '活动完整复盘' });
+      await expect(fullPreset).toBeEnabled();
+      await fullPreset.click();
+      await adminPage.getByRole('button', { name: '下一步' }).click();
+      // 第 3 步（行筛选）：默认 → 下一步
+      await adminPage.getByRole('button', { name: '下一步' }).click();
+      // 第 4 步（字段）：预设已填 → 下一步
+      await adminPage.getByRole('button', { name: '下一步' }).click();
+      // 第 5 步（格式）：切到 CSV ZIP → 生成预览 → 创建
+      await adminPage.getByRole('radio', { name: /规范化 CSV ZIP/ }).check();
+      await adminPage.getByRole('button', { name: '生成预览' }).click();
+      await expect(adminPage.getByRole('button', { name: '创建导出任务' })).toBeEnabled();
       await adminPage.getByRole('button', { name: '创建导出任务' }).click();
       await expect(adminPage.getByText('已完成').first()).toBeVisible();
 
       const downloadPromise = adminPage.waitForEvent('download');
-      await adminPage.getByRole('button', { name: '下载 ZIP' }).first().click();
+      await adminPage.getByRole('button', { name: '下载' }).first().click();
       const download = await downloadPromise;
       const zipPath = await download.path();
       expect(zipPath).toBeTruthy();
@@ -159,26 +172,28 @@ test.describe.serial('V1 主链路', () => {
       const zip = new AdmZip(zipPath!);
       const csvOf = (name: string) => zip.readAsText(name);
       const names = zip.getEntries().map((e) => e.entryName).sort();
-      expect(names).toEqual([...EXPECTED_CSVS].sort());
+      const surveyCsv = names.find((n) => n.startsWith('survey_'));
+      expect(surveyCsv).toBeTruthy();
+      expect(names).toEqual([...EXPECTED_CSVS, surveyCsv!].sort());
       // CSV 规范：UTF-8 BOM（PRD §10.3）
       expect(csvOf('registrations.csv').startsWith('﻿')).toBe(true);
 
-      // 包含本次链路的报名 / 签到 / 答卷记录
+      // 包含本次链路的报名 / 签到 / 答卷记录（v2 已把报名字段拆为 registrations 列）
       expect(csvOf('registrations.csv')).toContain(fixture.activityId);
       expect(csvOf('registrations.csv')).toContain('approved');
+      expect(csvOf('registrations.csv')).toContain(A.nickname);
       expect(csvOf('checkins.csv')).toContain('valid');
-      expect(csvOf('submissions.csv')).toContain('submitted');
-      expect(csvOf('answers.csv')).toContain('SAT');
-      expect(csvOf('answers.csv')).toContain(A.sat);
-      expect(csvOf('answers.csv')).toContain(A.note);
-      expect(csvOf('registration_answers.csv')).toContain(A.nickname);
+      expect(csvOf(surveyCsv!)).toContain('submitted');
+      expect(csvOf(surveyCsv!)).toContain('SAT');
+      expect(csvOf(surveyCsv!)).toContain(A.sat);
+      expect(csvOf(surveyCsv!)).toContain(A.note);
 
       // 敏感过滤（FR-EXP-002）：敏感题 MOOD、敏感报名字段与普通导出用户名均不出现
-      expect(csvOf('answers.csv')).not.toContain('MOOD');
-      expect(csvOf('registration_answers.csv')).not.toContain('wechat_id');
-      expect(csvOf('registration_answers.csv')).not.toContain(A.wechat);
-      expect(csvOf('participants.csv')).not.toContain(fixture.participantUsername);
-      expect(csvOf('participants.csv').split('\r\n')[0]).not.toContain('username');
+      expect(csvOf(surveyCsv!)).not.toContain('MOOD');
+      expect(csvOf('registrations.csv')).not.toContain('wechat_id');
+      expect(csvOf('registrations.csv')).not.toContain(A.wechat);
+      expect(csvOf('registrations.csv')).not.toContain(fixture.participantUsername);
+      expect(csvOf('manifest.csv')).toContain('csv_zip');
     });
   });
 });
