@@ -1,18 +1,17 @@
 name: Deploy
 
-# main 分支有推送（含 PR 合并）时自动部署到阿里云 ECS：
-# SSH 登录服务器 → /opt/chatcircle 拉取 main → docker compose 重建
-# （镜像重建，pb_data/backups 卷不动，迁移由 PocketBase 启动时自动应用，
-#   与 deploy/README.md §2 的手动升级命令一致）。
+# main 分支有推送（含 PR 合并）时自动部署到阿里云 ECS。
+# 部署分两阶段：先在临时 worktree 中用生产 .env/override 校验目标版本并构建，
+# 只有预检成功才更新 /opt/chatcircle 的 main 并重建运行中的服务。
+# 这样缺失生产环境变量或 Docker 构建失败时，不会先改动生产工作区。
 #
 # 所需 Secrets（Settings → Secrets and variables → Actions）：
-#   ECS_SSH_PRIVATE_KEY  部署专用私钥（对应公钥已加入服务器 authorized_keys，
-#                        comment 为 github-actions-deploy-chatcircle）
+#   ECS_SSH_PRIVATE_KEY  部署专用私钥（对应公钥已加入服务器 authorized_keys）
 #   ECS_HOST             服务器地址
 #   ECS_USER             登录用户
 #
-# 注意：服务器上的 docker-compose.override.yml（过渡期明文 HTTP 挂 8443、
-# 跳过 caddy）不在仓库内，重建时不受影响；切 HTTPS 时按 deploy/README.md §5 处理。
+# 生产应用 secrets 仍只保存在 ECS /opt/chatcircle/.env，不写入仓库或 Actions 日志。
+# 服务器上的 docker-compose.override.yml（如仍存在）会被复制到临时 worktree 一并预检。
 
 on:
   push:
@@ -26,7 +25,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: 同步到阿里云 ECS 并重建
+    name: 预检并部署到阿里云 ECS
     runs-on: ubuntu-latest
     steps:
       - name: 配置 SSH
@@ -38,17 +37,105 @@ jobs:
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$ECS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-      - name: 服务器拉取 main 并重建
+
+      - name: 预检目标版本并构建
         env:
           ECS_HOST: ${{ secrets.ECS_HOST }}
           ECS_USER: ${{ secrets.ECS_USER }}
         run: |
-          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$ECS_USER@$ECS_HOST" '
-            set -e
-            cd /opt/chatcircle
-            git fetch origin
-            git checkout main
-            git merge --ff-only origin/main
-            docker compose up --build -d
-            docker compose ps
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$ECS_USER@$ECS_HOST" 'bash -se' <<'REMOTE'
+          set -Eeuo pipefail
+          cd /opt/chatcircle
+
+          git fetch --prune origin main
+          target_sha="$(git rev-parse origin/main)"
+          project_name="$(basename "$PWD")"
+          preflight_project="${project_name}-preflight"
+          candidate_dir="$(mktemp -d /tmp/chatcircle-deploy.XXXXXX)"
+          # git worktree add 要求目标路径尚不存在；mktemp 这里只负责安全地产生唯一名称。
+          rmdir "$candidate_dir"
+
+          cleanup() {
+            cd /opt/chatcircle || true
+            if [ -d "$candidate_dir" ]; then
+              docker compose --project-name "$preflight_project" -f "$candidate_dir/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1 || true
+            fi
+            git worktree remove --force "$candidate_dir" >/dev/null 2>&1 || rm -rf "$candidate_dir"
+          }
+          trap cleanup EXIT
+
+          echo "Preflight target: $target_sha"
+          git worktree add --detach "$candidate_dir" "$target_sha"
+
+          if [ ! -f .env ]; then
+            echo "ERROR: /opt/chatcircle/.env 不存在，拒绝部署" >&2
+            exit 1
+          fi
+          cp .env "$candidate_dir/.env"
+          chmod 600 "$candidate_dir/.env"
+
+          if [ -f docker-compose.override.yml ]; then
+            cp docker-compose.override.yml "$candidate_dir/docker-compose.override.yml"
+          fi
+
+          cd "$candidate_dir"
+
+          # Compose 在真正构建前完成所有 ${VAR:?message} 校验。
+          # 因此未来新增必需生产变量时，无需在 workflow 里维护变量名单。
+          echo "Validating Docker Compose configuration..."
+          docker compose config -q
+
+          # 用独立 project name 构建候选镜像，不触碰当前运行中的容器。
+          # 正式部署再次 build 时会复用 BuildKit 缓存。
+          echo "Building candidate images..."
+          docker compose --project-name "$preflight_project" build
+
+          # Compose 的 :? 只能验证非空；手机号 HMAC key 还有 >=32 字符的运行时约束。
+          # 在隔离 project 中验证，不挂生产端口、不启动依赖、也不接触生产 pb_data。
+          docker compose --project-name "$preflight_project" run --rm --no-deps --entrypoint sh app -eu -c '
+            if [ "${#CC_PHONE_HASH_KEY}" -lt 32 ]; then
+              echo "ERROR: CC_PHONE_HASH_KEY 必须至少 32 字符" >&2
+              exit 1
+            fi
           '
+          REMOTE
+
+      - name: 更新生产版本并健康检查
+        env:
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$ECS_USER@$ECS_HOST" 'bash -se' <<'REMOTE'
+          set -Eeuo pipefail
+          cd /opt/chatcircle
+
+          previous_sha="$(git rev-parse HEAD)"
+          target_sha="$(git rev-parse origin/main)"
+          echo "Deploying: $previous_sha -> $target_sha"
+
+          git checkout main
+          git merge --ff-only "$target_sha"
+
+          # 预检已经验证配置和构建；这里正常会命中构建缓存。
+          docker compose up --build -d
+
+          # app 自带 /api/health；最多等待约 90 秒。
+          healthy=0
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8090/api/health >/dev/null 2>&1; then
+              healthy=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$healthy" -ne 1 ]; then
+            echo "ERROR: 部署后 app 健康检查失败" >&2
+            docker compose ps || true
+            docker compose logs --tail=120 app || true
+            exit 1
+          fi
+
+          docker compose ps
+          echo "Deploy healthy: $target_sha"
+          REMOTE
