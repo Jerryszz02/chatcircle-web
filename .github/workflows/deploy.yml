@@ -50,10 +50,16 @@ jobs:
           git fetch --prune origin main
           target_sha="$(git rev-parse origin/main)"
           project_name="$(basename "$PWD")"
+          preflight_project="${project_name}-preflight"
           candidate_dir="$(mktemp -d /tmp/chatcircle-deploy.XXXXXX)"
+          # git worktree add 要求目标路径尚不存在；mktemp 这里只负责安全地产生唯一名称。
+          rmdir "$candidate_dir"
 
           cleanup() {
             cd /opt/chatcircle || true
+            if [ -d "$candidate_dir" ]; then
+              docker compose --project-name "$preflight_project" -f "$candidate_dir/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1 || true
+            fi
             git worktree remove --force "$candidate_dir" >/dev/null 2>&1 || rm -rf "$candidate_dir"
           }
           trap cleanup EXIT
@@ -82,7 +88,16 @@ jobs:
           # 用独立 project name 构建候选镜像，不触碰当前运行中的容器。
           # 正式部署再次 build 时会复用 BuildKit 缓存。
           echo "Building candidate images..."
-          docker compose --project-name "${project_name}-preflight" build
+          docker compose --project-name "$preflight_project" build
+
+          # Compose 的 :? 只能验证非空；手机号 HMAC key 还有 >=32 字符的运行时约束。
+          # 在隔离 project 中验证，不挂生产端口、不启动依赖、也不接触生产 pb_data。
+          docker compose --project-name "$preflight_project" run --rm --no-deps --entrypoint sh app -eu -c '
+            if [ "${#CC_PHONE_HASH_KEY}" -lt 32 ]; then
+              echo "ERROR: CC_PHONE_HASH_KEY 必须至少 32 字符" >&2
+              exit 1
+            fi
+          '
           REMOTE
 
       - name: 更新生产版本并健康检查
