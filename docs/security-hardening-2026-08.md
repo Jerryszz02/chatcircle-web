@@ -118,7 +118,7 @@
 | finding | 问题 | 修复 |
 | --- | --- | --- |
 | 1/3（CWE-601）| `/login` redirect 允许反斜杠绕过站内校验（`redirect=/\\evil.example` 被浏览器规范化为站外）| `frontend/src/features/participant/lib/redirect.ts` 的 `sanitizeRedirect`：拒绝反斜杠、控制字符/NUL，`new URL(raw, window.location.origin)` 解析后校验 origin 不变；补反斜杠/控制字符回归用例 |
-| 2/7（CWE-362）| 限流计数非原子（先 `store().get` 检查、业务后 `set` 写回），并发可突破阈值 | 计数迁至 `cc_rate_counters` 集合（迁移 `1787895600`），改为 DB 事务「检查即预占」（`$app.runInTransaction` + busy 重试 ≤2 次）；同源内联更新 lib/auth/authguard/phoneauth；`suite_auth` 新增并发回归（AUTH-18/19） |
+| 2/7（CWE-362）| 限流计数非原子（先 `store().get` 检查、业务后 `set` 写回），并发可突破阈值 | 计数迁至 `cc_rate_counters` 集合（迁移 `1787895600`），改为 DB 事务「检查即预占」（`$app.runInTransaction` + busy 重试 ≤2 次）；同源内联更新 lib/auth/authguard/phoneauth；`suite_auth` 新增并发回归（AUTH-18/19）；另按 review P2 增加**节流 GC 清理过期废弃键**（`updated` 早于 1h 的键，store 每 10 分钟至多扫一次，best-effort，防 DB 持久化后无限增长）|
 | 6（CWE-59）| MCP `upload_report` 词法白名单被符号链接绕过 | `mcp/server.js`：比较 `REPORT_DIR` 与目标的 realpath、逐组件拒绝符号链接（`lstatSync`），读取用 realpath 结果 |
 | 9（CWE-400）| MCP 上传在本地无大小上限即整块读入 | `mcp/server.js` 增加 `REPORT_MAX_BYTES`=20MB（与 `reports.maxSize` 对齐），`readFileSync` 前 `stat` 拒绝超限/空文件 |
 | 8（CWE-345）| 生产 compose 把 8090 发布到 host 回环，本地进程可直连伪造 XFF | `docker-compose.yml` 移除 `app` 端口映射（生产只在 Docker 私网供 Caddy/backup）；新增 `deploy/docker-compose.debug.yml`（显式 `-f` 启用时重新发布 127.0.0.1:8090，含风险警示）|
@@ -139,5 +139,5 @@
 
 ### 6.4 行为与运维变化警示（必读）
 
-- **生产 `app` 不再发布 host 端口**：`docker compose up -d` 后，服务器本机将不能再直连 `127.0.0.1:8090`。若部署沿用「SSH 隧道 + `CC_PB_URL=http://127.0.0.1:18090`」的 MCP 访问方式，需改用 `docker compose -f docker-compose.yml -f docker-compose.debug.yml up -d` 显式启用 debug override，或改用 Caddy HTTPS（`https://chatcircle.empact.cn:8443`）作为 `CC_PB_URL`。
+- **生产 `app` 不再发布 host 端口**：`docker compose up -d` 后，服务器本机将不能再直连 `127.0.0.1:8090`。若部署沿用「SSH 隧道 + `CC_PB_URL=http://127.0.0.1:18090`」的 MCP 访问方式，需改用 `docker compose -f docker-compose.yml -f deploy/docker-compose.debug.yml up -d` 显式启用 debug override，或改用 Caddy HTTPS（`https://chatcircle.empact.cn:8443`）作为 `CC_PB_URL`。
 - **限流计数表 `cc_rate_counters`**：新增内部集合（API rules 全 null，无对外读写），随迁移自动建/删；单实例 SQLite 部署即可，V1 不引入外部组件。

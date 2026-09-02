@@ -133,9 +133,28 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
       if (!Array.isArray(parsed)) return [];
       return parsed.filter((x) => typeof x === 'number');
     };
+    // epoch 秒 → PB 日期时间字符串（与库内 ccNow 同款）
+    const ccRateDt = (epochSec) => new Date(epochSec * 1000).toISOString().replace('T', ' ').slice(0, 23) + 'Z';
+    // 过期限流键垃圾回收（best-effort，P2：DB 持久化后防止废弃键无限增长）；store 节流，失败不影响主流程
+    const ccRateGc = () => {
+      try {
+        const GC_INTERVAL_SEC = 600;
+        const GC_TTL_SEC = 3600;
+        const now = Math.floor(Date.now() / 1000);
+        const last = Number($app.store().get('cc_rl_gc_last') || 0);
+        if (now - last < GC_INTERVAL_SEC) return;
+        const cutoff = ccRateDt(now - GC_TTL_SEC);
+        $app.runInTransaction((txApp) => {
+          const stale = txApp.findRecordsByFilter('cc_rate_counters', 'updated < {:t}', '', 500, 0, { t: cutoff });
+          for (const rec of stale) txApp.delete(rec);
+        });
+        $app.store().set('cc_rl_gc_last', String(now));
+      } catch (_) { /* best-effort */ }
+    };
     // 多键原子「检查即预占」（all-or-none）：任一键已超限则整体拒绝且一个都不预占；
     // 全部未超限则同时为各键预占一格（保持原「同请求须三轴同时通过才放行、任一超限即整体拒绝」语义）。
     const tryReserveMany = (keys) => {
+      ccRateGc(); // 节流 GC 废弃键（best-effort）
       const now = ccRateNow();
       let allowed = false;
       let attempts = 0;

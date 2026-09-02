@@ -59,7 +59,26 @@ onRecordAuthWithPasswordRequest((e) => {
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((x) => typeof x === 'number');
   };
+  // epoch 秒 → PB 日期时间字符串（与库内 ccNow 同款）
+  const ccRateDt = (epochSec) => new Date(epochSec * 1000).toISOString().replace('T', ' ').slice(0, 23) + 'Z';
+  // 过期限流键垃圾回收（best-effort，P2：DB 持久化后防止废弃键无限增长）；store 节流，失败不影响主流程
+  const ccRateGc = () => {
+    try {
+      const GC_INTERVAL_SEC = 600;
+      const GC_TTL_SEC = 3600;
+      const now = Math.floor(Date.now() / 1000);
+      const last = Number($app.store().get('cc_rl_gc_last') || 0);
+      if (now - last < GC_INTERVAL_SEC) return;
+      const cutoff = ccRateDt(now - GC_TTL_SEC);
+      $app.runInTransaction((txApp) => {
+        const stale = txApp.findRecordsByFilter('cc_rate_counters', 'updated < {:t}', '', 500, 0, { t: cutoff });
+        for (const rec of stale) txApp.delete(rec);
+      });
+      $app.store().set('cc_rl_gc_last', String(now));
+    } catch (_) { /* best-effort */ }
+  };
   const checkRateLimit = (key, max, windowSec) => {
+    ccRateGc(); // 节流 GC 废弃键（best-effort）
     const k = ccRlKey(key);
     const now = ccRateNow();
     let allowed = false;
