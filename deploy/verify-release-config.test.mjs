@@ -3,8 +3,25 @@ import test from 'node:test';
 
 import {
   hasActiveAdminConsoleBlock,
+  hasActiveConfigText,
   hasCandidateImagePreflightBuild,
-} from './verify-release-config.mjs';
+  hasLoopbackOnlyPocketBasePort,
+  hasPostDeployHealthCheck,
+  hasPreflightComposeValidation,
+  hasPreflightPhoneKeyValidation,
+} from './release-config-checks.mjs';
+
+const workflow = ({ preflight = '', deploy = '' } = {}) => `
+jobs:
+  deploy:
+    steps:
+      - name: 预检目标版本并构建
+        run: |
+${preflight}
+      - name: 更新生产版本并健康检查
+        run: |
+${deploy}
+`;
 
 test('accepts an active admin-console deny handler', () => {
   assert.equal(hasActiveAdminConsoleBlock(`
@@ -34,17 +51,59 @@ test('requires respond 403 inside the admin-console handler', () => {
   `), false);
 });
 
-test('accepts the active candidate-image preflight build command', () => {
-  assert.equal(hasCandidateImagePreflightBuild(`
-    docker compose config -q
-    docker compose --project-name "$preflight_project" build
-  `), true);
+test('requires active Caddy security directives', () => {
+  assert.equal(hasActiveConfigText('# Strict-Transport-Security disabled', 'Strict-Transport-Security'), false);
+  assert.equal(hasActiveConfigText('Strict-Transport-Security "max-age=31536000"', 'Strict-Transport-Security'), true);
 });
 
-test('rejects comments and the later production up --build command', () => {
-  assert.equal(hasCandidateImagePreflightBuild(`
-    # docker compose --project-name "$preflight_project" build
-    # Building candidate images...
-    docker compose up --build -d
+test('accepts only an active loopback PocketBase short port mapping', () => {
+  assert.equal(hasLoopbackOnlyPocketBasePort(`
+    ports:
+      - '127.0.0.1:8090:8090'
+  `), true);
+  assert.equal(hasLoopbackOnlyPocketBasePort(`
+    ports:
+      # - '127.0.0.1:8090:8090'
+      - 8090:8090
   `), false);
+  assert.equal(hasLoopbackOnlyPocketBasePort(`
+    ports:
+      - "0.0.0.0:8090:8090"
+  `), false);
+});
+
+test('accepts active deployment safeguards in their intended steps', () => {
+  const source = workflow({
+    preflight: `
+          docker compose config -q
+          docker compose --project-name "$preflight_project" build
+          if [ "\${#CC_PHONE_HASH_KEY}" -lt 32 ]; then`,
+    deploy: `
+          if curl -fsS http://127.0.0.1:8090/api/health >/dev/null 2>&1; then`,
+  });
+
+  assert.equal(hasPreflightComposeValidation(source), true);
+  assert.equal(hasCandidateImagePreflightBuild(source), true);
+  assert.equal(hasPreflightPhoneKeyValidation(source), true);
+  assert.equal(hasPostDeployHealthCheck(source), true);
+});
+
+test('rejects commented safeguards and commands in the wrong step', () => {
+  const source = workflow({
+    preflight: `
+          # docker compose config -q
+          # docker compose --project-name "$preflight_project" build
+          # if [ "\${#CC_PHONE_HASH_KEY}" -lt 32 ]; then
+          # if curl -fsS http://127.0.0.1:8090/api/health >/dev/null 2>&1; then`,
+    deploy: `
+          docker compose config -q
+          docker compose --project-name "$preflight_project" build
+          docker compose up --build -d
+          if [ "\${#CC_PHONE_HASH_KEY}" -lt 32 ]; then`,
+  });
+
+  assert.equal(hasPreflightComposeValidation(source), false);
+  assert.equal(hasCandidateImagePreflightBuild(source), false);
+  assert.equal(hasPreflightPhoneKeyValidation(source), false);
+  assert.equal(hasPostDeployHealthCheck(source), false);
 });
