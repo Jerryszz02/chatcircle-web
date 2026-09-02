@@ -126,7 +126,7 @@ Codex 使用相同的 `[mcp_servers.chatcircle]` 结构，用户级配置文件�
 | 环境 | `CC_PB_URL` | 说明 |
 | --- | --- | --- |
 | 本地开发 | `http://127.0.0.1:8090` | 本机 PocketBase |
-| 未备案生产（当前安全入口） | `http://127.0.0.1:18090` | 必须先建立下方 SSH 隧道，公网链路由 SSH 加密 |
+| 未备案生产（当前安全入口） | `http://127.0.0.1:18090` | 必须先建立下方 SSH 隧道，公网链路由 SSH 加密；**前提是服务器以 debug override 启动**（见下）|
 | 未备案生产（公网 TLS 启用后） | `https://chatcircle.empact.cn:8443` | 仅在 TLS 健康检查实际通过后使用 |
 | 备案且 HTTPS 切换完成后 | `https://chatcircle.empact.cn` | 长期生产入口；切换前先验证 `/api/cc/health` |
 
@@ -135,6 +135,16 @@ Codex 使用相同的 `[mcp_servers.chatcircle]` 结构，用户级配置文件�
 ```sh
 ssh -N -L 18090:127.0.0.1:8090 <服务器用户>@106.15.44.81
 ```
+
+> **生产默认不再发布服务器回环 8090**（2026-09 安全加固，见 `docker-compose.yml` 的 `app` 注释）：
+> 生产 `app` 只在 Docker 私网供 Caddy/backup 访问。以上 SSH 隧道指向 `127.0.0.1:8090`，因此服务器须以
+> debug override 启动才会接受直连：
+> ```sh
+> docker compose -f docker-compose.yml -f docker-compose.debug.yml up -d
+> ```
+> 该 override 重新发布 `127.0.0.1:8090:8090`，并再次暴露「本地进程可伪造 X-Forwarded-For」的风险
+> （`deploy/docker-compose.debug.yml` 文件头有警示），**仅限知悉下使用**；长期应改用上面的 Caddy HTTPS 入口
+> 作为 `CC_PB_URL`。
 
 保持隧道终端运行，并配置：
 
@@ -197,7 +207,8 @@ STDIO server 不兼容。不能简单地把 `server.js` 放到公网运行，因
 - **启动即退出并提示缺少账号**：检查 `CC_AGENT_EMAIL` / `CC_AGENT_PASSWORD` 是否注入到 MCP 子进程。
 - **客户端找不到 `node`**：把 `command` 改成 `command -v node` 返回的绝对路径。
 - **登录失败**：先在 `mcp/` 目录用同一组环境变量运行 `npm run selftest`，确认账号和 `CC_PB_URL`。
-- **上传报告被拒绝**：报告文件必须非空且位于 `CC_REPORT_DIR` 内；默认应把分析产物写进
+- **上传报告被拒绝**：报告文件必须非空、≤20MB 且位于 `CC_REPORT_DIR` 内（含 realpath 收敛：
+  目录外或符号链接解析到目录外的文件会被拒，2026-09 安全加固）；默认应把分析产物写进
   `CC_DATA_DIR`。
 - **把 IP 配成 HTTP MCP 后无法连接**：IP 是 PocketBase 后端地址，应放进 `CC_PB_URL`；客户端仍须
   以 STDIO 方式启动本地 `server.js`。
