@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { hasActiveAdminConsoleBlock } from './verify-release-config.mjs';
+import {
+  hasActiveAdminConsoleBlock,
+  hasCandidateImagePreflightBuild,
+} from './verify-release-config.mjs';
 
 test('accepts an active admin-console deny handler', () => {
   assert.equal(hasActiveAdminConsoleBlock(`
@@ -28,5 +31,20 @@ test('requires respond 403 inside the admin-console handler', () => {
     handle {
       respond 403
     }
+  `), false);
+});
+
+test('accepts the active candidate-image preflight build command', () => {
+  assert.equal(hasCandidateImagePreflightBuild(`
+    docker compose config -q
+    docker compose --project-name "$preflight_project" build
+  `), true);
+});
+
+test('rejects comments and the later production up --build command', () => {
+  assert.equal(hasCandidateImagePreflightBuild(`
+    # docker compose --project-name "$preflight_project" build
+    # Building candidate images...
+    docker compose up --build -d
   `), false);
 });

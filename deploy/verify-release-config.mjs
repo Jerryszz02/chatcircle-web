@@ -19,6 +19,11 @@ export function hasActiveAdminConsoleBlock(caddyfile) {
   return /\bhandle\s+\/_\/\*\s*\{[^{}]*\brespond\s+403(?:\s|$)[^{}]*\}/m.test(activeConfig);
 }
 
+export function hasCandidateImagePreflightBuild(workflow) {
+  const activeWorkflow = workflow.replace(/^\s*#.*$/gm, '');
+  return /^\s*docker compose --project-name "\$preflight_project" build\s*$/m.test(activeWorkflow);
+}
+
 const files = {
   compose: read('docker-compose.yml'),
   envExample: read('.env.example'),
@@ -88,12 +93,17 @@ check(
 
 for (const [name, expected] of [
   ['Compose 配置预检', 'docker compose config -q'],
-  ['候选镜像构建', 'build'],
   ['手机号 HMAC 密钥长度校验', '${#CC_PHONE_HASH_KEY}'],
   ['部署后健康检查', 'curl -fsS http://127.0.0.1:8090/api/health'],
 ]) {
   check(`部署 workflow ${name}`, files.deployWorkflow.includes(expected), `缺少 ${expected}`);
 }
+
+check(
+  '部署 workflow 候选镜像构建',
+  hasCandidateImagePreflightBuild(files.deployWorkflow),
+  '缺少活动的 docker compose --project-name "$preflight_project" build 预检命令',
+);
 
 check(
   '.env 被 Git 忽略',
