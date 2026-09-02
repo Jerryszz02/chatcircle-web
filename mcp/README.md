@@ -140,7 +140,7 @@ ssh -N -L 18090:127.0.0.1:8090 <服务器用户>@106.15.44.81
 > 生产 `app` 只在 Docker 私网供 Caddy/backup 访问。以上 SSH 隧道指向 `127.0.0.1:8090`，因此服务器须以
 > debug override 启动才会接受直连：
 > ```sh
-> docker compose -f docker-compose.yml -f docker-compose.debug.yml up -d
+> docker compose -f docker-compose.yml -f deploy/docker-compose.debug.yml up -d
 > ```
 > 该 override 重新发布 `127.0.0.1:8090:8090`，并再次暴露「本地进程可伪造 X-Forwarded-For」的风险
 > （`deploy/docker-compose.debug.yml` 文件头有警示），**仅限知悉下使用**；长期应改用上面的 Caddy HTTPS 入口
