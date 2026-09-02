@@ -69,6 +69,33 @@ def run(ctx):
     rep.check('AUTH-10 限流响应不携带账号信息（无 record/token 字段）',
               isinstance(r, dict) and 'record' not in r and 'token' not in r, r)
 
+    # ---------- 2b. 并发失败不可突破阈值（CWE-362 回归，原子「检查即预占」）----------
+    # 同一 username+IP 限流 max=5：并发打 max*2=10 次失败登录。原子「检查即预占」保证最多 5 次
+    # 进入认证并返回 400（预占 5 格后，其余被 429 拦截）；此前非原子 get/set 会允许并发放行、
+    # 计数相互覆盖而突破阈值。spray 桶只计失败、成功不计（成功回滚），此处失败均计入 spray，
+    # 预算充足（阈值 30/IP）。
+    fx.create_participant(base, 'rl_atomic_user')
+    n_atomic = 10
+    barrier2 = threading.Barrier(n_atomic + 1)
+
+    def fail_login(_uname):
+        barrier2.wait()
+        return call(base, 'POST', '/api/cc/auth/participant',
+                    {'username': 'rl_atomic_user', 'password': 'wrong_pass_999'})
+
+    with ThreadPoolExecutor(max_workers=n_atomic) as pool:
+        futs = [pool.submit(fail_login, 'rl_atomic_user') for _ in range(n_atomic)]
+        barrier2.wait()
+        res = [f.result() for f in futs]
+    codes_atomic = [x[0] for x in res]
+    rep.check('AUTH-18 并发 10 次失败登录：进入认证(400)次数不超过阈值 5，其余被 429 拦截',
+              codes_atomic.count(400) <= 5 and codes_atomic.count(429) >= n_atomic - 5,
+              sorted(codes_atomic))
+    ok_400 = all(biz_code(x[1]) == 'INVALID_CREDENTIALS' for x in res if x[0] == 400)
+    ok_429 = all(biz_code(x[1]) == 'TOO_MANY_ATTEMPTS' for x in res if x[0] == 429)
+    rep.check('AUTH-19 并发限流错误码保持统一语义（400 均 INVALID_CREDENTIALS/429 均 TOO_MANY_ATTEMPTS）',
+              ok_400 and ok_429 and set(codes_atomic) <= {400, 429}, res[:3])
+
     # ---------- 3. 邀请码（AC-02）----------
     org = fx.create_org(base, st, '邀请码机构')
 

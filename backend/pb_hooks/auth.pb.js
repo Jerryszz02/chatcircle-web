@@ -31,22 +31,86 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
   const ccOne = (app, collection, filter, params) => {
     try { return app.findFirstRecordByFilter(collection, filter, params || {}); } catch (err) { if (ccIsNoRows(err)) return null; throw err; }
   };
-  // 登录限流（与 lib/ratelimit.pb.js 同源）：状态存 $app.store()（Go 侧共享 KV，
-  // JSVM 请求间无 JS 内存可共享）；滑动窗口内失败达上限即临时拒绝
+  // 登录限流（与 lib/ratelimit.pb.js 原子版同源）：状态存 cc_rate_counters 集合，
+  // DB 事务「检查即预占」（安全审查 finding 2/7、CWE-362 修复）——$app.store() 无原子自增
+  // 原语，原「先 get 检查、业务后再 set 写回」的非原子计数可被并发请求突破阈值。
+  // 语义不变：滑动窗口内失败达上限即临时拒绝；响应不泄露账号是否存在。
   const ccRlKey = (key) => 'cc_rl|' + key;
+  const ccRateNow = () => Math.floor(Date.now() / 1000);
+  const ccRateIsBusy = (err) => !!err && /busy|locked|snapshot/i.test(String((err && err.message) || err));
+  const ccRateOne = (app, key) => {
+    try { return app.findFirstRecordByFilter('cc_rate_counters', 'key = {:k}', { k: key }); }
+    catch (err) { if (!!err && typeof err.message === 'string' && err.message.indexOf('no rows') >= 0) return null; throw err; }
+  };
+  // json 字段读取解码（PB 0.28 读 json 字段返回原始 JSON 字节数组/字符串，非 JS 数组）
+  const ccRateSlots = (rec) => {
+    const v = rec && rec.get('slots');
+    if (v === null || v === undefined || v === '') return [];
+    let parsed = null;
+    if (typeof v === 'string') { try { parsed = JSON.parse(v); } catch (_) { /* fallthrough */ } }
+    else if (Array.isArray(v)) {
+      const first = v[0];
+      if (typeof first === 'number' && first > 128) { parsed = v; } // 已是时间戳数组
+      else if (typeof first === 'number' && v.length === 0) { parsed = []; }
+      else if (typeof first === 'number') { // 原始 JSON 字节数组（0-255）还原为字符串再解析
+        let s = '';
+        for (const b of v) s += String.fromCharCode(b);
+        try { parsed = JSON.parse(s); } catch (_) { /* fallthrough */ }
+      }
+    }
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((x) => typeof x === 'number');
+  };
   const checkRateLimit = (key, max, windowSec) => {
-    const now = Math.floor(Date.now() / 1000);
-    const kept = ($app.store().get(ccRlKey(key)) || []).filter((ts) => ts > now - windowSec);
-    return kept.length < max;
-  };
-  const recordRateLimitFailure = (key, windowSec) => {
-    const now = Math.floor(Date.now() / 1000);
     const k = ccRlKey(key);
-    const kept = ($app.store().get(k) || []).filter((ts) => ts > now - windowSec);
-    kept.push(now);
-    $app.store().set(k, kept);
+    const now = ccRateNow();
+    let allowed = false;
+    let attempts = 0;
+    for (;;) {
+      try {
+        $app.runInTransaction((txApp) => {
+          const rec = ccRateOne(txApp, k);
+          const kept = ccRateSlots(rec).filter((ts) => ts > now - windowSec);
+          if (kept.length >= max) { allowed = false; return; }
+          kept.push(now);
+          if (!rec) {
+            const col = txApp.findCollectionByNameOrId('cc_rate_counters');
+            const created = new Record(col);
+            created.set('key', k);
+            created.set('slots', kept);
+            txApp.save(created);
+          } else {
+            rec.set('slots', kept);
+            txApp.save(rec);
+          }
+          allowed = true;
+        });
+        break;
+      } catch (err) {
+        if (ccRateIsBusy(err) && attempts < 2) { attempts++; continue; }
+        if (ccRateIsBusy(err)) { allowed = false; break; } // fail-closed：拒绝而非放行
+        throw err;
+      }
+    }
+    return allowed;
   };
-  const resetRateLimit = (key) => { $app.store().remove(ccRlKey(key)); };
+  const resetRateLimit = (key) => {
+    const k = ccRlKey(key);
+    $app.runInTransaction((txApp) => {
+      const rec = ccRateOne(txApp, k);
+      if (rec) txApp.delete(rec);
+    });
+  };
+  const releaseRateLimit = (key) => { // 回滚最近一次预占（「只计失败」语义，best-effort）
+    const k = ccRlKey(key);
+    $app.runInTransaction((txApp) => {
+      const rec = ccRateOne(txApp, k);
+      if (!rec) return;
+      const slots = ccRateSlots(rec);
+      slots.pop();
+      if (slots.length === 0) txApp.delete(rec); else { rec.set('slots', slots); txApp.save(rec); }
+    });
+  };
   // 用户名规则（FR-AUTH-005）：4–20 位字母/数字/下划线，存储统一小写（大小写不敏感唯一）
   const CC_USERNAME_RE = /^[a-z0-9_]{4,20}$/;
   // 登录限流常量（PRD 未给数值，technical-design 待确认 #1）：同一 username + IP 10 分钟窗口 5 次失败（AC-21）
@@ -74,7 +138,9 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
     ccError(400, 'INVALID_PASSWORD', '密码长度须为 ' + CC_PASSWORD_MIN + '–' + CC_PASSWORD_MAX + ' 位');
   }
 
-  // 限流：同一用户名 + 来源 IP 连续失败达阈值后临时拒绝；响应不泄露账号是否存在
+  // 限流（原子「检查即预占」）：同一用户名 + 来源 IP 连续失败达阈值后临时拒绝；
+  // 响应不泄露账号是否存在。rateKey 预占格在成功时清空（连续失败语义），
+  // sprayKey 预占格在成功时回滚（只计失败语义，避免共享出口正常用户互相误伤）。
   const rateKey = 'participant|' + username + '|' + e.realIP();
   // 喷洒限流：同一来源 IP 跨用户名累计失败（成功不清零，窗口滑出自动恢复）
   const sprayKey = 'participant_ip|' + e.realIP();
@@ -88,15 +154,16 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
   // T1 后用户名入口仅用于迁移已有账号。未知用户名与错误密码必须同形响应，
   // 且不能创建账号或签发 token，否则可绕过手机号验证直接进入参与者业务端点。
   if (!record || !record.validatePassword(password)) {
-    recordRateLimitFailure(rateKey, CC_LOGIN_WINDOW_SEC);
-    recordRateLimitFailure(sprayKey, CC_SPRAY_WINDOW_SEC);
+    // 失败：rateKey / sprayKey 的预占格在 checkRateLimit 时已计入窗口，无需再 record
     ccError(400, 'INVALID_CREDENTIALS', '用户名或密码错误');
   }
   if (record.get('status') !== 'active') {
     ccError(403, 'ACCOUNT_DISABLED', '账号已停用');
   }
 
+  // 成功：rateKey（连续失败）清空；sprayKey（只计失败）回滚本次预占
   resetRateLimit(rateKey);
+  releaseRateLimit(sprayKey);
   return e.json(200, { token: record.newAuthToken(), record: record, created: false });
   } catch (err) {
     // 统一错误响应：{ code: <http status>, message, data: { code } }（同 lib/http.pb.js jsonError 形态）

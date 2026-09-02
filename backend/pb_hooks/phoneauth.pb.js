@@ -104,18 +104,76 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
     const phoneHash = (phone) => $security.hs256(phone.e164, phoneHashKey());
     const phoneMask = (phone) => '+86 ' + phone.local.slice(0, 3) + '****' + phone.local.slice(7);
 
+    // 验证码请求限流（与 lib/ratelimit.pb.js 原子版同源）：状态存 cc_rate_counters 集合，
+    // DB 事务「检查即预占」（安全审查 finding 2/7、CWE-362 修复）——$app.store() 无原子自增
+    // 原语，原「先 get 检查、业务后再 set 写回」的非原子计数可被并发请求突破阈值。
     const ccRlKey = (key) => 'cc_phone_rl|' + key;
-    const rateAllowed = (key, max, windowSec) => {
-      const now = Math.floor(Date.now() / 1000);
-      const kept = ($app.store().get(ccRlKey(key)) || []).filter((ts) => ts > now - windowSec);
-      return kept.length < max;
+    const ccRateNow = () => Math.floor(Date.now() / 1000);
+    const ccRateIsBusy = (err) => !!err && /busy|locked|snapshot/i.test(String((err && err.message) || err));
+    const ccRateOne = (app, key) => {
+      try { return app.findFirstRecordByFilter('cc_rate_counters', 'key = {:k}', { k: key }); }
+      catch (err) { if (!!err && typeof err.message === 'string' && err.message.indexOf('no rows') >= 0) return null; throw err; }
     };
-    const recordRate = (key, windowSec) => {
-      const now = Math.floor(Date.now() / 1000);
-      const storageKey = ccRlKey(key);
-      const kept = ($app.store().get(storageKey) || []).filter((ts) => ts > now - windowSec);
-      kept.push(now);
-      $app.store().set(storageKey, kept);
+    // json 字段读取解码（PB 0.28 读 json 字段返回原始 JSON 字节数组/字符串，非 JS 数组）
+    const ccRateSlots = (rec) => {
+      const v = rec && rec.get('slots');
+      if (v === null || v === undefined || v === '') return [];
+      let parsed = null;
+      if (typeof v === 'string') { try { parsed = JSON.parse(v); } catch (_) { /* fallthrough */ } }
+      else if (Array.isArray(v)) {
+        const first = v[0];
+        if (typeof first === 'number' && first > 128) { parsed = v; } // 已是时间戳数组
+        else if (typeof first === 'number' && v.length === 0) { parsed = []; }
+        else if (typeof first === 'number') { // 原始 JSON 字节数组（0-255）还原为字符串再解析
+          let s = '';
+          for (const b of v) s += String.fromCharCode(b);
+          try { parsed = JSON.parse(s); } catch (_) { /* fallthrough */ }
+        }
+      }
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((x) => typeof x === 'number');
+    };
+    // 多键原子「检查即预占」（all-or-none）：任一键已超限则整体拒绝且一个都不预占；
+    // 全部未超限则同时为各键预占一格（保持原「同请求须三轴同时通过才放行、任一超限即整体拒绝」语义）。
+    const tryReserveMany = (keys) => {
+      const now = ccRateNow();
+      let allowed = false;
+      let attempts = 0;
+      for (;;) {
+        try {
+          $app.runInTransaction((txApp) => {
+            const rows = keys.map(({ key }) => ccRateOne(txApp, ccRlKey(key)));
+            // rows 与 keys 按索引对齐：逐键应用各自 window 过滤
+            const keptAll = rows.map((rec, i) =>
+              ccRateSlots(rec).filter((ts) => ts > now - keys[i].window),
+            );
+            for (let i = 0; i < keys.length; i++) {
+              if (keptAll[i].length >= keys[i].max) { allowed = false; return; }
+            }
+            for (let i = 0; i < keys.length; i++) {
+              const col = txApp.findCollectionByNameOrId('cc_rate_counters');
+              const slots = keptAll[i];
+              slots.push(now);
+              if (rows[i]) {
+                rows[i].set('slots', slots);
+                txApp.save(rows[i]);
+              } else {
+                const created = new Record(col);
+                created.set('key', ccRlKey(keys[i].key));
+                created.set('slots', slots);
+                txApp.save(created);
+              }
+            }
+            allowed = true;
+          });
+          break;
+        } catch (err) {
+          if (ccRateIsBusy(err) && attempts < 2) { attempts++; continue; }
+          if (ccRateIsBusy(err)) { allowed = false; break; } // fail-closed：拒绝而非放行
+          throw err;
+        }
+      }
+      return allowed;
     };
     const enforceRequestRate = (hash) => {
       const ipHash = $security.sha256(String(e.realIP() || 'unknown'));
@@ -123,19 +181,15 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
       const device = /^[A-Za-z0-9._-]{8,128}$/.test(rawDevice)
         ? $security.sha256(rawDevice)
         : ipHash;
-      const phoneKey = 'phone|' + hash;
-      const ipKey = 'ip|' + ipHash;
-      const deviceKey = 'device|' + device;
-      if (
-        !rateAllowed(phoneKey, PHONE_MAX, PHONE_WINDOW_SEC) ||
-        !rateAllowed(ipKey, IP_MAX, IP_WINDOW_SEC) ||
-        !rateAllowed(deviceKey, DEVICE_MAX, DEVICE_WINDOW_SEC)
-      ) {
+      const keys = [
+        { key: 'phone|' + hash, max: PHONE_MAX, window: PHONE_WINDOW_SEC },
+        { key: 'ip|' + ipHash, max: IP_MAX, window: IP_WINDOW_SEC },
+        { key: 'device|' + device, max: DEVICE_MAX, window: DEVICE_WINDOW_SEC },
+      ];
+      // 原子 all-or-none 预占：任一超限即整体拒绝（不预占任何键）
+      if (!tryReserveMany(keys)) {
         ccError(429, 'code_throttled', '验证码请求过于频繁，请稍后再试');
       }
-      recordRate(phoneKey, PHONE_WINDOW_SEC);
-      recordRate(ipKey, IP_WINDOW_SEC);
-      recordRate(deviceKey, DEVICE_WINDOW_SEC);
     };
 
     const providerName = () => {
