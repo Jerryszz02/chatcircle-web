@@ -5,9 +5,12 @@ services:
       args:
         PB_VERSION: ${PB_VERSION:-0.28.4}
         VITE_PB_URL: ${VITE_PB_URL:-}
-    ports:
-      # 只绑回环：对外流量一律走 caddy（HTTPS）；8090 仅保留本机调试入口
-      - '127.0.0.1:8090:8090'
+    # 生产默认不向 host 发布 PocketBase 端口（安全审查 finding 8、CWE-345）：
+    # 后端只在 Docker 私网内供 Caddy/backup 访问（app:8090），避免本地不可信进程
+    # 直连回环 8090 并伪造 X-Forwarded-For，绕过按来源 IP 的限流与审计归因。
+    # 需要本机直连调试（或 TLS 就绪前 MCP 经 SSH 隧道访问）时，显式附加 debug override：
+    #   docker compose -f docker-compose.yml -f deploy/docker-compose.debug.yml up
+    # 该 override 会重新发布 127.0.0.1:8090:8090，并再次暴露「本地伪造 XFF」风险，仅在知悉下使用。
     volumes:
       - pb_data:/pb/pb_data
     environment:

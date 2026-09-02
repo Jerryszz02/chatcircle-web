@@ -56,10 +56,16 @@ test('requires active Caddy security directives', () => {
   assert.equal(hasActiveConfigText('Strict-Transport-Security "max-age=31536000"', 'Strict-Transport-Security'), true);
 });
 
-test('accepts only an active loopback PocketBase short port mapping', () => {
+test('accepts only an active loopback PocketBase short port mapping, or no mapping at all', () => {
   assert.equal(hasLoopbackOnlyPocketBasePort(`
     ports:
       - '127.0.0.1:8090:8090'
+  `), true);
+  // 无 8090 映射（生产不发布 host 端口）同样不暴露到公网 → 通过
+  assert.equal(hasLoopbackOnlyPocketBasePort(`
+    # 生产默认不向 host 发布 PocketBase 端口
+    volumes:
+      - pb_data:/pb/pb_data
   `), true);
   assert.equal(hasLoopbackOnlyPocketBasePort(`
     ports:

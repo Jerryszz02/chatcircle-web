@@ -100,7 +100,44 @@
 
 - **PocketBase 0.28.4 → 0.39.x 升级**：单独分支做，含 hooks API 兼容回归（0.28→0.39 有破坏性变更），不夹带其他改动。
 - **超管会话加固**：超管登录改 BFF/HttpOnly cookie（ token 不落 localStorage）+ MFA。
-- **签到一次性 challenge**：固定 token 二维码可被转发代签；评估短时效一次性 challenge（权衡现场网络与扫码体验后立项）。
+- **签到一次性 challenge**：固定 token 二维码可被转发代签；评估短时效一次性 challenge（权衡现场网络与扫码体验后立项）。**2026-09 安全复审再次确认该风险（CWE-294，medium，finding 4/5）**，经权衡现场扫码体验与改动规模，暂不实现轮换系统，作为已确认的残留风险跟踪（见 §6）。
+- **限流原子化扩展到其余同式写点**：`mailguard.pb.js`（3 处内联）与 `exports.pb.js` / `exports_v2.pb.js` 仍为非原子 `$app.store()` 先查后写，本轮按范围仅修报告点名的 4 处，其余列入后续扩展。
+- **React Router 升级**：`react-router-dom` 锁文件 6.30.4 涉及 open-redirect 相关公告；根因已在 `sanitizeRedirect`（拒绝反斜杠/控制字符并校验 origin）修复，公告影响已缓解，升级作为可选跟进项。
 - 运维动作（不占代码分支）：**备份加密与异地同步**；**RAM 最小权限执行落地**（策略已给指引，需人工在阿里云控制台收窄并轮换密钥）；**删除服务器明文 override**（排查备份/恢复链路残留明文凭据或覆盖文件）。
 - 待 PRD 确认：**草稿答卷是否纳入导出口径**；**超管敏感导出豁免口径**（当前超管不受机构 `allow_sensitive_export` 开关限制）。
 - 工程化：导出异步化（当前同步生成，大数据量有超时风险）；容器非 root 运行；`getFullList` 全面分页（hooks 内查询改显式分页上限）。
+
+---
+
+## 6. 2026-09 安全复审响应（report.md，分支 fix/security-report-20260902）
+
+> 对 main@ad5ce493 的 React/PocketBase/MCP/部署安全复审，报告 9 条 finding（6 条唯一问题）。本批次为响应修复，除「固定二维码转发代签」按决定记为残留风险外，其余均修复并附回归测试。
+
+### 6.1 已修复
+
+| finding | 问题 | 修复 |
+| --- | --- | --- |
+| 1/3（CWE-601）| `/login` redirect 允许反斜杠绕过站内校验（`redirect=/\\evil.example` 被浏览器规范化为站外）| `frontend/src/features/participant/lib/redirect.ts` 的 `sanitizeRedirect`：拒绝反斜杠、控制字符/NUL，`new URL(raw, window.location.origin)` 解析后校验 origin 不变；补反斜杠/控制字符回归用例 |
+| 2/7（CWE-362）| 限流计数非原子（先 `store().get` 检查、业务后 `set` 写回），并发可突破阈值 | 计数迁至 `cc_rate_counters` 集合（迁移 `1787895600`），改为 DB 事务「检查即预占」（`$app.runInTransaction` + busy 重试 ≤2 次）；同源内联更新 lib/auth/authguard/phoneauth；`suite_auth` 新增并发回归（AUTH-18/19）；另按 review P2 增加**节流 GC 清理过期废弃键**（`updated` 早于 1h 的键，store 每 10 分钟至多扫一次，best-effort，防 DB 持久化后无限增长）|
+| 6（CWE-59）| MCP `upload_report` 词法白名单被符号链接绕过 | `mcp/server.js`：比较 `REPORT_DIR` 与目标的 realpath、逐组件拒绝符号链接（`lstatSync`），读取用 realpath 结果 |
+| 9（CWE-400）| MCP 上传在本地无大小上限即整块读入 | `mcp/server.js` 增加 `REPORT_MAX_BYTES`=20MB（与 `reports.maxSize` 对齐），`readFileSync` 前 `stat` 拒绝超限/空文件 |
+| 8（CWE-345）| 生产 compose 把 8090 发布到 host 回环，本地进程可直连伪造 XFF | `docker-compose.yml` 移除 `app` 端口映射（生产只在 Docker 私网供 Caddy/backup）；新增 `deploy/docker-compose.debug.yml`（显式 `-f` 启用时重新发布 127.0.0.1:8090，含风险警示）|
+
+### 6.2 记为残留风险（未实现）
+
+- **固定二维码可被转发代签（CWE-294，medium，finding 4/5）**：活动/培训自助签到用生命周期固定 token，得到二维码的合格参与者可转发给不在场的合格参与者。短时轮换/一次性 challenge 需新增迁移 + 前端二维码轮询 + 后端签发校验 + 全套回归，且影响现场扫码体验；经权衡按用户决定本轮不实现，保留为 backlog（见 §5 已更新）。方向确认，后续如需立项按「绑定开放场次、短时有效并轮换的签名 challenge，服务端校验 audience/expiry/rotation」推进。
+
+### 6.3 验证（本批次）
+
+| 层 | 命令 | 结果 |
+| --- | --- | --- |
+| L3 后端集成 | `bash backend/tests/run_integration.sh` | PASS=596 FAIL=0（含并发限流 AUTH-18/19）|
+| M0 迁移冒烟 | `bash backend/tests/migration_smoke.sh` | PASS=62 FAIL=0 |
+| L1 前端单测 | `cd frontend && npm run test` | 通过（含 redirect 反斜杠回归）|
+| 前端类型检查 | `cd frontend && npm run typecheck` | 通过 |
+| MCP 校验冒烟 | `node <临时脚本>` | 普通文件通过；目录外/符号链接越界/超限/空文件均被拒 |
+
+### 6.4 行为与运维变化警示（必读）
+
+- **生产 `app` 不再发布 host 端口**：`docker compose up -d` 后，服务器本机将不能再直连 `127.0.0.1:8090`。若部署沿用「SSH 隧道 + `CC_PB_URL=http://127.0.0.1:18090`」的 MCP 访问方式，需改用 `docker compose -f docker-compose.yml -f deploy/docker-compose.debug.yml up -d` 显式启用 debug override，或改用 Caddy HTTPS（`https://chatcircle.empact.cn:8443`）作为 `CC_PB_URL`。
+- **限流计数表 `cc_rate_counters`**：新增内部集合（API rules 全 null，无对外读写），随迁移自动建/删；单实例 SQLite 部署即可，V1 不引入外部组件。

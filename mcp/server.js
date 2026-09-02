@@ -30,6 +30,9 @@ const DATA_DIR =
   process.env.CC_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
 // 上传路径白名单根目录：upload_report 只接受该目录内的文件（默认 = DATA_DIR）
 const REPORT_DIR = path.resolve(process.env.CC_REPORT_DIR || DATA_DIR);
+// 上传大小上限：与后端 reports.maxSize（20MB）对齐；readFileSync 前先按 stat 拒绝，
+// 避免把任意大文件整块读入内存后才被后端限额拒绝（CWE-400 资源消耗）
+const REPORT_MAX_BYTES = 20 * 1024 * 1024;
 
 if (!AGENT_EMAIL || !AGENT_PASSWORD) {
   console.error('[cc-mcp] 缺少 CC_AGENT_EMAIL / CC_AGENT_PASSWORD 环境变量');
@@ -229,11 +232,41 @@ server.registerTool(
     if (rel.startsWith('..') || path.isAbsolute(rel)) {
       throw new Error(`报告文件必须位于输出目录 ${REPORT_DIR} 内，收到：${abs}`);
     }
-    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+    // realpath 收敛（CWE-59 修复）：词法白名单可能被输出目录内的符号链接绕过——readFileSync
+    // 会跟随最终符号链接而把任意本地可读文件读入并上传。比较根目录与目标的 realpath 判定真实
+    // 目标必须落在 REPORT_DIR 之内，并逐组件拒绝符号链接。
+    let realAbs;
+    let realDir;
+    try {
+      realAbs = fs.realpathSync(abs);
+      realDir = fs.realpathSync(REPORT_DIR);
+    } catch {
+      throw new Error(`报告文件不存在或不可读：${abs}`);
+    }
+    const realRel = path.relative(realDir, realAbs);
+    if (realRel.startsWith('..') || path.isAbsolute(realRel)) {
+      throw new Error(`报告文件（符号链接解析后）必须位于输出目录 ${REPORT_DIR} 内，收到：${abs}`);
+    }
+    let cur = REPORT_DIR;
+    for (const part of rel.split(path.sep).filter(Boolean)) {
+      cur = path.join(cur, part);
+      if (fs.lstatSync(cur).isSymbolicLink()) {
+        throw new Error(`报告文件路径包含符号链接，已拒绝：${cur}`);
+      }
+    }
+    // 大小与存在性：stat 先于 readFileSync，超限/空文件在读入前拒绝（CWE-400 资源消耗）
+    let st;
+    try {
+      st = fs.statSync(realAbs);
+    } catch {
       throw new Error(`报告文件不存在：${abs}`);
     }
-    const buf = fs.readFileSync(abs);
-    if (buf.length === 0) throw new Error(`报告文件为空：${abs}`);
+    if (!st.isFile()) throw new Error(`报告文件不是普通文件：${abs}`);
+    if (st.size === 0) throw new Error(`报告文件为空：${abs}`);
+    if (st.size > REPORT_MAX_BYTES) {
+      throw new Error(`报告文件超过 ${REPORT_MAX_BYTES / 1024 / 1024}MB 上限：${abs}`);
+    }
+    const buf = fs.readFileSync(realAbs);
 
     const form = new FormData();
     form.set('title', title);

@@ -88,7 +88,10 @@ docker compose start app
 ## 5. HTTPS 与反向代理
 
 - 生产禁止明文 HTTP（PRD §11.2）：compose `caddy` 服务终止 TLS，转发到 app:8090，
-  全站 HTTPS；app 的 8090 只绑 `127.0.0.1` 作本机调试入口。
+  全站 HTTPS；**生产默认不向 host 发布 app 的 8090**（2026-09 安全加固，见 §5「安全加固」），
+  仅经 Docker 私网供 Caddy/backup 访问。需要本机直连调试或经 SSH 隧道让 MCP 访问后端时，
+  显式附加 `docker compose -f docker-compose.yml -f deploy/docker-compose.debug.yml up -d`（`deploy/docker-compose.debug.yml`，
+  含「本地伪造 XFF」风险警示，仅限知悉下使用）。
 - 反代选型 **Caddy**（镜像 `deploy/caddy.Dockerfile` 编译进 `caddy-dns/alidns` 插件），
   配置 `deploy/Caddyfile`，站点 `chatcircle.empact.cn`。
 - **未备案期间的特殊处置（2026-08 首次部署）**：境内 ECS（上海）80/443 被阿里云拦截，

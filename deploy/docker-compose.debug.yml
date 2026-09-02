@@ -1,0 +1,16 @@
+# Chat Circles 调试 override（本地开发调试 / TLS 就绪前的 MCP SSH 隧道访问）
+#
+# 用途：生产 compose 默认不向 host 发布 PocketBase 端口（见 docker-compose.yml 的 app 服务注释，
+# 安全审查 finding 8、CWE-345）。需要本机直连 8090 调试，或在未备案阶段经
+#   ssh -N -L 18090:127.0.0.1:8090 <服务器用户>@<服务器IP>
+# 让 MCP 访问后端时，显式附加本 override：
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.debug.yml up -d
+#
+# ⚠️ 安全警示：本 override 重新把 8090 发布到 host 回环，使本地不可信进程可直连并伪造
+# X-Forwarded-For（PocketBase 全局信任该头），从而绕过按来源 IP 的限流与审计归因。
+# 仅限开发/排障环境使用；生产日常应保持默认（不发布 host 端口），MCP 应优先经 Caddy HTTPS
+# （https://chatcircle.empact.cn:8443）访问。
+services:
+  app:
+    ports:
+      - '127.0.0.1:8090:8090'

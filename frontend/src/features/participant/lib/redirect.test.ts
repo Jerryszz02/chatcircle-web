@@ -18,6 +18,19 @@ describe('sanitizeRedirect', () => {
     expect(sanitizeRedirect('javascript:alert(1)')).toBeNull();
   });
 
+  it('拒绝反斜杠等会被规范化为站外的形态（CWE-601 回归）', () => {
+    // 反斜杠绕过 startsWith('/')：/\\evil.example 会被浏览器规范化为 //evil.example
+    expect(sanitizeRedirect('/\\evil.example.com')).toBeNull();
+    expect(sanitizeRedirect('\\evil.example.com')).toBeNull();
+    expect(sanitizeRedirect('/\\/evil.example.com')).toBeNull();
+    expect(sanitizeRedirect('\\\\evil.example.com')).toBeNull();
+    // 控制字符 / NUL 同样会被规范化
+    expect(sanitizeRedirect('/\u0000evil.example.com')).toBeNull();
+    expect(sanitizeRedirect('/\u0001evil.example.com')).toBeNull();
+    expect(sanitizeRedirect('/\u001fevil.example.com')).toBeNull();
+    expect(sanitizeRedirect('/\u007fevil.example.com')).toBeNull();
+  });
+
   it('回跳目标是登录页本身时视为无效（避免登录后循环）', () => {
     expect(sanitizeRedirect('/login')).toBeNull();
     expect(sanitizeRedirect('/login?redirect=%2Fme')).toBeNull();

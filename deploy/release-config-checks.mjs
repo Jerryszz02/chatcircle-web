@@ -39,8 +39,10 @@ export function hasLoopbackOnlyPocketBasePort(compose) {
     .map((match) => match[1] || match[2] || match[3])
     .filter((mapping) => /(^|:)8090(?:\/tcp)?$/.test(mapping));
 
-  return shortMappings.length > 0
-    && shortMappings.every((mapping) => /^127\.0\.0\.1:\d+:8090(?:\/tcp)?$/.test(mapping));
+  // 无 8090 映射（生产默认不向 host 发布 PocketBase 端口，仅在 Docker 私网供 Caddy/backup
+  // 访问 —— 2026-09 安全加固）同样满足「不得暴露到公网」；有映射则必须全部只绑 127.0.0.1。
+  return shortMappings.length === 0
+    || shortMappings.every((mapping) => /^127\.0\.0\.1:\d+:8090(?:\/tcp)?$/.test(mapping));
 }
 
 function getWorkflowStep(workflow, stepName) {
