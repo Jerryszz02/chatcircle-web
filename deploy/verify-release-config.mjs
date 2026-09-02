@@ -14,6 +14,11 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 
+export function hasActiveAdminConsoleBlock(caddyfile) {
+  const activeConfig = caddyfile.replace(/^\s*#.*$/gm, '');
+  return /\bhandle\s+\/_\/\*\s*\{[^{}]*\brespond\s+403(?:\s|$)[^{}]*\}/m.test(activeConfig);
+}
+
 const files = {
   compose: read('docker-compose.yml'),
   envExample: read('.env.example'),
@@ -70,11 +75,16 @@ for (const [name, expected] of [
   ['CSP', 'Content-Security-Policy'],
   ['防 MIME 嗅探', 'X-Content-Type-Options'],
   ['防嵌入', 'X-Frame-Options'],
-  ['PB 管理台封闭', 'handle /_/*'],
   ['可信代理源 IP', 'header_up X-Forwarded-For {remote_host}'],
 ]) {
   check(`Caddy ${name}`, files.caddy.includes(expected), `缺少 ${expected}`);
 }
+
+check(
+  'Caddy PB 管理台封闭',
+  hasActiveAdminConsoleBlock(files.caddy),
+  '缺少活动的 handle /_/* { respond 403 } 配置块',
+);
 
 for (const [name, expected] of [
   ['Compose 配置预检', 'docker compose config -q'],
