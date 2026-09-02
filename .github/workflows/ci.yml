@@ -63,6 +63,8 @@ jobs:
             echo "checking $f"
             node --check "$f"
           done
+      - name: T7 发布配置与隐私不变量
+        run: node deploy/verify-release-config.mjs
 
   backend-integration:
     # L3 服务端集成套件（test-plan §3/§8，integration job；越权矩阵 AC-03 含在其中独立成组）。

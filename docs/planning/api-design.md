@@ -1,12 +1,12 @@
 # 手机号账号与活动现场 API 契约
 
-> 状态：T0 契约、T1 手机号认证、T2 现场编号与配对后端、T3 实时数据服务与 T4 机构活动工作台（含 §4.1 duplicate 端点）已在默认分支验证并合并；T5 参与者配对体验在 `agent/t5-participant-pairing` `已验证`，尚未合并或部署；T6 仍为`计划中`
+> 状态：T0–T6 契约与端点已在默认分支实现；T7 自动化验收于 2026-09-02 `已验证`。真实阿里云与生产状态仍待外部验收。
 >
 > 契约版本：`2026-08-28.t0-v1`
 >
 > 适用范围：[account-event-workflow-prd.md](account-event-workflow-prd.md) 的手机号账号、现场编号/配对、实时工作台与细粒度导出
 >
-> 当前实现差距：T1 四个手机号端点已在 `phoneauth.pb.js` 落地并通过 mock provider 集成测试；T2/T3 已提供配对/锁定端点、本人最小快照、`live-summary`、Realtime topic 守卫与失效化订阅服务；T4 机构活动工作台（含 §4.1 duplicate 端点）已合并默认分支；T5 参与者配对卡已在 `frontend/src/features/participant/`（`lib/myPairingLive.ts` + `components/MyPairingCard.tsx`）落地，签到成功页、「我的」报名条目与活动详情页三入口共用。真实阿里云账号、费用与测试号码仍待部署环境联调，§6 导出 v2 尚未实现；T5 分支尚未合并或部署。实际代码现状以 [developer-guide.md](../developer-guide.md) 和 `backend/pb_hooks/` 为准。
+> 当前实现差距：本文 T1–T6 的仓库契约均已落地；T7 双角色 E2E 已验证手机号登录、签到、配对、两端 Realtime 更新与导出。剩余差距是真实阿里云账号/测试号码和生产放行，见 [release-checklist.md](../release-checklist.md)。实际代码现状以 [developer-guide.md](../developer-guide.md) 和 `backend/pb_hooks/` 为准。
 
 ## 1. 权威边界
 

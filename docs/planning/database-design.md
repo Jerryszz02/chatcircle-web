@@ -1,6 +1,6 @@
 # Chat Circles — 数据库设计（PocketBase 集合设计草案）
 
-> **2026-08-29 T1/T2/T3 更新：**`participant_accounts` 已增加隐藏手机号/HMAC、验证时间、绑定来源和迁移状态，并新增内部 `participant_phone_challenges` 集合；存量账号已回填 `legacy_unbound`。T3 提供事务快照与 Realtime 守卫；本 T2 分支已实现并验证 §6.3/§6.4 的现场编号字段与 `activity_pairs`。标准字段激活和细粒度 `export_jobs.scope_json` 仍为`计划中`；本 T2 分支尚未合并或部署。
+> **2026-09-02 T7 更新：** T1 手机号/HMAC/challenge、T2 现场编号与 `activity_pairs`、T3 事务快照、T6 `export_jobs.scope_json` v2 均已实现并通过迁移往返与集成测试。生产数据与迁移状态本次未验证。
 
 > 本文档将 PRD v0.3 §9 数据模型落地为 PocketBase 集合定义，面向后续实现工程师。阅读本文不需要先读 PRD；涉及 PRD 口径处均注明出处。所有表结构为**设计草案**：字段名、枚举机器码、索引与规则如与实现阶段证据冲突，以实现阶段评审结论为准并回写本文。
 
@@ -24,7 +24,7 @@
 |---|---|
 | 需求基线 | PRD v0.3（评审修订版，2026-08-05），`docs/Chat_Circles_活动与问卷平台_PRD_v0.3.docx`；本文引用其 §9 数据模型、§4 状态模型、§6 功能需求、§10 导出规范、§11 安全审计、§12.3 备份、§14 验收标准、附录 B 命名规范 |
 | 已确认技术决策 | 响应式 Web（React 18 + Vite + TypeScript）+ PocketBase（后端/认证/SQLite）+ Docker；统一入口 `chatcircle.empact.cn`；完整 V1（M0~M5） |
-| 项目现状（2026-08-29） | `agent/t2-pairing-backend` 已同步 `origin/main@5d67520`；默认分支含 T3，本分支新增 `activity_pairs`、现场编号与配对 hooks 且测试通过；参与者 identity 仍为 `username`，T2 尚未合并或部署 |
+| 项目现状（2026-09-02） | `origin/main@f2436f3` 已含 T0–T6；T7 分支通过迁移往返与 594 项后端集成断言。手机号是主要登录身份，`username` 只保留给存量迁移 |
 | T0 证据 | PocketBase 0.28.4 隔离临时库实测已确认自定义 text identity 可登录且唯一索引生效；为保持“只有短信验证码”的产品语义，目标方案不把手机号加入 password identity |
 | 相关文档 | [README.md](README.md)（项目索引与术语）、[api-design.md](api-design.md)（T0 端点/权限/兼容契约）、technical-design.md（架构决策）、security-privacy.md（审计与隐私细则） |
 
@@ -540,7 +540,7 @@
 
 ## 6. T0 冻结的目标契约（T2 已部分落地）
 
-本节是 T1/T2/T3/T6 的数据库门禁。T1 手机号字段与 challenge 集合已由 `1787895000_cc_participant_phone_auth.js` 实现，§6.3/§6.4 已由本 T2 分支实现，T3 不新增 schema，T6 仍为目标设计。机器名与前端共享类型以 `frontend/src/shared/api/accountEvent.ts` 为准。
+本节是 T1/T2/T3/T6 的数据库门禁。T1 手机号字段与 challenge 集合、§6.3/§6.4 现场配对 schema 与 T6 `scope_json` v2 已实现；T3 不新增 schema。机器名与前端共享类型以 `frontend/src/shared/api/accountEvent.ts` 为准。
 
 ### 6.1 participant_accounts 追加字段
 
