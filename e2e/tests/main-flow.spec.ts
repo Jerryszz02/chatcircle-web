@@ -30,6 +30,17 @@ async function newAdminPage(browser: Browser): Promise<Page> {
   return page;
 }
 
+/** 参与者经手机号验证码登录，用于同场活动双角色独立会话。 */
+async function participantLogin(page: Page, phone: string) {
+  await page.goto(`${webUrl}/login`);
+  await page.getByRole('textbox', { name: /^手机号/ }).fill(phone);
+  await page.getByRole('checkbox').check();
+  await page.getByRole('button', { name: '获取验证码' }).click();
+  await page.getByRole('textbox', { name: /^验证码/ }).fill(fixture.phoneCode);
+  await page.getByRole('button', { name: '登录 / 注册' }).click();
+  await page.waitForURL('**/me');
+}
+
 test.describe.serial('V1 主链路', () => {
   test('详情→注册→报名→审核→签到→问卷→我的中心→导出', async ({ page, browser }) => {
     const A = fixture.answers;
@@ -46,6 +57,7 @@ test.describe.serial('V1 主链路', () => {
       await page.getByRole('link', { name: '立即报名' }).click();
       await page.waitForURL(`**/a/${fixture.activityId}/register`);
       await page.getByRole('textbox', { name: /^手机号/ }).fill(fixture.participantPhone);
+      await expect(page.getByText(/我们仅将你的姓名和手机号用于账号验证/)).toBeVisible();
       await page.getByRole('checkbox').check();
       await page.getByRole('button', { name: '获取验证码' }).click();
       await page.getByRole('textbox', { name: /^验证码/ }).fill(fixture.phoneCode);
@@ -57,6 +69,7 @@ test.describe.serial('V1 主链路', () => {
     await test.step('提交报名表', async () => {
       await page.getByRole('radio', { name: /倾诉者/ }).check();
       await page.getByLabel('昵称').fill(A.nickname);
+      await page.getByLabel('姓名').fill(A.fullName);
       await page.getByLabel('年龄').fill(A.age);
       await page.getByLabel('微信号').fill(A.wechat);
       await page.getByRole('button', { name: '提交报名' }).click();
@@ -75,9 +88,9 @@ test.describe.serial('V1 主链路', () => {
       const dialog = adminPage.getByRole('dialog', { name: '审核通过' });
       await dialog.getByRole('button', { name: '确认' }).click();
       await expect(dialog).toBeHidden();
-      // 「已通过」页签出现 1 条记录
+      // 「已通过」包含本次倾诉者与 T7 fixture 中的聆听者。
       await adminPage.getByRole('tab', { name: '已通过' }).click();
-      await expect(adminPage.locator('.admin-table tbody tr')).toHaveCount(1);
+      await expect(adminPage.locator('.admin-table tbody tr')).toHaveCount(2);
     });
 
     // ---------- 5. 管理员开放签到（FR-CHK-001） ----------
@@ -87,12 +100,47 @@ test.describe.serial('V1 主链路', () => {
       await expect(adminPage.getByText('已开放')).toBeVisible();
     });
 
-    // ---------- 6. 参与者自助签到；重复扫码幂等提示已签到（AC-09/AC-20） ----------
-    await test.step('参与者自助签到（重复扫码幂等）', async () => {
+    // ---------- 6. 双角色自助签到；现场编号与重复扫码幂等（T2/AC-09/AC-20） ----------
+    const listenerContext = await browser.newContext({ viewport: VIEWPORT });
+    const listenerPage = await listenerContext.newPage();
+    await test.step('聆听者独立会话签到并获取 L01', async () => {
+      await participantLogin(listenerPage, fixture.listenerPhone);
+      await listenerPage.goto(`${webUrl}/checkin/${fixture.checkinQrToken}`);
+      await expect(listenerPage.getByText('签到成功')).toBeVisible();
+      await expect(listenerPage.getByText('L01', { exact: true })).toBeVisible();
+      await expect(listenerPage.getByText('等待开始配对')).toBeVisible();
+    });
+
+    await test.step('倾诉者自助签到（重复扫码幂等）并获取 S01', async () => {
       await page.goto(`${webUrl}/checkin/${fixture.checkinQrToken}`);
       await expect(page.getByText('签到成功')).toBeVisible();
+      await expect(page.getByText('S01', { exact: true })).toBeVisible();
+      await expect(page.getByText('等待开始配对')).toBeVisible();
       await page.goto(`${webUrl}/checkin/${fixture.checkinQrToken}`);
       await expect(page.getByText('您已签到')).toBeVisible();
+    });
+
+    // ---------- 6.5 管理员在实时工作台启动配对；两端通过 Realtime 失效重拉收到结果 ----------
+    await test.step('现场工作台开始配对并实时刷新两端卡片', async () => {
+      await adminPage.getByRole('tab', { name: '现场工作台' }).click();
+      const pairingCard = adminPage.locator('section.cc-card', {
+        has: adminPage.getByRole('heading', { name: '配对', exact: true }),
+      });
+      await expect(pairingCard.getByText(/已签到：倾诉者\s*1\s*·\s*聆听者\s*1/)).toBeVisible();
+      await pairingCard.getByRole('button', { name: '开始配对', exact: true }).click();
+      await expect(adminPage.getByText('配对已开始，新建 1 组')).toBeVisible();
+
+      await expect(page.getByText('已配对', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: '查看组号与搭档' }).click();
+      await expect(page.getByText('P01', { exact: true })).toBeVisible();
+      await expect(page.getByText('L01', { exact: true })).toBeVisible();
+      await expect(page.getByText(fixture.listenerFullName, { exact: true })).toBeVisible();
+
+      await expect(listenerPage.getByText('已配对', { exact: true })).toBeVisible();
+      await listenerPage.getByRole('button', { name: '查看组号与搭档' }).click();
+      await expect(listenerPage.getByText('P01', { exact: true })).toBeVisible();
+      await expect(listenerPage.getByText('S01', { exact: true })).toBeVisible();
+      await expect(listenerPage.getByText(A.fullName, { exact: true })).toBeVisible();
     });
 
     // ---------- 7. 管理员从模板创建问卷并开放（FR-SUR-001/011） ----------
@@ -183,6 +231,9 @@ test.describe.serial('V1 主链路', () => {
       expect(csvOf('registrations.csv')).toContain('approved');
       expect(csvOf('registrations.csv')).toContain(A.nickname);
       expect(csvOf('checkins.csv')).toContain('valid');
+      expect(csvOf('pairings.csv')).toContain('P01');
+      expect(csvOf('pairings.csv')).toContain('S01');
+      expect(csvOf('pairings.csv')).toContain('L01');
       expect(csvOf(surveyCsv!)).toContain('submitted');
       expect(csvOf(surveyCsv!)).toContain('SAT');
       expect(csvOf(surveyCsv!)).toContain(A.sat);
@@ -192,8 +243,11 @@ test.describe.serial('V1 主链路', () => {
       expect(csvOf(surveyCsv!)).not.toContain('MOOD');
       expect(csvOf('registrations.csv')).not.toContain('wechat_id');
       expect(csvOf('registrations.csv')).not.toContain(A.wechat);
+      expect(csvOf('registrations.csv')).not.toContain(A.fullName);
       expect(csvOf('registrations.csv')).not.toContain(fixture.participantUsername);
       expect(csvOf('manifest.csv')).toContain('csv_zip');
     });
+
+    await listenerContext.close();
   });
 });

@@ -42,6 +42,7 @@ API，**只断言 API 行为与数据终态，不测内部函数**。输出逐�
 | `suite_trainings.py` | 聆听者培训体系：生命周期状态机、直连守卫（draft 强制/token 生成/写锁定）、签到资格（listener_not_approved）、开放/关闭分支、重复扫码幂等、补签/撤销原因必填+审计、撤销后可重签、me/trainings 聚合形态 | 48 |
 | `suite_surveys.py` | 问卷四条件资格 AC-11 与答卷生命周期 AC-12/20：资格分因、草稿预填、提交幂等且内容不被覆盖、提交锁定、作废审计/统计排除/记录保留/不可重填 | 21 |
 | `suite_exports.py` | 导出 AC-16/17：13 个 CSV 清单、BOM、manifest 行数一致、is_sensitive 过滤（非字段名）、作废排除、无用户名、二次确认、机构开关、超管豁免、审计 | 22 |
+| `suite_exports_v2.py` | T6 细粒度导出：preview/create 共用判敏、范围/数据域/行列选择、XLSX/CSV ZIP、预估与正式行数一致、自定义敏感字段、审计无敏感值、v1 兼容 | 46 |
 | `suite_auth.py` | 登录限流 AC-21 与账号规则 AC-06/02：用户名规则、大小写不敏感唯一、错密码不建重号、5 次失败触发 429 且限流期正确密码亦拒、邀请码一次性/撤销/过期/并发 | 19 |
 | `suite_admin_email.py` | 管理员邮箱认证 AC-24（2026-08 改版）：注册必填邮箱（格式/查重/小写归一/verified=false）、邮箱+密码登录、找回门控（未验证静默 204 + suppressed 审计、已验证放行）、request-verification 限流 429、request-otp 可用（OTP 全链路属上线验收）、guards 禁直连改邮箱 | 15 |
 | `suite_posts.py` | 内容推文 posts AC-25（2026-08 改版）：仅超管写（管理员/参与者/匿名 create/update/delete 全拒）、正文或外链至少其一与外链协议校验、published_at 只写一次、status 缺省 hidden、可见性矩阵、置顶排序、post.create/update 审计、公开读字段收敛 | 20 |

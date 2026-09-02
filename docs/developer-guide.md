@@ -9,7 +9,7 @@
 >
 > 各子目录另有聚焦手册，本文会引用而不是复制它们：`backend/README.md`（后端操作）、`deploy/README.md`（生产部署）、`mcp/README.md`（MCP 数据取送）、`e2e/`（端到端测试）。
 >
-> **专项升级边界（2026-08-30）**：`frontend/src/shared/api/accountEvent.ts` 已冻结手机号/配对/快照/细粒度导出契约；T1 手机号认证与参与者 UI、T2 现场编号与配对后端、T3 单活动实时数据服务、T4 机构活动工作台（创建向导、复制活动、生命周期首页、现场工作台与配对管理）均已实现并验证且已合并默认分支；T5 参与者配对体验（三入口共用 my-pairing 快照 + 本人 Realtime 失效订阅）已在 `agent/t5-participant-pairing` 验证、尚未合并，T6 仍是目标契约。
+> **专项升级边界（2026-09-02）**：T0–T6 已在默认分支实现。T7 增加双角色签到/配对/Realtime/细粒度导出全链路 E2E、无密钥发布配置检查和统一发布验收入口；自动化已通过，生产放行仍按 [`release-checklist.md`](release-checklist.md) 执行。
 
 ---
 
@@ -255,8 +255,9 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 | 端点 | 鉴权 | 说明 |
 |---|---|---|
-| POST `/api/cc/exports` | admin\|super | **同步**生成 ZIP（13 个 CSV），写 export_jobs+审计；限流 per 机构 10 次/h、per 超管 20 次/h |
-| GET `/api/cc/exports/{id}/download` | admin\|super | 鉴权下载（admin 仅本机构 job），记 export.download 审计 |
+| POST `/api/cc/exports/preview` | admin\|super | T6 v2 预览：归一化范围/行列、预估数据域行数、服务端判敏与权限结果；不返回实际数据 |
+| POST `/api/cc/exports` | admin\|super | v2 生成 XLSX/CSV ZIP，create 重算判敏并写 job/审计；旧 v1 形状归一化后保留固定 13 CSV 兼容一个发布窗口 |
+| GET `/api/cc/exports/{id}/download` | admin\|super | 鉴权下载 XLSX/ZIP（admin 仅本机构 job），记 export.download 审计 |
 | GET `/api/cc/metrics/{metricKey}` | admin\|super | 看板指标，8 个 key 注册表分发（口径注释在文件头，改口径前先读） |
 | GET `/api/cc/activities/{id}/live-summary` | admin\|super | T3 单活动同快照汇总：报名、签到、配对、问卷、匿名人口统计与最近签到；机构管理员仅本机构，跨机构 404 |
 
@@ -293,7 +294,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 ### 5.7 后端测试体系（`backend/tests/`）
 
-- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 21 个 suite（548 断言）：越权矩阵 AC-03、名额并发 AC-08、状态机 AC-07、签到 AC-09/20、T1 手机号认证与存量登录防绕过、T2 配对、T3 实时汇总与 Realtime ACL、T4 复制活动、培训、问卷资格、导出 AC-16/17、限流 AC-21、备份告警 AC-23、无硬删除 AC-18、安全加固回归等。
+- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 22 个 suite（当前 594 断言）：越权矩阵、名额/配对并发、状态机、手机号认证、Realtime ACL、复制活动、问卷资格、v1/v2 导出准确性与敏感门禁、限流、备份告警、无硬删除和安全加固等。
 - `migration_smoke.sh`：seed 及后续迁移局部回滚 → 全量 down → sqlite3 直查 26 个业务/内部集合清零 → 再 up，随后 serve 抽查，共 62 项。
 - **两条强制规则**：① authguard 对内置 auth-with-password 按 IP 限 25 次/10min，一轮全量当前使用 22 次（余量 3）——新增套件仍应避免消耗这项预算，管理员登录态用 impersonate，参与者走 `/api/cc/auth/participant`；② 新增带 `organization_id` 的接口，**必须同 PR 补机构越权用例**（通用端点放 `suite_acl.py`，领域聚合端点可放对应 suite）。
 
@@ -312,7 +313,7 @@ src/
 │   ├── pocketbase.ts      #   3 个按角色隔离的 PB client 单例（见 §6.3）
 │   ├── auth.ts / session.ts / guards.tsx
 │   ├── api/               #   types.ts（当前 record 类型+枚举，与 pb_migrations 手工同步）
-│   │                      #   accountEvent.ts（T0 冻结契约；T1/T2/T3 已实现，其余仍是目标）
+│   │                      #   accountEvent.ts（T0 冻结契约；T1–T6 已实现）
 │   │                      #   collections.ts（类型化 RecordService 封装）、http.ts（自定义端点 fetch 包装）
 │   ├── ui/                #   无样式结构组件（Button/Card/Modal/Toast/Loading/PageLayout/ForbiddenPage…）
 │   ├── styles/global.css  #   设计 token + .cc-* 共享类（见 §6.6）
@@ -359,7 +360,7 @@ Vitest + jsdom + Testing Library，51 个测试文件与源码 colocate，主力
 
 **参与者主链路**：广场/详情（`GET /api/cc/public/activities*`）→ 报名页请求并验证手机号验证码（首次自动建号；存量用户名账号先登录再绑定）→ 提交报名（`POST .../register`，按所选角色的 role_scope 字段渲染表单）→ 在 `/me`（`GET /api/cc/me/overview`）看审核状态和绑定/换绑手机号 → 到场扫固定二维码 → `POST /api/cc/checkin/self`（幂等）→ 活动后问卷草稿/提交。
 
-**机构管理员日常**：建活动（draft）→ （如机构开审核则提交审批）→ 发布 → 审核报名（transition，事务内名额硬校验）→ 现场开放签到场次、展示二维码、补签/撤销 → 从模板复制问卷并开放 → 看板/导出 ZIP（13 个 CSV）→ 培训同理（trainings 三件套）。
+**机构管理员日常**：建活动（draft）→ （如机构开审核则提交审批）→ 发布 → 审核报名（transition，事务内名额硬校验）→ 现场工作台开放签到、配对与问卷 → 用五步向导按范围/数据域/行列生成 XLSX 或 CSV ZIP → 培训同理。旧 v1 固定 13 CSV 仅作一个发布窗口的兼容入口。
 
 **超管**：建机构、生成一次性邀请码（明文只展示一次）、机构开关（发布审核/敏感导出）、活动审批/下架、内容推文管理（`/super/posts`，置顶/显隐，无硬删除）、问卷模板版本管理、全局看板/导出/审计、备份告警（`/super/system`）。
 
@@ -400,9 +401,10 @@ MCP 是由 WorkBuddy、Kimi、Claude、Codex 等本地客户端启动的 STDIO �
 
 | 层 | 位置 | 运行 | 覆盖 |
 |---|---|---|---|
-| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 51 files / 373 tests：lib 纯逻辑、页面行为、路由守卫、T1 手机号交互、T3 Realtime 失效化、T4 工作台口径（阶段推导/小样本抑制/完成率展示/视图导出）与 T5 配对卡五态 |
+| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 当前 54 files / 401 tests：页面/组件行为、路由守卫、手机号交互、Realtime 失效化、工作台口径、配对卡五态与导出向导 |
 | 后端集成 + 迁移冒烟 | `backend/tests/` | `bash backend/tests/run_integration.sh`、`migration_smoke.sh` | 越权矩阵、状态机、并发名额、导出、限流、无硬删除……（AC-01~23 映射见 docs/planning/test-plan.md） |
-| E2E 主链路 | `e2e/` | `cd e2e && npm test`（环境全自动自举，与本地库隔离） | 报名→审核→签到→问卷→导出、培训链路（移动 viewport，少而精） |
+| E2E 主链路 | `e2e/` | `cd e2e && npm test`（环境全自动自举，与本地库隔离） | 手机号登录→报名→审核→双角色签到/配对/Realtime→问卷→细粒度导出，外加培训链路 |
+| T7 发布验收 | `scripts/t7-release-acceptance.sh` | `bash scripts/t7-release-acceptance.sh` | 串联配置 15 项、hooks/备份语法、前端、迁移、后端集成与 E2E；不部署、不读真实 `.env` |
 
 CI（`.github/workflows/ci.yml`，push 到 main 与全部 PR 触发，三 job 均为 PR 必过）：`frontend`（lint→typecheck→test→build）、`backend-migrations`（空目录 migrate up + `node --check` 全部 hooks）、`backend-integration`（全量集成套件）。另有 `e2e.yml`（PR + 每日 cron）与 `deploy.yml`（push main 自动部署）。
 

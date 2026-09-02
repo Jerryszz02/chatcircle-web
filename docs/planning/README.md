@@ -6,14 +6,14 @@
 
 ## 项目是什么
 
-**Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。2026-08-29 审计时，默认分支 `origin/main@83f90e0` 已包含 T0 冻结契约、T1 手机号账号和 T3 单活动实时数据服务；当前 T2 分支另已实现并验证现场编号与配对后端。工作台 UI、参与者配对 UI 和细粒度导出仍属于`计划中`功能，功能分支状态不代表已部署生产。
+**Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。2026-09-02 审计时，`origin/main@f2436f3` 已包含 T0–T6；T7 分支已通过仓库自动化验收。这些证据不代表真实阿里云、真机微信、备份恢复、合规或生产部署已验收。
 
 - 多机构集中管理：Empact 集中式平台，统一数据库，机构间按 `organization_id` 逻辑隔离。
 - 活动全生命周期：活动创建/发布/传播（链接与二维码；另设公开活动广场页 `/activities`，仅展示已发布/已关闭活动）→ 报名与人工审核（角色名额硬限制、误判回退）→ 现场固定二维码签到（含补签/撤销）→ 多份问卷发布与填写 → 基础项目管理看板 → 规范化 ZIP/CSV 数据导出。
 - 聆听者培训体系（2026-08 扩展，PRD 外）：机构级培训创建/发布/关闭、固定二维码培训签到（资格 = 账号存在 approved 聆听者报名，全平台通用）、账号级「培训通过」标记（仅记录与展示，不作报名门槛）。
 - 三级账号权限：超级管理员、机构管理员、参与者。T1 已实现中国大陆手机号验证码登录/注册；存量用户名账号保留迁移入口，绑定后沿用原 `participant_id` 与历史记录。
-- 现场执行升级：T2 后端在本分支`已验证`，包含签到编号、队列配对、迟到补配、释放/调整、现场锁定、本人最小快照、Realtime 失效消息与审计；管理员/参与者 UI 仍`计划中`（T4/T5）。
-- 机构效率升级：T3 单活动事务快照、参与者结构抑制和 Realtime 失效化服务已在默认分支`已验证`；活动创建向导、工作台 UI 和细粒度导出仍`计划中`。
+- 现场执行升级：签到编号、队列配对、迟到补配、释放/调整、现场锁定、管理工作台与参与者三入口 Realtime 配对卡均已实现。
+- 机构效率升级：活动创建/复制、生命周期首页、单活动快照、小样本抑制、Realtime 失效化与 XLSX/CSV ZIP 细粒度导出均已实现。
 
 正式入口域名：`chatcircle.empact.cn`。
 
@@ -45,11 +45,11 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 |---|---|
 | 生成请求 | 归档 2026-08-27 专项升级，并于 2026-08-28 实施 T0 共享契约和 T1 手机号账号 |
 | 初始生成 | 2026-08-05 |
-| 最近同步 | 2026-08-29（T1/T2/T3 `已验证`）：手机号认证与参与者 UI、现场编号/配对后端、事务快照与 Realtime 失效化均已落地；T0 契约版本不变。 |
-| 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb-t2-pairing-backend`；`agent/t2-pairing-backend` 已合并 `origin/main@83f90e0`。本分支尚未合并或部署。 |
-| 本次关键代码证据 | `phoneauth.pb.js` 与 `1787895000_cc_participant_phone_auth.js` 提供 T1；`pairings.pb.js` 与 `1787880000_cc_activity_pairings.js` 提供 T2；`live.pb.js` 与 `activityLive.ts` 提供 T3。 |
-| 本次验证命令 | T1/T2/T3 合并后已通过后端集成 535/535、迁移冒烟 62/62、前端 lint/typecheck、46 files / 320 tests、build、Playwright 3/3；planning 文档审计与当前 PR checks 继续作为发布门禁。 |
-| 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T1/T2/T3 均复用 `2026-08-28.t0-v1`，T4–T6 继续按冻结契约实现。 |
+| 最近同步 | 2026-09-02：T0–T6 已合并默认分支；T7 自动化验收`已验证`，外部/生产验收`待确认`。 |
+| 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb`；T7 分支基于 `origin/main@f2436f3`。 |
+| 本次关键代码证据 | `main-flow.spec.ts` 覆盖双角色全链路；`verify-release-config.mjs` 固化无密钥发布不变量；`t7-release-acceptance.sh` 是统一验收入口。 |
+| 本次验证命令 | `bash scripts/t7-release-acceptance.sh`：配置 15/15、前端 54 files / 401 tests、后端 594/594、迁移往返、build、Playwright 3/3 通过。 |
+| 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T1–T6 共用 `2026-08-28.t0-v1`。 |
 
 ## 已生成文档
 
@@ -62,6 +62,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | [test-plan.md](test-plan.md) | 测试与 CI 策略：测试分层、AC-01~26 验收映射（AC-24~26 为 2026-08 后端改版续编）、越权自动化测试与 CI 流水线 |
 | [ui-design.md](ui-design.md) | 前端视觉与交互规范：色彩/字体/间距/动效 token、组件规则、响应式与无障碍基线、文案语气、图表样式；仅含纯前端 UI，业务口径以 PRD 与本目录其他文档为准 |
 | [account-event-workflow-prd.md](account-event-workflow-prd.md) | **2026-08-27 专项升级主入口**：手机号账号、机构活动全流程、实时看板、现场编号与配对、参与者端展示、细粒度导出、隐私边界、API 草案、并行任务和验收清单 |
+| [release-checklist.md](../release-checklist.md) | **T7 当前发布验收入口**：自动化门禁、测试环境、真机/合规/生产放行；运维操作细节链接 `deploy/README.md` |
 
 ## 有意跳过的目录文档
 
@@ -74,7 +75,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | architecture.md | 并入 [technical-design.md](technical-design.md) | 架构内容与技术实现指引一体，拆分只会制造交叉引用负担 |
 | user-flow.md | 不生成 | 核心业务流程见 PRD §5；状态机与迁移约束见 [database-design.md](database-design.md) |
 | release-plan.md | 拆分合并 | 部署与备份要点并入 [technical-design.md](technical-design.md)；上线 checklist 属 M5 阶段产物 |
-| operations-runbook.md | 暂缓 | 运维手册属 M5「生产交付」阶段产物，现阶段标记为待确认 |
+| operations-runbook.md | 不再单独生成 | 生产操作已由 `deploy/README.md` 维护；T7 放行门禁由 [release-checklist.md](../release-checklist.md) 维护，再建同用途文档会形成双源 |
 | decision-log.md | 并入 [technical-design.md](technical-design.md) | 关键决策以表格形式记录在技术设计文档中，避免维护两份决策清单 |
 
 ## 核心概念速览
@@ -95,11 +96,11 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | 参与者账号演进 | T1 已验证手机号验证码登录/注册；存量用户先登录原账号再绑定手机号，保留原 `participant_id`；冲突只标记 `merge_required`，不自动覆盖 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §3 |
 | 现场编号与配对 | 在线签到按数据库角色计数器的原子自增顺序产生不可变编号；不按客户端时间/预生成 ID 推断并发先后，存量签到不补号；管理员开始配对后按两侧现场序号配对，不自动重排已有组 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §5 |
 | 双问卷完成率 | 现场与总体完成率的分子都必须与各自当前分母人群取交集；撤销签到或回退报名后同步移出对应分子，比例不得超过 100% | [account-event-workflow-prd.md](account-event-workflow-prd.md) §4.3 |
-| 细粒度导出 | 计划支持单活动、单问卷、指定参与者、行筛选、字段/题目选择；任一所选报名字段或问卷题目 `is_sensitive=true`，或选择账号层敏感字段时，均由服务端触发敏感导出门槛 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §7 |
+| 细粒度导出 | 已支持单活动、单/多问卷、指定参与者、行筛选、字段/题目选择与 XLSX/CSV ZIP；敏感性由 preview/create 共用的服务端规则重算 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §7 |
 
 ## 开发入口
 
-仓库已经完成初始化。当前代码结构、本地启动、测试与部署命令以 [开发者指南](../developer-guide.md) 和各 package 的 `package.json` 为准；planning 文档不复制易漂移的命令。后续 T1/T4~T6 必须先读 [api-design.md](api-design.md) 并复用 `frontend/src/shared/api/accountEvent.ts`；不得改名或另造契约，T4/T5 应直接消费 T2 配对端点与 T3 快照/订阅服务。
+仓库已经完成初始化。当前代码结构、本地启动和修改方式以 [开发者指南](../developer-guide.md) 为准；发布验收以 [release-checklist.md](../release-checklist.md) 为准。后续契约演进仍必须先读 [api-design.md](api-design.md) 并复用 `frontend/src/shared/api/accountEvent.ts`。
 
 ## Roadmap
 
@@ -137,7 +138,6 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | 长期维护、保修、升级与责任划分 | 运维与商务约定 | PRD §16.2；不阻塞 V1 |
 | 机构独立域名方案 | host → organization 映射的实施计划 | PRD §12.2、§16.2；V1 统一使用 `chatcircle.empact.cn` |
 | 数据治理与法定删除请求处理 | 管理政策 | PRD §16.2；V1 不提供硬删除 |
-| operations-runbook.md（运维手册） | M5 阶段产物，现阶段无内容来源 | 本索引「有意跳过」表 |
 | License | Empact 对许可条款的决定 | 见上文 License 节 |
 | 阿里云短信认证生产配置 | 实际账号开通、AccessKey 安全下发、费用和测试号码 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §12 |
 | UI 设计稿与规划文档的业务冲突项 | 设计稿中的 Skill 入口、活动列表/推荐、通知中心等不作为实现依据；如需采纳须先回 PRD 评审 | 见 [ui-design.md](ui-design.md)「非目标」 |

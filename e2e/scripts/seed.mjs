@@ -30,9 +30,11 @@ export const FIXTURE = {
   outsiderPassword: 'e2e_user_pass_2',
   outsiderPhone: '13800003003',
   listenerNickname: '小听',
+  listenerFullName: '测试聆听者',
   outsiderNickname: '小外',
   answers: {
     nickname: '阿一',
+    fullName: '测试倾诉者',
     age: '26',
     wechat: 'secret_wx_001', // 敏感报名字段：普通导出必须过滤
     mood: '4', // 敏感问卷题（MOOD，模板内 is_sensitive）：普通导出必须过滤
@@ -112,10 +114,11 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     require_activity_approval: false, allow_sensitive_export: true, remark: '',
   }, ST);
 
-  // 标准报名字段：昵称(必填)、年龄(选填)、微信号(选填+敏感)
+  // 标准报名字段：姓名是 T0 冻结的每活动必填敏感字段；昵称保留为普通导出断言列。
   const fieldDefs = {};
   for (const [code, type, label, required, sensitive] of [
     ['nickname', 'text', '昵称', true, false],
+    ['FULL_NAME', 'text', '姓名', true, true],
     ['age', 'number', '年龄', false, false],
     ['wechat_id', 'text', '微信号', false, true],
   ]) {
@@ -158,6 +161,7 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     form_config_json: {
       fields: [
         { field_def_id: fieldDefs.nickname, enabled: true, required: true },
+        { field_def_id: fieldDefs.FULL_NAME, enabled: true, required: true },
         { field_def_id: fieldDefs.age, enabled: true, required: false },
         { field_def_id: fieldDefs.wechat_id, enabled: true, required: false },
       ],
@@ -194,6 +198,7 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     form_config_json: {
       fields: [
         { field_def_id: fieldDefs.nickname, enabled: true, required: true },
+        { field_def_id: fieldDefs.FULL_NAME, enabled: true, required: true },
       ],
     },
   }, AT);
@@ -235,15 +240,36 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     const auth = await createLegacyAndBind(username, password, phone);
     const reg = await call('POST', `${pbUrl}/api/cc/activities/${qualActivity.id}/register`, {
       activity_role: role,
-      answers: [{ field_def_id: fieldDefs.nickname, value: nickname }],
+      answers: [
+        { field_def_id: fieldDefs.nickname, value: nickname },
+        { field_def_id: fieldDefs.FULL_NAME, value: `${nickname}姓名` },
+      ],
     }, auth.token);
     await call('POST', `${pbUrl}/api/cc/registrations/${reg.registration.id}/transition`, {
       to: 'approved',
     }, AT);
-    return auth.record.id;
+    return auth;
   };
-  await registerAndApprove(FIXTURE.listenerUsername, FIXTURE.listenerPassword, FIXTURE.listenerPhone, 'listener', FIXTURE.listenerNickname);
+  const listener = await registerAndApprove(FIXTURE.listenerUsername, FIXTURE.listenerPassword, FIXTURE.listenerPhone, 'listener', FIXTURE.listenerNickname);
   await registerAndApprove(FIXTURE.outsiderUsername, FIXTURE.outsiderPassword, FIXTURE.outsiderPhone, 'speaker', FIXTURE.outsiderNickname);
+
+  // T7 全链路需要在主活动中同时存在一名已通过的聆听者，才能从两端真实签到并验证配对。
+  const listenerMainRegistration = await call(
+    'POST', `${pbUrl}/api/cc/activities/${activity.id}/register`,
+    {
+      activity_role: 'listener',
+      answers: [
+        { field_def_id: fieldDefs.nickname, value: FIXTURE.listenerNickname },
+        { field_def_id: fieldDefs.FULL_NAME, value: FIXTURE.listenerFullName },
+      ],
+    },
+    listener.token,
+  );
+  await call(
+    'POST', `${pbUrl}/api/cc/registrations/${listenerMainRegistration.registration.id}/transition`,
+    { to: 'approved' },
+    AT,
+  );
 
   // 培训：集合 API 创建（status 服务端强制 draft；checkin_qr_token 由 hooks 生成并随响应带回）
   // → 发布为 published。开放签到留给 spec 经管理端 UI 操作（与主链路活动签到同模式）。
@@ -284,6 +310,7 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     listenerUsername: FIXTURE.listenerUsername,
     listenerPassword: FIXTURE.listenerPassword,
     listenerPhone: FIXTURE.listenerPhone,
+    listenerFullName: FIXTURE.listenerFullName,
     outsiderUsername: FIXTURE.outsiderUsername,
     outsiderPassword: FIXTURE.outsiderPassword,
     outsiderPhone: FIXTURE.outsiderPhone,

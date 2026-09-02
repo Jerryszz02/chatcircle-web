@@ -1,8 +1,8 @@
 # 参与者手机号账号与活动全流程升级（专项 PRD）
 
-> 状态：T0 契约、T1 手机号认证、T2 配对后端、T3 实时数据服务与 T4 机构活动工作台已在默认分支`已验证`（T4 经 #41 合并）；T5 参与者配对体验在 `agent/t5-participant-pairing` `已验证`，尚未合并或部署；T6/T7 仍待实现
+> 状态：T0–T6 已在默认分支实现；T7 自动化集成与发布验收于 2026-09-02 `已验证`。真实阿里云短信、微信真机、备份恢复演练、合规签字与生产部署仍是上线门禁，不得因自动化通过称为`已部署`。
 >
-> 最近更新：2026-08-30
+> 最近更新：2026-09-02
 >
 > 适用项目：Chat Circles 现有 React + PocketBase 网站
 >
@@ -243,9 +243,9 @@ T0 已将目标契约冻结为 `2026-08-28.t0-v1`。机器名与共享 TypeScrip
 | T2 配对后端 | `已验证`并已合并默认分支（#38）：签到编号、队列、批量配对、迟到补配、释放/调整、现场锁定、本人最小快照、提交后 Realtime 失效消息、审计、并发与幂等测试 | T0 |
 | T3 实时数据服务 | `已验证`：单活动事务快照、报名/签到/问卷/配对指标、Realtime 失效化订阅与重连 | T0 |
 | T4 机构活动工作台 | `已验证`并已合并默认分支（#41）：创建分步向导、复制活动端点（代码/签到 token/问卷 token 重新生成，不复制历史数据）、生命周期首页、现场工作台六区域、管理员配对界面 | T1、T2、T3 |
-| T5 参与者配对体验 | `已验证`（本分支）：签到成功页、我的活动、活动现场页三入口共用 my-pairing 快照与本人 Realtime 失效事件；编号/等待/已配对/已调整/签到撤销五态以文字+图标展示，断线重连重拉快照 | T1、T2、T3 |
-| T6 细粒度导出 | 单活动/问卷/参与者、字段和题目选择、XLSX、CSV ZIP、敏感权限和审计 | T0、T3 |
-| T7 集成与发布验收 | 全链路 E2E、权限、配对并发、导出准确性、断线恢复、隐私与运维配置检查 | T1~T6 |
+| T5 参与者配对体验 | `已验证`并已合并：签到成功页、我的活动、活动现场页三入口共用 my-pairing 快照与本人 Realtime 失效事件；五态以文字+图标展示，断线重连重拉快照 | T1、T2、T3 |
+| T6 细粒度导出 | `已验证`并已合并（#43）：单活动/问卷/参与者、行列选择、XLSX、CSV ZIP、敏感权限、二次确认和审计 | T0、T3 |
+| T7 集成与发布验收 | `已验证`（自动化层）：全链路 E2E、权限、配对并发、导出准确性、断线恢复、隐私与运维配置检查；真机/生产项见 [`docs/release-checklist.md`](../release-checklist.md) | T1~T6 |
 
 执行波次：
 
@@ -258,7 +258,7 @@ T0
 
 T0 由主任务维护共享契约和迁移边界；并行任务不得各自发明同义字段或端点。Wave 2 开始前，应先把 Wave 1 的契约合并到最新 `origin/main`。
 
-T1/T2/T3 组合验证证据（2026-08-29，本 T2 分支合并 `origin/main@83f90e0`）：`suite_phone_auth.py` 覆盖手机号认证、存量绑定与换绑；`suite_pairings.py` 覆盖现场编号、配对、锁定前后边界、事务提交后 Realtime 失效消息、并发与幂等；`suite_live_summary.py` 覆盖双完成率交集、零分母、互补桶联合抑制、跨机构 404 与 Realtime topic 越权。合并后后端集成 535/535、迁移冒烟 62/62、前端 46 files / 320 tests、Playwright 3/3 均通过；管理端订阅服务另有 Vitest 覆盖六类快照依赖“先订阅再拉快照”、活动/问卷失效事件防抖和重连刷新。该证据不等于 T2 已合并或生产已部署。
+T7 自动化验收证据（2026-09-02，基于 `origin/main@f2436f3` 后的 T7 分支）：`bash scripts/t7-release-acceptance.sh` 通过发布配置 15/15、前端 54 files / 401 tests、后端集成 594/594、迁移往返、hooks/备份脚本语法、生产构建与 Playwright 3/3。主 E2E 在 360×740 Chromium 走通手机号登录、姓名必填报名、双角色 `S01/L01` 签到、`P01` 配对、两端 Realtime 更新、问卷与细粒度导出。该证据不包含真实外部服务或生产部署。
 
 ## 11. 验收清单
 
@@ -298,5 +298,5 @@ T1/T2/T3 组合验证证据（2026-08-29，本 T2 分支合并 `origin/main@83f9
 可在新对话中直接粘贴：
 
 ```text
-请先完整阅读 docs/planning/account-event-workflow-prd.md、docs/planning/api-design.md 和 docs/planning/README.md，并检查当前 origin/main 的代码现状。T0 契约已冻结，后续任务必须复用 frontend/src/shared/api/accountEvent.ts，不得自创同义字段或端点。T1/T2/T3 已验证；请按依赖选择 T4~T6 的一个任务，以一个 Worktree、一个 agent/<task-name> 分支、一个独立 PR 推进，并同步相关 planning 与 developer guide。
+请先完整阅读 docs/planning/account-event-workflow-prd.md、docs/release-checklist.md 和 docs/planning/README.md，并检查当前 origin/main 的代码现状。T0–T7 自动化层已实现并验证；如继续上线验收，只执行 release checklist 中尚未有当前证据的真实外部服务、真机、备份恢复、合规与生产部署门禁，不得伪造已完成状态。
 ```
