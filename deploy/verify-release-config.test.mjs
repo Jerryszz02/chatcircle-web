@@ -85,7 +85,7 @@ test('accepts active deployment safeguards in their intended steps', () => {
           docker compose --project-name "$preflight_project" build
           if [ "\${#CC_PHONE_HASH_KEY}" -lt 32 ]; then`,
     deploy: `
-          if curl -fsS http://127.0.0.1:8090/api/health >/dev/null 2>&1; then`,
+          if docker compose exec -T app wget -qO- http://127.0.0.1:8090/api/health >/dev/null 2>&1; then`,
   });
 
   assert.equal(hasPreflightComposeValidation(source), true);
@@ -94,13 +94,22 @@ test('accepts active deployment safeguards in their intended steps', () => {
   assert.equal(hasPostDeployHealthCheck(source), true);
 });
 
+test('rejects host-level PocketBase health checks after host port removal', () => {
+  const source = workflow({
+    deploy: `
+          if curl -fsS http://127.0.0.1:8090/api/health >/dev/null 2>&1; then`,
+  });
+
+  assert.equal(hasPostDeployHealthCheck(source), false);
+});
+
 test('rejects commented safeguards and commands in the wrong step', () => {
   const source = workflow({
     preflight: `
           # docker compose config -q
           # docker compose --project-name "$preflight_project" build
           # if [ "\${#CC_PHONE_HASH_KEY}" -lt 32 ]; then
-          # if curl -fsS http://127.0.0.1:8090/api/health >/dev/null 2>&1; then`,
+          # if docker compose exec -T app wget -qO- http://127.0.0.1:8090/api/health >/dev/null 2>&1; then`,
     deploy: `
           docker compose config -q
           docker compose --project-name "$preflight_project" build

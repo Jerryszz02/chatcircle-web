@@ -89,5 +89,5 @@ export function hasPreflightPhoneKeyValidation(workflow) {
 }
 
 export function hasPostDeployHealthCheck(workflow) {
-  return /^\s*if curl -fsS http:\/\/127\.0\.0\.1:8090\/api\/health >\/dev\/null 2>&1; then\s*$/m.test(deployStep(workflow));
+  return /^\s*if docker compose exec -T app wget -qO- http:\/\/127\.0\.0\.1:8090\/api\/health >\/dev\/null 2>&1; then\s*$/m.test(deployStep(workflow));
 }
