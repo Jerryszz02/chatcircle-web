@@ -19,7 +19,7 @@
 5. 同步本批次涉及的公众 README、开发者指南、部署手册和规划文档。
 6. 修复当前 production dependency 安全公告，并增加持续审计门禁。
 
-建议拆成三个独立 PR，依次合并。每个 PR 必须从当时最新的 `origin/main` 新建 `agent/<task-name>` 分支；不得在默认分支直接开发，不得自动合并。
+建议拆成三个独立 PR，依次合并。每个 PR 必须从当时最新的 `origin/main` 新建分支，分支名遵循仓库全局 Git 规则 `<type>/<kebab-case 简述>-<YYYYMMDD>`（type 与该 PR 主 commit 一致）；不得在默认分支直接开发，不得自动合并。
 
 ## 2. 非目标
 
@@ -42,7 +42,7 @@
 | 短信生产凭据 | 部署负责人提供的脱敏容器检查显示 AccessKey ID/Secret 未设置，签名和旧单模板变量已设置 | `待确认`：需负责人在 ECS 写入新变量后才能真机验证 |
 | 管理员注册 | 后端 `auth.pb.js` 强制 email；前端 `AdminRegisterPage.tsx` 和 `registerAdmin()` 未收集/提交 email | `计划中`：网页注册必然得到 `INVALID_EMAIL` |
 | 文档 | 根 README 仍称参与者无需手机号/邮箱；开发者指南仍称生产 app 绑定回环 `8090` | `计划中`：与当前代码不一致 |
-| 前端依赖 | `npm audit --omit=dev`：2 个 moderate；当前 `react-router-dom/react-router=6.30.4` | `计划中` |
+| 前端依赖 | `npm audit --omit=dev`：2 个 moderate；lockfile 实际解析 `react-router-dom/react-router=6.30.4`（`package.json` 声明 `^6.28.0`，实际以 lockfile 为准） | `计划中` |
 | MCP 依赖 | `npm audit --omit=dev`：`qs@6.15.3` 含 2 个 moderate advisory | `计划中` |
 | CI 审计 | `ci.yml` 未运行 production dependency audit | `计划中` |
 
@@ -63,6 +63,8 @@
 
 - `100002` 修改绑定手机号模板：它是通用换绑描述，但当前产品会分别向旧号和新号发送验证码，使用 `100005`/`100004` 能准确说明每条短信的目的。
 - `100003` 重置密码模板：参与者以短信验证码登录，不存在参与者短信重置密码流程。
+
+> 模板 CODE 与内容按阿里云控制台**赠送模板**核对无误（2026-09-03 控制台截图）：四个模板的验证码变量均为 `${code}`、有效期变量均为 `${min}`，与 `sendCode()` 现有 `TemplateParam = { code: '##code##', min: ... }` 完全一致，故无需按模板区分发送参数，CODE 作为本批次固定实现常量。
 
 阿里云号码认证服务的赠送签名必须与赠送模板搭配；`SchemeName` 是可选参数，不传时使用默认方案。实现与联调应以以下官方资料为准：
 
@@ -97,7 +99,7 @@ ALIBABA_CLOUD_SECURITY_TOKEN  # 仅 STS 临时凭据需要
 CC_SMS_SCHEME_NAME            # 不填时使用阿里云默认方案
 ```
 
-`CC_SMS_TEMPLATE_CODE` 可为迁移期保留非生产兼容，但生产预检不得用它替代上述场景变量，否则仍可能让所有场景静默共用一个模板。
+`CC_SMS_TEMPLATE_CODE` 可为迁移期保留非生产兼容，但生产预检不得用它替代上述场景变量，否则仍可能让所有场景静默共用一个模板。`docker-compose.yml` 在迁移期仍保留传入 `CC_SMS_TEMPLATE_CODE`（对旧版本/回滚无副作用），但新后端代码（§5.3）不再读取它，也不以它作为预检依据；真机验收通过后可由负责人从生产 `.env` 移除。
 
 ### 4.3 管理员邮箱注册边界
 
@@ -115,7 +117,7 @@ CC_SMS_SCHEME_NAME            # 不填时使用阿里云默认方案
 ### 5.1 Git 信息
 
 ```text
-branch: agent/deploy-sms-readiness
+branch: fix/deploy-sms-readiness-20260903
 commit: fix(deploy): validate SMS configuration and container health
 PR:     fix(deploy): validate SMS configuration and container health
 ```
@@ -139,6 +141,8 @@ deploy/verify-release-config.test.mjs
 4. 失败时输出 `docker compose ps` 和 `docker compose logs --tail=120 app`。
 5. 不为修检查重新发布宿主机 `8090`，也不把 debug override 变成生产默认配置。
 6. 更新静态发布配置检查，使其要求部署步骤中存在活动的容器健康检查；注释中的命令或放错步骤的命令不能通过。
+
+> 判定语义：compose 的 healthcheck（`start_period=10s`/`interval=10s`/`retries=12`）理论上约 140s 才把坏容器标记为 `unhealthy`，在 90 秒等待窗口内它通常仍处于 `starting`。因此判定标准是「90 秒内未达 `healthy` 即失败」，并非等待 `unhealthy` 判定。
 
 优先复用 `docker-compose.yml` 已声明的 app healthcheck。无需从宿主机再次请求已不可达的 `127.0.0.1:8090`。
 
@@ -239,7 +243,7 @@ git diff --check
 ### 6.1 Git 信息
 
 ```text
-branch: agent/admin-email-registration
+branch: fix/admin-email-registration-20260903
 commit: fix(auth): collect email during admin registration
 PR:     fix(auth): collect email during admin registration
 ```
@@ -279,7 +283,7 @@ frontend/src/features/admin/pages/AdminRegisterPage.test.tsx
 - 密码不一致仍被拦截。
 - 正常请求四个字段齐全。
 - 注册成功后调用登录并跳转管理端。
-- `EMAIL_TAKEN`、`INVALID_EMAIL` 等后端错误能显示给用户。
+- `EMAIL_TAKEN`、`INVALID_EMAIL` 等后端错误的 message 文案能显示给用户（复用 `normalizeApiError` 现有实现，只依赖后端返回 `message`；前端不需要识别业务 code，故不扩展错误码类型）。
 
 后端 `backend/tests/integration/suite_admin_email.py` 已覆盖 email 必填、格式、归一化、重复值与匿名响应不泄露 email；不得削弱这些断言。
 
@@ -294,9 +298,9 @@ docs/release-checklist.md
 docs/planning/technical-design.md
 docs/planning/security-privacy.md
 docs/planning/README.md
-frontend/src/features/admin/pages/AdminRegisterPage.tsx
-frontend/src/shared/api/http.ts
 ```
+
+> 注：`AdminRegisterPage.tsx` 与 `http.ts` 属 §6.2 的代码改动，其注释/契约说明随 §6.2 一并更新，此处不重复列出。
 
 要求：
 
@@ -324,7 +328,7 @@ git diff --check
 ### 7.1 Git 信息
 
 ```text
-branch: agent/dependency-audit
+branch: ci/dependency-audit-20260903
 commit: ci(security): audit production dependencies
 PR:     ci(security): audit production dependencies
 ```
