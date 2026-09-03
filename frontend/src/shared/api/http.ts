@@ -116,13 +116,14 @@ export function health(client: PocketBase): Promise<unknown> {
 }
 
 /**
- * 管理员邀请码注册（FR-ORG-002/003、AC-02）：邀请码明文 + 用户名 + 密码，
+ * 管理员邀请码注册（FR-ORG-002/003、AC-02）：邀请码明文 + 用户名 + 邮箱 + 密码，
  * 服务端单事务校验邀请码并创建 admin_accounts；并发使用同一邀请码只能成功一次。
- * 请求体契约字段为 invite_code（与后端 auth.pb.js 一致，已对齐）。
+ * 请求体契约字段为 invite_code / username / email / password（与后端 auth.pb.js 一致，已对齐）。
+ * 邮箱由注册页归一化（trim + 小写）后提交，本函数不在日志中打印完整请求体。
  */
 export function registerAdmin(
   client: PocketBase,
-  input: { invite_code: string; username: string; password: string },
+  input: { invite_code: string; username: string; email: string; password: string },
 ): Promise<unknown> {
   return apiPost(client, '/api/cc/auth/admin-register', input);
 }

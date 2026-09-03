@@ -80,7 +80,7 @@ npm install
 npm run dev
 ```
 
-Docker 一键启动（生产同构）：`cp .env.example .env` → **先填好 `.env`** → `docker compose up --build` → `http://localhost:8090`。注意 compose 对四个变量用了 `${VAR:?}` 必填校验，而 `.env.example` 里它们默认注释掉，不填会在启动前的变量插值阶段直接报错：`PB_SUPERUSER_EMAIL` / `PB_SUPERUSER_PASSWORD`（backup 服务登录用超管）、`ALIYUN_ACCESS_KEY_ID` / `ALIYUN_ACCESS_KEY_SECRET`（caddy 的 DNS-01 证书签发）。本地只是想跑起来看看时，四个变量可填占位值（backup 登录失败、caddy 证书签发失败属预期，app 本身在 `http://localhost:8090` 可用）；日常本地开发更推荐上面的原生启动方式。
+Docker 一键启动（生产同构）：`cp .env.example .env` → **先填好 `.env`** → `docker compose up --build`。注意 compose 对五个变量用了 `${VAR:?}` 必填校验，而 `.env.example` 里它们默认注释掉，不填会在启动前的变量插值阶段直接报错：`CC_PHONE_HASH_KEY`（手机号 HMAC 密钥）、`PB_SUPERUSER_EMAIL` / `PB_SUPERUSER_PASSWORD`（backup 服务登录用超管）、`ALIYUN_ACCESS_KEY_ID` / `ALIYUN_ACCESS_KEY_SECRET`（caddy 的 DNS-01 证书签发）。本地只是想跑起来看看时可用占位值填上（backup 登录、caddy 证书签发失败属预期），但**生产基础 compose 默认不向 host 发布 app 的 `8090`**——要本机直连调试，需显式叠加 `docker compose -f docker-compose.yml -f deploy/docker-compose.debug.yml up -d` 发布回环 `127.0.0.1:8090`（该 override 存在「本地伪造 XFF」风险，见 deploy/README.md §5，仅限知悉下使用）。日常本地开发更推荐上面的原生启动方式。
 
 常用端口约定：开发后端 8090 / 种子脚本临时实例 8096 / 集成测试 8097 / 迁移冒烟 8099 / e2e 18090+14173。
 
@@ -196,7 +196,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 | POST `/api/cc/auth/participant` | anon | **仅存量用户名账号迁移登录**：用户名小写归一，只校验已存在账号；未知用户名与错误密码同形拒绝且不建号、不签发 token；双层限流（同人+IP 5 次/10min、同 IP 跨用户名 30 次/10min 防喷洒） |
 | POST `/api/cc/auth/participant/request-code` `/verify-code` | anon | 手机号验证码请求与登录/注册；响应不区分号码是否已注册，成功响应不含内部 username/完整手机号/HMAC |
 | POST `/api/cc/auth/participant/bind-phone` `/change-phone` | participant | 存量账号绑定保留 participant_id；换绑需旧号和新号双验证码，冲突不自动覆盖 |
-| POST `/api/cc/auth/admin-register` | anon | 一次性邀请码注册管理员，事务内消费邀请码+建号+审计 |
+| POST `/api/cc/auth/admin-register` | anon | 一次性邀请码注册管理员（邀请码 + 用户名 + 必填邮箱 + 密码），事务内消费邀请码+建号+审计 |
 | （非路由）PB 内置 auth-with-password | — | `authguard.pb.js` 补限流：per-IP 20 次/10min + per-身份+IP 5 次失败/10min |
 
 **活动生命周期**（`activities.pb.js`，另挂模型钩子：创建时强制 `checkin_qr_token = 24 位随机串`、名额不变量校验）
@@ -294,7 +294,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 ### 5.7 后端测试体系（`backend/tests/`）
 
-- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 22 个 suite（当前 594 断言）：越权矩阵、名额/配对并发、状态机、手机号认证、Realtime ACL、复制活动、问卷资格、v1/v2 导出准确性与敏感门禁、限流、备份告警、无硬删除和安全加固等。
+- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 22 个 suite（当前 601 断言）：越权矩阵、名额/配对并发、状态机、手机号认证、Realtime ACL、复制活动、问卷资格、v1/v2 导出准确性与敏感门禁、限流、备份告警、无硬删除和安全加固等。
 - `migration_smoke.sh`：seed 及后续迁移局部回滚 → 全量 down → sqlite3 直查 26 个业务/内部集合清零 → 再 up，随后 serve 抽查，共 62 项。
 - **两条强制规则**：① authguard 对内置 auth-with-password 按 IP 限 25 次/10min，一轮全量当前使用 22 次（余量 3）——新增套件仍应避免消耗这项预算，管理员登录态用 impersonate，参与者走 `/api/cc/auth/participant`；② 新增带 `organization_id` 的接口，**必须同 PR 补机构越权用例**（通用端点放 `suite_acl.py`，领域聚合端点可放对应 suite）。
 
@@ -345,7 +345,7 @@ src/
 | 区 | 路由 |
 |---|---|
 | 参与者 `/`（公开页不要求登录） | `/` 落地页（现有活动最近 2 场、往期活动公开推文最近 2 篇）、`/activities` 现有活动（仅未结束场次）、`/activities/past` 全部公开推文、`/a/:activityId` 详情、`/a/:activityId/register` 报名、`/login`；需会话：`/me` 我的、`/checkin/:token` 扫码签到、`/survey/:qrToken` 填问卷、`/trainings`、`/training-checkin/:token` |
-| 机构 `/admin` | 公开：`/admin/login`、`/admin/register`（邀请码）；守卫：`/admin/activities`（+`/new` T4 分步创建向导、`/:activityId` 生命周期面板 + 五 tab 详情含「现场工作台」）、`/admin/trainings`(+`/:id`)、`/admin/dashboard`、`/admin/exports`、`/admin/audit` |
+| 机构 `/admin` | 公开：`/admin/login`、`/admin/register`（邀请码 + 用户名 + 邮箱 + 密码）；守卫：`/admin/activities`（+`/new` T4 分步创建向导、`/:activityId` 生命周期面板 + 五 tab 详情含「现场工作台」）、`/admin/trainings`(+`/:id`)、`/admin/dashboard`、`/admin/exports`、`/admin/audit` |
 | 超管 `/super` | 公开：`/super/login`；守卫：`/super/organizations`（机构+邀请码+开关）、`/super/approvals`、`/super/activities`、`/super/posts`（内容推文）、`/super/dashboard`、`/super/exports`、`/super/audit`、`/super/system`（备份告警+模板管理） |
 
 ### 6.6 样式体系
@@ -401,7 +401,7 @@ MCP 是由 WorkBuddy、Kimi、Claude、Codex 等本地客户端启动的 STDIO �
 
 | 层 | 位置 | 运行 | 覆盖 |
 |---|---|---|---|
-| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 当前 54 files / 401 tests：页面/组件行为、路由守卫、手机号交互、Realtime 失效化、工作台口径、配对卡五态与导出向导 |
+| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 当前 55 files / 410 tests：页面/组件行为、路由守卫、手机号交互、Realtime 失效化、工作台口径、配对卡五态与导出向导 |
 | 后端集成 + 迁移冒烟 | `backend/tests/` | `bash backend/tests/run_integration.sh`、`migration_smoke.sh` | 越权矩阵、状态机、并发名额、导出、限流、无硬删除……（AC-01~23 映射见 docs/planning/test-plan.md） |
 | E2E 主链路 | `e2e/` | `cd e2e && npm test`（环境全自动自举，与本地库隔离） | 手机号登录→报名→审核→双角色签到/配对/Realtime→问卷→细粒度导出，外加培训链路 |
 | T7 发布验收 | `scripts/t7-release-acceptance.sh` | `bash scripts/t7-release-acceptance.sh` | 串联配置 15 项、hooks/备份语法、前端、迁移、后端集成与 E2E；不部署、不读真实 `.env` |
@@ -411,7 +411,7 @@ CI（`.github/workflows/ci.yml`，push 到 main 与全部 PR 触发，三 job �
 ## 10. 部署与运维速览
 
 - **一体化镜像**（根 `Dockerfile`）：stage1 构建前端 → stage2 alpine 下载 PB 0.28.4（sha256 硬校验）+ 拷入 `pb_public`/`pb_migrations`/`pb_hooks`；`VOLUME /pb/pb_data`；容器启动时 `serve` 自动应用迁移（与本地需手动 `migrate up` 不同）。
-- **compose 三服务**：`app`（端口只绑 127.0.0.1:8090）、`backup`（crond 每日北京时间 02:00 跑 `deploy/backup.sh`：PB `/api/backups` 一致性快照 → 下载 ZIP → 校验 → 删服务端副本 → 30 天滚动 → 写 `last_backup.json` 标记并直写 `audit_logs` 驱动超管告警）、`caddy`（TLS 走阿里云 DNS-01，安全响应头，封 `/_/*` 管理台，反代 app:8090 并覆写 XFF）。
+- **compose 三服务**：`app`（生产基础 compose 默认不向 host 发布端口，只在 Docker 私网供 Caddy/backup 以 app:8090 访问；显式叠加 `deploy/docker-compose.debug.yml` 才发布回环 `127.0.0.1:8090`）、`backup`（crond 每日北京时间 02:00 跑 `deploy/backup.sh`：PB `/api/backups` 一致性快照 → 下载 ZIP → 校验 → 删服务端副本 → 30 天滚动 → 写 `last_backup.json` 标记并直写 `audit_logs` 驱动超管告警）、`caddy`（TLS 走阿里云 DNS-01，安全响应头，封 `/_/*` 管理台，反代 app:8090 并覆写 XFF）。
 - **部署流水线**：push main → `deploy.yml` SSH 到 ECS `/opt/chatcircle` → `git merge --ff-only origin/main` → `docker compose up --build -d`。
 - **恢复**：stop app → 用 `cc_daily_*.zip` 覆盖 pb_data → start（compose 文件尾注释）。
 - **环境变量**：全部见 `.env.example`（PB 版本、备份保留天数、超管与 agent 服务账号凭据、阿里云密钥；真实 .env 不入库）。

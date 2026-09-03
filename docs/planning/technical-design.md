@@ -156,7 +156,7 @@ chatcircle-web/
 | 路由 | 页面 |
 | --- | --- |
 | `/admin/login` | 管理员登录 |
-| `/admin/register` | 邀请码注册（邀请码 + 用户名 + 密码） |
+| `/admin/register` | 邀请码注册（邀请码 + 用户名 + 邮箱 + 密码） |
 | `/admin/activities`、`/admin/activities/:activityId` | 活动列表与详情（含报名审核、签到控制台、问卷管理子页） |
 | `/admin/trainings`、`/admin/trainings/:trainingId` | 培训列表/创建与详情（发布/关闭、签到管理：二维码、开放/关闭、名单、补签/撤销） |
 | `/admin/dashboard` | 本机构看板 |
