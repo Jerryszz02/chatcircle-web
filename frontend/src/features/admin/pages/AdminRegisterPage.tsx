@@ -9,15 +9,19 @@ import { Button, Input, PageLayout } from '../../../shared/ui';
  *  含小写归一化——后端 auth.pb.js 存小写，前端先归一化再提交，所见即所存）。 */
 const USERNAME_PATTERN = /^[a-z0-9_]{4,20}$/;
 
+/** 邮箱格式：与后端 auth.pb.js 的简版规则保持一致（前端校验仅改善体验，后端仍为权威）。 */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 /**
  * 邀请码注册（/admin/register，FR-ORG-002/003、AC-02）。
- * 输入邀请码明文 + 用户名 + 密码，服务端单事务校验邀请码并创建 admin_accounts；
+ * 输入邀请码明文 + 用户名 + 邮箱 + 密码，服务端单事务校验邀请码并创建 admin_accounts；
  * 注册成功后直接以新凭据登录进入后台。
  */
 export function AdminRegisterPage() {
   const navigate = useNavigate();
   const [inviteCode, setInviteCode] = useState('');
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [error, setError] = useState('');
@@ -39,6 +43,12 @@ export function AdminRegisterPage() {
       setError('用户名须为 4–20 位字母、数字或下划线');
       return;
     }
+    // 邮箱必填：trim + 小写归一化后提交；格式检查对齐后端简版规则，后端仍为权威。
+    const normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail === '' || normalizedEmail.length > 254 || !EMAIL_PATTERN.test(normalizedEmail)) {
+      setError('请输入有效的邮箱地址');
+      return;
+    }
     if (password.length < 8) {
       setError('密码至少 8 位');
       return;
@@ -52,6 +62,7 @@ export function AdminRegisterPage() {
       await registerAdmin(adminAuth.client, {
         invite_code: inviteCode.trim(),
         username: name,
+        email: normalizedEmail,
         password,
       });
       // 注册成功后以新凭据登录（邀请码已被服务端消费，不可复用）。
@@ -80,6 +91,16 @@ export function AdminRegisterPage() {
           onChange={(e) => setUsername(e.target.value)}
           hint="4–20 位字母、数字或下划线；大写字母将自动转为小写"
           autoComplete="username"
+          required
+        />
+        <Input
+          label="邮箱"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          hint="用于后续找回与通知，注册后不可修改"
+          autoComplete="email"
+          maxLength={254}
           required
         />
         <Input
