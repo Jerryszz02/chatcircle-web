@@ -98,7 +98,8 @@ jobs:
               echo "ERROR: CC_PHONE_HASH_KEY 必须至少 32 字符" >&2
               exit 1
             fi
-            if [ "${CC_ENVIRONMENT:-}" = "production" ] && [ "${CC_SMS_PROVIDER:-}" = "aliyun" ]; then
+            sms_provider="$(printf "%s" "${CC_SMS_PROVIDER:-}" | tr "A-Z" "a-z")"
+            if [ "${CC_ENVIRONMENT:-}" = "production" ] && [ "$sms_provider" = "aliyun" ]; then
               missing=""
               for name in \
                 ALIBABA_CLOUD_ACCESS_KEY_ID \
