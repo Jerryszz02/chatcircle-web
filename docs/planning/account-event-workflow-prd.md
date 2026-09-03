@@ -40,6 +40,7 @@
 ### 2.1 外部服务边界
 
 - 阿里云“短信认证”支持个人或企业实名认证账号，使用平台预设签名和模板，不要求本阶段自行提交企业资质、短信签名和短信模板；它只适合验证码，不等于普通短信发送能力。实现前仍需在实际阿里云账号控制台确认开通资格、价格和可用地区。官方资料：[短信认证新手指南](https://help.aliyun.com/zh/pnvs/getting-started/sms-authentication-service-novice-guide)、[短信认证服务说明](https://help.aliyun.com/zh/pnvs/user-guide/sms-authentication-service)。
+- 短信认证按每条验证码的实际用途选择模板：登录/注册用登录/注册模板，首次绑定与换绑新号用绑定新手机号模板，换绑时验证当前旧号用验证绑定手机号模板；模板 CODE 为阿里云控制台赠送模板的固定实现常量（详见 [production-readiness-batch-1-plan.md](production-readiness-batch-1-plan.md) §4.1）。
 - 活动提醒属于普通通知短信，不能复用短信认证接口。后续若启用，须走普通短信产品的签名、模板与资质流程；不得发送微信群邀请、加群诱导或营销信息。官方资料：[通知短信模板规范](https://help.aliyun.com/zh/sms/user-guide/notification-template-specifications)。
 - PocketBase Realtime 基于 SSE，作为实时看板与本人配对状态的推送机制；数据库仍是最终事实来源。官方资料：[PocketBase Realtime API](https://pocketbase.io/docs/api-realtime/)。
 

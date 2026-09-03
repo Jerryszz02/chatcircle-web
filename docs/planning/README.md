@@ -45,9 +45,9 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 |---|---|
 | 生成请求 | 归档 2026-08-27 专项升级，并于 2026-08-28 实施 T0 共享契约和 T1 手机号账号 |
 | 初始生成 | 2026-08-05 |
-| 最近同步 | 2026-09-03：新增上线前第一批整改计划；计划项均为`计划中`，生产短信与外部/人工验收仍`待确认`。 |
+| 最近同步 | 2026-09-03：新增上线前第一批整改计划；PR 1（部署健康检查与短信生产闭环）已实现，PR 2/PR 3 仍`计划中`，生产短信与外部/人工验收仍`待确认`。 |
 | 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb`；当前文档分支基于 `origin/main@05411bf`。 |
-| 本次关键代码证据 | 生产 compose 不发布 app `8090`，但 deploy workflow 仍请求宿主机 `8090`；phone hook 仅读取单一短信模板；管理员注册前后端 email 契约不一致。 |
+| 本次关键代码证据 | 生产 compose 不发布 app `8090`；deploy workflow 已改用容器 healthcheck 状态判定（不再请求宿主机 8090）；phone hook 已按业务场景选择短信模板；管理员注册前后端 email 契约仍不一致（PR 2）。 |
 | 本次验证命令 | `npm audit --omit=dev`（frontend：2 个 moderate；mcp：1 个受影响包、2 个 moderate advisory）；本次为计划归档，未重新运行完整 T7 验收。 |
 | 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T1–T6 共用 `2026-08-28.t0-v1`。 |
 
@@ -62,7 +62,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | [test-plan.md](test-plan.md) | 测试与 CI 策略：测试分层、AC-01~26 验收映射（AC-24~26 为 2026-08 后端改版续编）、越权自动化测试与 CI 流水线 |
 | [ui-design.md](ui-design.md) | 前端视觉与交互规范：色彩/字体/间距/动效 token、组件规则、响应式与无障碍基线、文案语气、图表样式；仅含纯前端 UI，业务口径以 PRD 与本目录其他文档为准 |
 | [account-event-workflow-prd.md](account-event-workflow-prd.md) | **2026-08-27 专项升级主入口**：手机号账号、机构活动全流程、实时看板、现场编号与配对、参与者端展示、细粒度导出、隐私边界、API 草案、并行任务和验收清单 |
-| [production-readiness-batch-1-plan.md](production-readiness-batch-1-plan.md) | **上线前第一批整改实施任务书**：部署健康检查、短信场景模板与生产预检、管理员注册邮箱、文档同步、依赖修复与审计门禁；当前为`计划中` |
+| [production-readiness-batch-1-plan.md](production-readiness-batch-1-plan.md) | **上线前第一批整改实施任务书**：部署健康检查、短信场景模板与生产预检、管理员注册邮箱、文档同步、依赖修复与审计门禁；PR 1 已实现，PR 2/PR 3 仍`计划中` |
 | [release-checklist.md](../release-checklist.md) | **T7 当前发布验收入口**：自动化门禁、测试环境、真机/合规/生产放行；运维操作细节链接 `deploy/README.md` |
 
 ## 有意跳过的目录文档

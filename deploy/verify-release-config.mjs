@@ -19,6 +19,7 @@ import {
   hasPostDeployHealthCheck,
   hasPreflightComposeValidation,
   hasPreflightPhoneKeyValidation,
+  hasPreflightSmsValidation,
   stripConfigComments,
 } from './release-config-checks.mjs';
 
@@ -111,10 +112,34 @@ check(
   '预检步骤缺少活动的 CC_PHONE_HASH_KEY 长度检查',
 );
 
+const smsTemplateVars = [
+  'CC_SMS_TEMPLATE_LOGIN_REGISTER_CODE',
+  'CC_SMS_TEMPLATE_BIND_NEW_CODE',
+  'CC_SMS_TEMPLATE_VERIFY_BOUND_CODE',
+];
+
 check(
-  '部署 workflow 部署后健康检查',
+  'app 容器注入三个场景短信模板变量',
+  smsTemplateVars.every((name) => activeCompose.includes(`${name}: \${${name}:-}`)),
+  `缺少：${smsTemplateVars.filter((name) => !activeCompose.includes(`${name}: \${${name}:-}`)).join(', ')}`,
+);
+
+check(
+  '三个场景短信模板变量在 .env.example 留有占位',
+  smsTemplateVars.every((name) => new RegExp(`^#?\\s*${name}=`, 'm').test(files.envExample)),
+  `缺少：${smsTemplateVars.filter((name) => !new RegExp(`^#?\\s*${name}=`, 'm').test(files.envExample)).join(', ')}`,
+);
+
+check(
+  '部署 workflow 生产短信必填变量预检',
+  hasPreflightSmsValidation(files.deployWorkflow),
+  '预检步骤缺少对生产短信全部必填变量的检查（ALIBABA_CLOUD_ACCESS_KEY_ID/SECRET、CC_SMS_SIGN_NAME 与三个模板 CODE）',
+);
+
+check(
+  '部署 workflow 部署后容器健康检查',
   hasPostDeployHealthCheck(files.deployWorkflow),
-  '生产更新步骤缺少活动的 /api/health 检查',
+  '生产更新步骤缺少活动的容器健康检查（docker compose ps -q app + docker inspect State.Health.Status）',
 );
 
 check(

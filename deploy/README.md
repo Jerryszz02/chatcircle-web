@@ -133,10 +133,13 @@ docker compose start app
 
 ## 6. 自动部署（GitHub Actions）
 
-`.github/workflows/deploy.yml`：push / 合并到 `main` 后，runner 经 SSH 登录 ECS，
-在 `/opt/chatcircle` 执行 `git fetch && git merge --ff-only origin/main &&
-docker compose up --build -d`——即 §2 手动升级命令的自动化，无需人工上服务器。
-也可在 Actions 页面手动触发（workflow_dispatch）。
+`.github/workflows/deploy.yml`：push / 合并到 `main` 后，runner 经 SSH 登录 ECS，分两阶段完成——
+先在临时 worktree 中用生产 `.env` 校验 Compose 配置、构建候选镜像，并在候选 app 容器内预检
+`CC_PHONE_HASH_KEY >= 32` 以及 `CC_ENVIRONMENT=production` 且 `CC_SMS_PROVIDER=aliyun` 时的全部
+短信必填变量（只输出缺失变量名，绝不输出变量值）；预检通过后才
+`git merge --ff-only origin/main && docker compose up --build -d`，随后按容器 healthcheck 状态轮询
+（`docker compose ps -q app` + `docker inspect ... .State.Health.Status`，最多约 90 秒）判定 healthy，
+**不再请求已不可达的宿主机 `127.0.0.1:8090`**。也可在 Actions 页面手动触发（workflow_dispatch）。
 
 - 所需 Secrets：`ECS_SSH_PRIVATE_KEY`（部署专用密钥对，公钥在服务器
   `authorized_keys`，comment `github-actions-deploy-chatcircle`）、`ECS_HOST`、`ECS_USER`。
@@ -162,6 +165,10 @@ docker compose up --build -d`——即 §2 手动升级命令的自动化，无�
 - `docker-compose.yml`：通过 YAML 语法与结构自查（depends_on/healthcheck/环境插值）；
   安全加固新增项（三服务 logging、backup TZ + tzdata 安装）经 YAML 解析与结构断言；
   **未经 `docker compose config` 与真实构建验证**（本机无 Docker）。
+- 2026-09 部署健康检查与短信生产闭环：`node deploy/verify-release-config.mjs` 与
+  `node --test deploy/verify-release-config.test.mjs` 本机全过；`deploy.yml` 改用容器
+  healthcheck 状态轮询并在预检中新增 production+aliyun 短信必填变量检查，均为静态核对，
+  **未在真实 Docker / ECS 环境运行**（本机无 Docker），首次部署时以 §2 冒烟清单核对。
 - `deploy/Caddyfile`：安全头 / `/_/` 封闭 / XFF 覆盖为人工语法核对，**本机无 caddy，
   未经 `caddy validate`**；首次部署时请先 `docker compose exec caddy caddy validate
   --config /etc/caddy/Caddyfile`。
