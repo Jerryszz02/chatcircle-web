@@ -90,12 +90,31 @@ jobs:
           echo "Building candidate images..."
           docker compose --project-name "$preflight_project" build
 
-          # Compose 的 :? 只能验证非空；手机号 HMAC key 还有 >=32 字符的运行时约束。
-          # 在隔离 project 中验证，不挂生产端口、不启动依赖、也不接触生产 pb_data。
+          # Compose 的 :? 只能验证非空；手机号 HMAC key 还有 >=32 字符的运行时约束，
+          # 生产短信凭据/场景模板在 production+aliyun 时必须全部非空。这里在隔离 project 的
+          # 候选 app 容器内校验（变量已实际注入容器），不挂生产端口、不启动依赖、也不接触生产 pb_data。
           docker compose --project-name "$preflight_project" run --rm --no-deps --entrypoint sh app -eu -c '
             if [ "${#CC_PHONE_HASH_KEY}" -lt 32 ]; then
               echo "ERROR: CC_PHONE_HASH_KEY 必须至少 32 字符" >&2
               exit 1
+            fi
+            if [ "${CC_ENVIRONMENT:-}" = "production" ] && [ "${CC_SMS_PROVIDER:-}" = "aliyun" ]; then
+              missing=""
+              for name in \
+                ALIBABA_CLOUD_ACCESS_KEY_ID \
+                ALIBABA_CLOUD_ACCESS_KEY_SECRET \
+                CC_SMS_SIGN_NAME \
+                CC_SMS_TEMPLATE_LOGIN_REGISTER_CODE \
+                CC_SMS_TEMPLATE_BIND_NEW_CODE \
+                CC_SMS_TEMPLATE_VERIFY_BOUND_CODE; do
+                if [ -z "$(printenv "$name")" ]; then
+                  if [ -n "$missing" ]; then missing="$missing $name"; else missing="$name"; fi
+                fi
+              done
+              if [ -n "$missing" ]; then
+                echo "ERROR: 生产短信必填变量缺失（仅列变量名，不含值）: $missing" >&2
+                exit 1
+              fi
             fi
           '
           REMOTE
@@ -119,10 +138,18 @@ jobs:
           # 预检已经验证配置和构建；这里正常会命中构建缓存。
           docker compose up --build -d
 
-          # app 默认不再向 host 发布 8090；从容器内部检查 /api/health，最多等待约 90 秒。
+          # 生产 app 不再向 host 发布 8090；改用容器 healthcheck 状态判定健康，
+          # 不再请求已不可达的宿主机 127.0.0.1:8090。最多等待约 90 秒（45 × 2s）。
+          app_id="$(docker compose ps -q app)"
+          if [ -z "$app_id" ]; then
+            echo "ERROR: app 容器未创建" >&2
+            docker compose ps || true
+            exit 1
+          fi
           healthy=0
           for attempt in $(seq 1 45); do
-            if docker compose exec -T app wget -qO- http://127.0.0.1:8090/api/health >/dev/null 2>&1; then
+            status="$(docker inspect --format '{{.State.Health.Status}}' "$app_id" 2>/dev/null || echo '')"
+            if [ "$status" = "healthy" ]; then
               healthy=1
               break
             fi
@@ -130,7 +157,7 @@ jobs:
           done
 
           if [ "$healthy" -ne 1 ]; then
-            echo "ERROR: 部署后 app 健康检查失败" >&2
+            echo "ERROR: 部署后 app 容器健康检查失败（90 秒内未达 healthy）" >&2
             docker compose ps || true
             docker compose logs --tail=120 app || true
             exit 1

@@ -88,6 +88,23 @@ export function hasPreflightPhoneKeyValidation(workflow) {
   return /^\s*if \[ "\$\{#CC_PHONE_HASH_KEY\}" -lt 32 \]; then\s*$/m.test(preflightStep(workflow));
 }
 
+// 生产（production + aliyun）短信必填变量（§4.2）。STS token 与 scheme 属可选，不在此列。
+export const SMS_REQUIRED_VARS = [
+  'ALIBABA_CLOUD_ACCESS_KEY_ID',
+  'ALIBABA_CLOUD_ACCESS_KEY_SECRET',
+  'CC_SMS_SIGN_NAME',
+  'CC_SMS_TEMPLATE_LOGIN_REGISTER_CODE',
+  'CC_SMS_TEMPLATE_BIND_NEW_CODE',
+  'CC_SMS_TEMPLATE_VERIFY_BOUND_CODE',
+];
+
+export function hasPreflightSmsValidation(workflow) {
+  const step = preflightStep(workflow);
+  return SMS_REQUIRED_VARS.every((name) => step.includes(name));
+}
+
 export function hasPostDeployHealthCheck(workflow) {
-  return /^\s*if docker compose exec -T app wget -qO- http:\/\/127\.0\.0\.1:8090\/api\/health >\/dev\/null 2>&1; then\s*$/m.test(deployStep(workflow));
+  const step = deployStep(workflow);
+  return /^\s*app_id="\$\(docker compose ps -q app\)"\s*$/m.test(step)
+    && /docker inspect[^\n]*\.State\.Health\.Status/m.test(step);
 }

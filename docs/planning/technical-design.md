@@ -310,6 +310,8 @@ V1 指标注册表初始项（口径原文来自 PRD §7.1）：
 - 所有环境差异走环境变量：`.env.example` 入库，真实 `.env` 不入库；secrets（超级管理员初始凭据、备份目标存储凭据等）只在部署时注入，不写入仓库、文档与审计日志。
 - Compose 采用 base 文件 + 各环境 override 表达差异；M0 的"一键启动"指 `docker compose up` 同时拉起 PocketBase（含迁移执行与模板初始化）与前端产物。
 - 部署拓扑：前端 build 产物放入 PocketBase 容器的 `pb_public/` 由 PocketBase **同源伺服**，避免 CORS 与多服务编排；反向代理只做 TLS 与域名路由。若后续拆分为独立静态服务，须更新本文档。
+- 生产 app 不向 host 发布 PocketBase 端口，只在 Docker 私网供 Caddy/backup 访问；部署健康检查复用 compose 的 app healthcheck，以容器 `State.Health.Status` 判定，不依赖宿主机 `8090`。
+- 短信验证码按业务场景选择阿里云模板：登录/注册、首次绑定与换绑新号、换绑旧号验证分别对应 `CC_SMS_TEMPLATE_LOGIN_REGISTER_CODE`、`CC_SMS_TEMPLATE_BIND_NEW_CODE`、`CC_SMS_TEMPLATE_VERIFY_BOUND_CODE`；生产 `CC_SMS_PROVIDER=aliyun` 时部署预检强制这些变量及短信凭据非空。
 - 前端通过同源相对路径访问 `/api/*`；如需跨环境直连，使用 `VITE_*` 构建变量。
 - 生产禁止明文 HTTP（PRD §11.2）；TLS 证书签发方式见「待确认」。
 

@@ -26,8 +26,8 @@ PR 还必须等待 GitHub 上 `frontend`、`backend-migrations`、`backend-integ
 
 以发布候选 commit 在有 Docker 的隔离测试环境执行，不得使用生产业务数据：
 
-- [ ] `docker compose config -q` 通过，`CC_ENVIRONMENT=production`、`CC_SMS_PROVIDER=aliyun`；手机号 HMAC 密钥长度至少 32 字符，且与 Caddy DNS 密钥分离。
-- [ ] `docker compose build` 和 `docker compose up -d` 通过，`/api/health` 正常，8090 仅绑定 `127.0.0.1`。
+- [ ] `docker compose config -q` 通过，`CC_ENVIRONMENT=production`、`CC_SMS_PROVIDER=aliyun`；手机号 HMAC 密钥长度至少 32 字符，且与 Caddy DNS 密钥分离；三个场景短信模板变量（`CC_SMS_TEMPLATE_LOGIN_REGISTER_CODE`/`CC_SMS_TEMPLATE_BIND_NEW_CODE`/`CC_SMS_TEMPLATE_VERIFY_BOUND_CODE`）与短信凭据（`ALIBABA_CLOUD_ACCESS_KEY_ID`/`SECRET`、`CC_SMS_SIGN_NAME`）均已注入。
+- [ ] `docker compose build` 和 `docker compose up -d` 通过，app 容器 healthcheck 达 `healthy`；生产默认不向 host 发布 `8090`（仅在 Docker 私网供 Caddy/backup 访问）。
 - [ ] 用阿里云测试号码验证发码、错码、过期码、重试、provider 失败和停用账号；日志中无验证码、完整手机号或密钥。
 - [ ] 使用机构 A/B 两套账号重跑活动、Realtime、配对、导出越权反例，跨机构资源统一为 404，参与者不能枚举他人配对。
 - [ ] 主动中断 Realtime 后恢复，管理工作台与参与者配对卡都显示断线状态并重拉快照自校正。

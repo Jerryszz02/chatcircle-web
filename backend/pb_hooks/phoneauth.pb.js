@@ -301,18 +301,43 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
       }
     };
 
-    const sendCode = (provider, phone, challengeId) => {
+    // §4.1 短信模板按业务场景选择：每条短信按实际用途选对应阿里云赠送模板。
+    // 未知 purpose/changeRole 组合在此抛稳定的 provider 配置错误，绝不回落到登录模板。
+    const smsTemplateScenario = (purpose, changeRole) => {
+      if (purpose === 'login_or_register') return 'login_register';
+      if (purpose === 'bind_phone') return 'bind_new';
+      if (purpose === 'change_phone' && changeRole === 'old') return 'verify_bound';
+      if (purpose === 'change_phone' && changeRole === 'new') return 'bind_new';
+      ccProviderError('CONFIG_MISSING', '');
+    };
+    const smsTemplateEnvName = (scenario) =>
+      ({
+        login_register: 'CC_SMS_TEMPLATE_LOGIN_REGISTER_CODE',
+        bind_new: 'CC_SMS_TEMPLATE_BIND_NEW_CODE',
+        verify_bound: 'CC_SMS_TEMPLATE_VERIFY_BOUND_CODE',
+      })[scenario];
+    const selectTemplateCode = (purpose, changeRole) => {
+      const scenario = smsTemplateScenario(purpose, changeRole);
+      const code = $os.getenv(smsTemplateEnvName(scenario));
+      if (!code) ccProviderError('CONFIG_MISSING', '');
+      return code;
+    };
+
+    const sendCode = (provider, phone, challengeId, purpose, changeRole) => {
+      const scenario = smsTemplateScenario(purpose, changeRole);
       if (provider === 'mock') {
         const mockCode = $os.getenv('CC_SMS_MOCK_CODE');
         if (!/^[0-9]{4,8}$/.test(mockCode || '')) ccProviderError('MOCK_NOT_CONFIGURED', '');
         if ($os.getenv('CC_SMS_MOCK_FAIL_PHONE') === phone.local) {
           ccProviderError('MOCK_PROVIDER_UNAVAILABLE', 'mock-' + challengeId);
         }
-        return { requestId: 'mock-' + challengeId };
+        // 测试标记仅含场景名（不含手机号/验证码/密钥），供集成测试经超管读
+        // provider_request_id 观测 mock 模板选择结果。
+        return { requestId: 'mock-' + scenario + '-' + challengeId };
       }
       const signName = $os.getenv('CC_SMS_SIGN_NAME');
-      const templateCode = $os.getenv('CC_SMS_TEMPLATE_CODE');
-      if (!signName || !templateCode) ccProviderError('CONFIG_MISSING', '');
+      const templateCode = selectTemplateCode(purpose, changeRole);
+      if (!signName) ccProviderError('CONFIG_MISSING', '');
       const params = {
         AutoRetry: '1',
         CodeLength: '6',
@@ -476,7 +501,7 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
       $app.save(challenge);
 
       try {
-        const sent = sendCode(provider, phone, challenge.id);
+        const sent = sendCode(provider, phone, challenge.id, purpose, changeRole);
         challenge.set('status', 'sent');
         challenge.set('sent_at', ccNow());
         challenge.set('provider_request_id', sent.requestId || '');

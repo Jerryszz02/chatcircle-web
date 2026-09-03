@@ -9,6 +9,7 @@ import {
   hasPostDeployHealthCheck,
   hasPreflightComposeValidation,
   hasPreflightPhoneKeyValidation,
+  hasPreflightSmsValidation,
 } from './release-config-checks.mjs';
 
 const workflow = ({ preflight = '', deploy = '' } = {}) => `
@@ -83,14 +84,19 @@ test('accepts active deployment safeguards in their intended steps', () => {
     preflight: `
           docker compose config -q
           docker compose --project-name "$preflight_project" build
-          if [ "\${#CC_PHONE_HASH_KEY}" -lt 32 ]; then`,
+          if [ "\${#CC_PHONE_HASH_KEY}" -lt 32 ]; then
+          if [ "\${CC_ENVIRONMENT:-}" = "production" ] && [ "\${CC_SMS_PROVIDER:-}" = "aliyun" ]; then
+          for name in ALIBABA_CLOUD_ACCESS_KEY_ID ALIBABA_CLOUD_ACCESS_KEY_SECRET CC_SMS_SIGN_NAME CC_SMS_TEMPLATE_LOGIN_REGISTER_CODE CC_SMS_TEMPLATE_BIND_NEW_CODE CC_SMS_TEMPLATE_VERIFY_BOUND_CODE; do`,
     deploy: `
-          if docker compose exec -T app wget -qO- http://127.0.0.1:8090/api/health >/dev/null 2>&1; then`,
+          docker compose up --build -d
+          app_id="$(docker compose ps -q app)"
+          status="$(docker inspect --format '{{.State.Health.Status}}' "$app_id" 2>/dev/null || echo '')"`,
   });
 
   assert.equal(hasPreflightComposeValidation(source), true);
   assert.equal(hasCandidateImagePreflightBuild(source), true);
   assert.equal(hasPreflightPhoneKeyValidation(source), true);
+  assert.equal(hasPreflightSmsValidation(source), true);
   assert.equal(hasPostDeployHealthCheck(source), true);
 });
 
@@ -120,5 +126,48 @@ test('rejects commented safeguards and commands in the wrong step', () => {
   assert.equal(hasPreflightComposeValidation(source), false);
   assert.equal(hasCandidateImagePreflightBuild(source), false);
   assert.equal(hasPreflightPhoneKeyValidation(source), false);
+  assert.equal(hasPreflightSmsValidation(source), false);
   assert.equal(hasPostDeployHealthCheck(source), false);
+});
+
+test('production SMS preflight requires every required variable', () => {
+  const allRequired = [
+    'ALIBABA_CLOUD_ACCESS_KEY_ID',
+    'ALIBABA_CLOUD_ACCESS_KEY_SECRET',
+    'CC_SMS_SIGN_NAME',
+    'CC_SMS_TEMPLATE_LOGIN_REGISTER_CODE',
+    'CC_SMS_TEMPLATE_BIND_NEW_CODE',
+    'CC_SMS_TEMPLATE_VERIFY_BOUND_CODE',
+  ];
+
+  assert.equal(hasPreflightSmsValidation(workflow({
+    preflight: `
+          for name in ${allRequired.join(' ')}; do`,
+  })), true);
+
+  // 缺少任一生产必填变量时预检失败（逐项验证）。
+  for (const missing of allRequired) {
+    const subset = allRequired.filter((name) => name !== missing);
+    assert.equal(hasPreflightSmsValidation(workflow({
+      preflight: `
+            for name in ${subset.join(' ')}; do`,
+    })), false, `缺少 ${missing} 时不应通过`);
+  }
+});
+
+test('production SMS preflight still passes without optional STS token or scheme', () => {
+  const required = [
+    'ALIBABA_CLOUD_ACCESS_KEY_ID',
+    'ALIBABA_CLOUD_ACCESS_KEY_SECRET',
+    'CC_SMS_SIGN_NAME',
+    'CC_SMS_TEMPLATE_LOGIN_REGISTER_CODE',
+    'CC_SMS_TEMPLATE_BIND_NEW_CODE',
+    'CC_SMS_TEMPLATE_VERIFY_BOUND_CODE',
+  ].join(' ');
+
+  // 可选变量 ALIBABA_CLOUD_SECURITY_TOKEN 与 CC_SMS_SCHEME_NAME 不出现仍应通过。
+  assert.equal(hasPreflightSmsValidation(workflow({
+    preflight: `
+          for name in ${required}; do`,
+  })), true);
 });

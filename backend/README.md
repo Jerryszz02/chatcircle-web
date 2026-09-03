@@ -65,8 +65,12 @@ export CC_PHONE_HASH_KEY='替换为至少32字符的独立随机密钥'
 export ALIBABA_CLOUD_ACCESS_KEY_ID='从部署环境注入'
 export ALIBABA_CLOUD_ACCESS_KEY_SECRET='从部署环境注入'
 export CC_SMS_SIGN_NAME='控制台中的短信认证签名'
-export CC_SMS_TEMPLATE_CODE='控制台中的短信认证模板代码'
+export CC_SMS_TEMPLATE_LOGIN_REGISTER_CODE='100001 登录/注册模板'
+export CC_SMS_TEMPLATE_BIND_NEW_CODE='100004 绑定新手机号模板'
+export CC_SMS_TEMPLATE_VERIFY_BOUND_CODE='100005 验证绑定手机号模板'
 ```
+
+短信按业务场景选择模板：登录/注册用 `CC_SMS_TEMPLATE_LOGIN_REGISTER_CODE`，首次绑定与换绑新号用 `CC_SMS_TEMPLATE_BIND_NEW_CODE`，换绑时验证当前旧号用 `CC_SMS_TEMPLATE_VERIFY_BOUND_CODE`。`CC_SMS_TEMPLATE_CODE` 仅为迁移期兼容，新代码不再读取。
 
 完整手机号只写入 `participant_accounts.phone_e164` 隐藏字段，精确查找使用带部署密钥的 HMAC；验证码和完整手机号不写 challenge、日志或审计。`CC_SMS_PROVIDER=mock` 只供自动化测试，且在 `CC_ENVIRONMENT=production` 下会被服务端拒绝。
 
