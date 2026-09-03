@@ -126,6 +126,8 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 
 - 所有变更通过 Pull Request 提交，需通过 CI 全部检查（见 [test-plan.md](test-plan.md)）；
 - CI 中必须包含机构**越权访问自动化测试**（AC-03），越权用例失败即阻塞合并；
+- CI 中必须包含生产依赖安全审计（`dependency-audit`，`npm audit --omit=dev --audit-level=moderate`），
+  moderate 及以上公告失败即阻塞合并；审计需访问 npm registry 网络，新增公告导致未来构建失败是安全门禁的预期行为；
 - 需求口径以 PRD v0.3 为基线，未经评审不得自行改变业务口径（PRD §0）。
 
 ## 待确认项汇总
@@ -141,6 +143,6 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | 数据治理与法定删除请求处理 | 管理政策 | PRD §16.2；V1 不提供硬删除 |
 | License | Empact 对许可条款的决定 | 见上文 License 节 |
 | 阿里云短信认证生产配置 | 实际账号开通、AccessKey 安全下发、费用和测试号码 | [account-event-workflow-prd.md](account-event-workflow-prd.md) §12 |
-| 上线前第一批整改的生产验收 | ECS 新短信变量、四类模板真机收发、容器健康检查与 GitHub required check | [production-readiness-batch-1-plan.md](production-readiness-batch-1-plan.md) §8–§10 |
+| 上线前第一批整改的生产验收 | ECS 新短信变量、四类模板真机收发、容器健康检查与 GitHub required check（含将 `dependency-audit` 设为必过） | [production-readiness-batch-1-plan.md](production-readiness-batch-1-plan.md) §8–§10 |
 | UI 设计稿与规划文档的业务冲突项 | 设计稿中的 Skill 入口、活动列表/推荐、通知中心等不作为实现依据；如需采纳须先回 PRD 评审 | 见 [ui-design.md](ui-design.md)「非目标」 |
 | SMTP 凭据下发与验证/找回邮件模板配置（2026-08 改版） | PB Settings 手工配置的责任人、凭据下发方式、模板文案与前端落地路由对应关系 | 见 [technical-design.md](technical-design.md)「待确认」#18/#19、security-privacy.md §14 |

@@ -248,10 +248,17 @@
 | 迁移校验 | 空库顺序应用全部迁移 → 注入 fixture 成功 | 无报错 | ✓ |
 | e2e | L4 主链路 + 辅助场景 | 全绿 | ✓（`e2e.yml` 对 PR 触发） |
 | release-config | 短信/隐私版本、密钥占位、TLS/安全头、部署预检静态不变量 | 15/15 | ✓（`backend-migrations` 内） |
+| dependency-audit | frontend 与 mcp 的 `npm audit --omit=dev --audit-level=moderate` | 0 个 moderate 及以上公告 | ✓ |
 
 E2E 已对 PR、`main` push、每日定时与手动触发；2026-09-02 本地全量 3 条用例耗时 8.1s（CI 冷启动耗时以 Actions 为准）。
 
 合并门禁：上表所有「PR 必过」job 绿灯 + 至少 1 人 review（含越权套件扩展检查）方可合并。
+
+依赖审计说明（production-readiness-batch-1-plan §7.4）：`dependency-audit` 只审计生产依赖（`--omit=dev`），
+以 `--audit-level=moderate` 作为失败阈值，moderate / high / critical 任一公告都会使 job 失败；不使用
+`continue-on-error`、`|| true` 或调高阈值绕过。审计需要访问 npm registry 网络，新增公告导致未来构建失败
+是安全门禁的预期行为。若仓库启用 required checks，仓库管理员需将 `dependency-audit` 加入必过列表；代码无法
+替代该 repository settings 配置。
 
 ### 9. 性能与兼容性人工核查项（每发版执行）
 

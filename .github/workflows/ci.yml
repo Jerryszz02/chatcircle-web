@@ -2,8 +2,8 @@ name: CI
 
 # 全部 job 均为 PR 必过（test-plan §8）。
 # 建议在 GitHub 仓库设置中对 main 启用 branch protection：
-#   Settings → Branches → Add rule → 要求 "frontend"、"backend-migrations" 与
-#   "backend-integration" 状态检查通过后方可合并。
+#   Settings → Branches → Add rule → 要求 "frontend"、"backend-migrations"、
+#   "backend-integration" 与 "dependency-audit" 状态检查通过后方可合并。
 
 on:
   push:
@@ -84,3 +84,27 @@ jobs:
           backend/pocketbase --version
       - name: 运行后端集成测试套件（runner 已有 python3，无其他系统依赖）
         run: bash backend/tests/run_integration.sh
+
+  dependency-audit:
+    # production dependency 安全门禁（test-plan §8 / production-readiness-batch-1-plan §7.4）：
+    # 只审计生产依赖，moderate / high / critical 任一公告都会使该 job 失败。
+    # 不使用 continue-on-error、|| true 或调高阈值绕过；审计需要访问 npm registry 网络，
+    # 新增公告导致未来构建失败是安全门禁的预期行为。
+    # 该 job 是独立 check，可被仓库管理员设为 required；代码无法替代 repository settings。
+    # 注意：GitHub required check 按 job 的 name（即展示名）选择，故 name 必须与文档中的
+    # `dependency-audit` 标识一致，否则无法按文档指示配置必过。
+    name: dependency-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            mcp/package-lock.json
+      - run: npm ci --prefix frontend
+      - run: npm audit --prefix frontend --omit=dev --audit-level=moderate
+      - run: npm ci --prefix mcp
+      - run: npm audit --prefix mcp --omit=dev --audit-level=moderate
