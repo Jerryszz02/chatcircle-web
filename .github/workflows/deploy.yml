@@ -1,9 +1,9 @@
 name: Deploy
 
 # main 分支有推送（含 PR 合并）时自动部署到阿里云 ECS。
-# 部署分两阶段：先在临时 worktree 中用生产 .env/override 校验目标版本并构建，
+# 部署分两阶段：先在临时 worktree 中用生产 .env 校验目标版本、拉取依赖镜像并构建，
 # 只有预检成功才更新 /opt/chatcircle 的 main 并重建运行中的服务。
-# 这样缺失生产环境变量或 Docker 构建失败时，不会先改动生产工作区。
+# 这样缺失生产环境变量、镜像拉取或 Docker 构建失败时，不会先改动生产工作区。
 #
 # 所需 Secrets（Settings → Secrets and variables → Actions）：
 #   ECS_SSH_PRIVATE_KEY  部署专用私钥（对应公钥已加入服务器 authorized_keys）
@@ -11,7 +11,8 @@ name: Deploy
 #   ECS_USER             登录用户
 #
 # 生产应用 secrets 仍只保存在 ECS /opt/chatcircle/.env，不写入仓库或 Actions 日志。
-# 服务器上的 docker-compose.override.yml（如仍存在）会被复制到临时 worktree 一并预检。
+# ICP 备案完成后生产 Compose 已固定为标准 80/443；服务器侧 legacy
+# docker-compose.override.yml 会被拒绝，避免旧的 8443/明文临时配置继续覆盖仓库配置。
 
 on:
   push:
@@ -47,6 +48,11 @@ jobs:
           set -Eeuo pipefail
           cd /opt/chatcircle
 
+          if [ -f docker-compose.override.yml ]; then
+            echo "ERROR: 检测到 legacy /opt/chatcircle/docker-compose.override.yml。ICP备案完成后的正式部署禁止服务器侧 override；请先备份并移除该文件。" >&2
+            exit 1
+          fi
+
           git fetch --prune origin main
           target_sha="$(git rev-parse origin/main)"
           project_name="$(basename "$PWD")"
@@ -74,16 +80,17 @@ jobs:
           cp .env "$candidate_dir/.env"
           chmod 600 "$candidate_dir/.env"
 
-          if [ -f docker-compose.override.yml ]; then
-            cp docker-compose.override.yml "$candidate_dir/docker-compose.override.yml"
-          fi
-
           cd "$candidate_dir"
 
           # Compose 在真正构建前完成所有 ${VAR:?message} 校验。
-          # 因此未来新增必需生产变量时，无需在 workflow 里维护变量名单。
+          # 因此未来新增必需生产变量时，无需在 workflow 里维护 Compose 变量名单。
           echo "Validating Docker Compose configuration..."
           docker compose config -q
+
+          # 先拉取 image-only 服务（尤其正式切换后的官方 Caddy 镜像），避免生产 main
+          # 更新后才发现镜像不可获取。不会启动或替换生产容器。
+          echo "Pulling candidate runtime images..."
+          docker compose --project-name "$preflight_project" pull caddy backup
 
           # 用独立 project name 构建候选镜像，不触碰当前运行中的容器。
           # 正式部署再次 build 时会复用 BuildKit 缓存。
@@ -136,11 +143,11 @@ jobs:
           git checkout main
           git merge --ff-only "$target_sha"
 
-          # 预检已经验证配置和构建；这里正常会命中构建缓存。
+          # 预检已经验证配置、拉取依赖镜像并构建；这里正常会命中缓存。
           docker compose up --build -d
 
-          # 生产 app 不再向 host 发布 8090；改用容器 healthcheck 状态判定健康，
-          # 不再请求已不可达的宿主机 127.0.0.1:8090。最多等待约 90 秒（45 × 2s）。
+          # 生产 app 不向 host 发布 8090；按容器 healthcheck 状态判定健康。
+          # 最多等待约 90 秒（45 × 2s）。
           app_id="$(docker compose ps -q app)"
           if [ -z "$app_id" ]; then
             echo "ERROR: app 容器未创建" >&2
