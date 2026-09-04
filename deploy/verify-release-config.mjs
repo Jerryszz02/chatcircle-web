@@ -4,8 +4,8 @@
  * T7 发布配置的无密钥静态验证。
  *
  * 这里只检查能由仓库证据确定的不变量：生产短信 provider、必填环境变量占位、
- * 隐私版本一致性、TLS/安全头、PocketBase 管理台封闭和部署预检。它不读取 .env，
- * 也不能代替真实阿里云、微信内置浏览器、备份恢复或线上健康检查。
+ * 隐私版本一致性、标准 80/443 Automatic HTTPS、安全头、PocketBase 管理台封闭和部署预检。
+ * 它不读取 .env，也不能代替真实阿里云、微信内置浏览器、备份恢复或线上健康检查。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,7 +20,11 @@ import {
   hasPreflightComposeValidation,
   hasPreflightPhoneKeyValidation,
   hasPreflightSmsValidation,
+  hasRuntimeImagePreflightPull,
+  hasStandardCaddyPublicPorts,
+  rejectsLegacyServerOverride,
   stripConfigComments,
+  usesStandardAutomaticHttps,
 } from './release-config-checks.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -39,6 +43,8 @@ const files = {
 const failures = [];
 const checks = [];
 const activeCompose = stripConfigComments(files.compose);
+const activeCaddy = stripConfigComments(files.caddy);
+const activeEnvExample = stripConfigComments(files.envExample);
 
 function check(name, condition, detail) {
   checks.push(name);
@@ -78,6 +84,29 @@ check(
   'PocketBase 8090 不得直接暴露到公网',
 );
 
+check(
+  'Caddy 使用标准 80/443',
+  hasStandardCaddyPublicPorts(files.compose),
+  '生产 Caddy 必须发布 80:80 与 443:443，且不得保留 8443',
+);
+
+check(
+  'Caddy 使用标准 Automatic HTTPS',
+  usesStandardAutomaticHttps(files.caddy),
+  '站点必须为 chatcircle.empact.cn，且不得保留 :8443、dns alidns 或 ALIYUN_ACCESS_KEY_*',
+);
+
+check(
+  '旧 DNS-01 凭据不再属于生产配置',
+  !activeCompose.includes('ALIYUN_ACCESS_KEY_ID')
+    && !activeCompose.includes('ALIYUN_ACCESS_KEY_SECRET')
+    && !activeCaddy.includes('ALIYUN_ACCESS_KEY_ID')
+    && !activeCaddy.includes('ALIYUN_ACCESS_KEY_SECRET')
+    && !activeEnvExample.includes('ALIYUN_ACCESS_KEY_ID=')
+    && !activeEnvExample.includes('ALIYUN_ACCESS_KEY_SECRET='),
+  'ICP备案后的正式部署不得重新依赖 Caddy DNS-01 AccessKey',
+);
+
 for (const [name, expected] of [
   ['HSTS', 'Strict-Transport-Security'],
   ['CSP', 'Content-Security-Policy'],
@@ -95,9 +124,21 @@ check(
 );
 
 check(
+  '部署 workflow 拒绝 legacy server override',
+  rejectsLegacyServerOverride(files.deployWorkflow),
+  '预检步骤必须在检测到 /opt/chatcircle/docker-compose.override.yml 时失败',
+);
+
+check(
   '部署 workflow Compose 配置预检',
   hasPreflightComposeValidation(files.deployWorkflow),
   '预检步骤缺少活动的 docker compose config -q',
+);
+
+check(
+  '部署 workflow 运行时镜像预拉取',
+  hasRuntimeImagePreflightPull(files.deployWorkflow),
+  '预检步骤缺少活动的 caddy/backup runtime image pull',
 );
 
 check(
