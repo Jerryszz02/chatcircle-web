@@ -1,19 +1,14 @@
-# Chat Circles 生产反代：全站 HTTPS，转发到 PocketBase 一体化应用（app:8090）。
-# 未备案期间站点挂在 8443（境内 ECS 80/443 被拦截）；备案后把站点地址改为
-# chatcircle.empact.cn 并去掉端口、compose 端口映射改为 443:443 即可。
+# Chat Circles 生产反代：ICP备案完成后使用标准 80/443。
+# Caddy 自动申请/续期 HTTPS 证书，并把外部流量转发到 Docker 私网中的 app:8090。
+# 不再使用未备案时期的 :8443 + 阿里云 DNS-01 临时方案，也不需要 DNS AccessKey。
 #
 # 生产环境封闭 PocketBase 管理台（/_/ 路径）：日常运营不需要 PB dashboard
 # （统一走产品内 /super 后台），封闭可减少暴露面；临时排障时注释下方
 # handle /_/* 段并 docker compose restart caddy 即可恢复，用完立即还原。
 
-chatcircle.empact.cn:8443 {
-	# DNS-01 挑战（阿里云 DNS），凭据经环境变量注入（.env，不入库）
-	tls {
-		dns alidns {
-			access_key_id {$ALIYUN_ACCESS_KEY_ID}
-			access_key_secret {$ALIYUN_ACCESS_KEY_SECRET}
-		}
-	}
+chatcircle.empact.cn {
+	# 不显式配置 tls/dns：Caddy 使用标准 Automatic HTTPS，
+	# 通过可达的 80/443 完成证书签发/续期，并自动把 HTTP 重定向到 HTTPS。
 
 	# 安全响应头。style-src 'unsafe-inline' 为 React 内联样式所需；
 	# CSP frame-ancestors 'none' 与 X-Frame-Options 并存，兼容不支持前者的旧浏览器
