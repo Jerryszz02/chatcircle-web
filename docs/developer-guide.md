@@ -80,7 +80,7 @@ npm install
 npm run dev
 ```
 
-Docker 一键启动（生产同构）：`cp .env.example .env` → **先填好 `.env`** → `docker compose up --build`。注意 compose 对五个变量用了 `${VAR:?}` 必填校验，而 `.env.example` 里它们默认注释掉，不填会在启动前的变量插值阶段直接报错：`CC_PHONE_HASH_KEY`（手机号 HMAC 密钥）、`PB_SUPERUSER_EMAIL` / `PB_SUPERUSER_PASSWORD`（backup 服务登录用超管）、`ALIYUN_ACCESS_KEY_ID` / `ALIYUN_ACCESS_KEY_SECRET`（caddy 的 DNS-01 证书签发）。本地只是想跑起来看看时可用占位值填上（backup 登录、caddy 证书签发失败属预期），但**生产基础 compose 默认不向 host 发布 app 的 `8090`**——要本机直连调试，需显式叠加 `docker compose -f docker-compose.yml -f deploy/docker-compose.debug.yml up -d` 发布回环 `127.0.0.1:8090`（该 override 存在「本地伪造 XFF」风险，见 deploy/README.md §5，仅限知悉下使用）。日常本地开发更推荐上面的原生启动方式。
+Docker 一键启动（生产同构）：`cp .env.example .env` → **先填好 `.env`** → `docker compose up --build`。当前 compose 只对三个变量使用 `${VAR:?}` 启动前必填校验：`CC_PHONE_HASH_KEY`（手机号 HMAC 密钥）、`PB_SUPERUSER_EMAIL` / `PB_SUPERUSER_PASSWORD`（backup 服务登录用超管）。生产环境使用 `CC_SMS_PROVIDER=aliyun` 时，Deploy workflow 还会在更新生产版本前校验 `ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET`、`CC_SMS_SIGN_NAME` 和三个场景短信模板 CODE；这些短信凭据与 Caddy 无关。ICP备案完成后的 Caddy 使用标准 80/443 Automatic HTTPS，不再需要 `ALIYUN_ACCESS_KEY_ID` / `ALIYUN_ACCESS_KEY_SECRET` 或 DNS-01。**生产基础 compose 默认不向 host 发布 app 的 `8090`**——要本机直连调试，需显式叠加 `docker compose -f docker-compose.yml -f deploy/docker-compose.debug.yml up -d` 发布回环 `127.0.0.1:8090`（该 override 存在「本地伪造 XFF」风险，见 deploy/README.md，仅限知悉下使用）。日常本地开发更推荐上面的原生启动方式。
 
 常用端口约定：开发后端 8090 / 种子脚本临时实例 8096 / 集成测试 8097 / 迁移冒烟 8099 / e2e 18090+14173。
 

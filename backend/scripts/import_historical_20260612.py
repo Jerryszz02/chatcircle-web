@@ -19,7 +19,7 @@ superuser 豁免，见 submissions.pb.js / surveys.pb.js 守卫注释），不�
     # 干跑（只解析 + 打印计划，不写库；给了凭据则额外做只读预检）
     python3 backend/scripts/import_historical_20260612.py --dry-run
     # 正式执行
-    PB_BASE_URL=https://chatcircle.empact.cn:8443 \
+    PB_BASE_URL=https://chatcircle.empact.cn \
     PB_SUPER_EMAIL=admin@example.com PB_SUPER_PASSWORD=xxx \
     python3 backend/scripts/import_historical_20260612.py
 """

@@ -84,26 +84,22 @@ services:
         max-size: 10m
         max-file: '3'
 
-  # HTTPS 反代（technical-design §5.7 / deploy/README.md §5）：Caddy 终止 TLS，
-  # 经阿里云 DNS-01 挑战自动签发/续期 Let's Encrypt 证书（未备案期间 80/443 被
-  # 拦截，HTTP-01 不可用，故走 DNS 验证；插件编译见 deploy/caddy.Dockerfile）。
-  # 未备案期间对外端口为 8443，备案后改为 443 并去掉 Caddyfile 站点地址中的端口。
+  # HTTPS 反代：ICP备案完成后使用标准 80/443。
+  # Caddy Automatic HTTPS 负责证书申请/续期和 HTTP→HTTPS 跳转，不再使用
+  # 未备案时期的 :8443 + 阿里云 DNS-01，也不再需要 ALIYUN_ACCESS_KEY_*。
   caddy:
-    build:
-      context: ./deploy
-      dockerfile: caddy.Dockerfile
+    image: caddy:2-alpine
     depends_on:
       app:
         condition: service_healthy
     ports:
-      - '8443:8443'
+      - '80:80'
+      - '443:443'
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      # 证书与 ACME 账户持久化，避免重启重复签发触发 CA 限流
+      # 证书、ACME 账户和 Caddy 运行配置持久化，避免重启重复申请证书
       - caddy_data:/data
-    environment:
-      ALIYUN_ACCESS_KEY_ID: ${ALIYUN_ACCESS_KEY_ID:?caddy 需要阿里云 AccessKey ID 做 DNS-01 验证（.env 注入，不入库）}
-      ALIYUN_ACCESS_KEY_SECRET: ${ALIYUN_ACCESS_KEY_SECRET:?caddy 需要阿里云 AccessKey Secret 做 DNS-01 验证（.env 注入，不入库）}
+      - caddy_config:/config
     restart: unless-stopped
     logging:
       driver: json-file
@@ -124,3 +120,4 @@ volumes:
   pb_data:
   backups:
   caddy_data:
+  caddy_config:

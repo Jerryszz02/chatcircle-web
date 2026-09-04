@@ -86,25 +86,28 @@ jobs:
         run: bash backend/tests/run_integration.sh
 
   dependency-audit:
-    # production dependency 安全门禁（test-plan §8 / production-readiness-batch-1-plan §7.4）：
-    # 只审计生产依赖，moderate / high / critical 任一公告都会使该 job 失败。
-    # 不使用 continue-on-error、|| true 或调高阈值绕过；审计需要访问 npm registry 网络，
-    # 新增公告导致未来构建失败是安全门禁的预期行为。
-    # 该 job 是独立 check，可被仓库管理员设为 required；代码无法替代 repository settings。
-    # 注意：GitHub required check 按 job 的 name（即展示名）选择，故 name 必须与文档中的
-    # `dependency-audit` 标识一致，否则无法按文档指示配置必过。
+    # production dependency 安全门禁（test-plan §8 / production-readiness-batch-1-plan §7.4）。
+    # npm registry 的 legacy Quick Audit endpoint 在 2026 年已进入退役/不稳定阶段，且 npm 在
+    # Bulk Advisory 响应异常时会 fallback 到该端点，造成与代码无关的 400/503 CI 假失败。
+    # 因此改用官方 OSV-Scanner 直接扫描两个 npm lockfile；.github/osv-production.toml
+    # 排除 dev-only 依赖，保持原 `npm audit --omit=dev` 的 production 范围。
+    # OSV-Scanner 发现任一已知 production 漏洞即返回非零，门禁比原 moderate 阈值只会更严格，
+    # 不使用 continue-on-error / || true 绕过安全失败。
     name: dependency-audit
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: OSV 扫描 production lockfiles
+        uses: google/osv-scanner-action/osv-scanner-action@06b2ab4348248b456ee06c9e953637f55e03504f # v2.5.0
+        env:
+          GOTOOLCHAIN: auto
         with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: |
-            frontend/package-lock.json
-            mcp/package-lock.json
-      - run: npm ci --prefix frontend
-      - run: npm audit --prefix frontend --omit=dev --audit-level=moderate
-      - run: npm ci --prefix mcp
-      - run: npm audit --prefix mcp --omit=dev --audit-level=moderate
+          scan-args: |-
+            scan
+            source
+            --config=.github/osv-production.toml
+            --lockfile=frontend/package-lock.json
+            --lockfile=mcp/package-lock.json
+            --verbosity=info

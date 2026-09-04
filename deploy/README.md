@@ -1,177 +1,251 @@
 # Chat Circles 生产部署手册（M5）
 
-> 依据：technical-design §5.7/§5.8、security-privacy §11、PRD §12。
-> 状态：备份脚本与 compose 已经本机进程级验证（见「验证记录」）；
-> **Docker 镜像构建与 compose 起停未在本机验证**（开发机无 Docker），首次在有
-> Docker 的环境执行时请以本文为清单逐步核对。
+> 当前生产基线：`chatcircle.empact.cn` 已完成 ICP 备案，正式入口使用标准 TCP 80/443。
+> Caddy 负责 Automatic HTTPS 与反向代理；未备案时期的 `:8443 + DNS-01 + ALIYUN_ACCESS_KEY_*` 已退出正式架构。
 
 ## 1. 部署拓扑
 
-一体化镜像（Dockerfile 多阶段）：前端 build 产物放 `pb_public/` 由 PocketBase **同源伺服**，
-反向代理只做 TLS 与域名路由（technical-design §5.7）。两个命名卷：
+```text
+浏览器
+  │ HTTP 80 / HTTPS 443
+  ▼
+Caddy（Automatic HTTPS、HTTP→HTTPS、反向代理）
+  │ Docker 私网
+  ▼
+PocketBase app:8090（前端静态资源 + API + hooks）
+  │
+  ├─ pb_data 持久化卷
+  └─ backup 服务每日一致性备份 → backups 卷
+```
 
-| 卷 | 内容 | 说明 |
-| --- | --- | --- |
-| `pb_data` | SQLite（data.db/auxiliary.db）+ 上传文件 | 镜像与数据分离；升级只换镜像不动卷 |
-| `backups` | 每日备份归档 `cc_daily_*.zip` + `last_backup.json` 标记 | 滚动保留 30 天；异地同步目标待确认 |
+生产基础 Compose **不向宿主机发布 PocketBase 8090**；只有 Caddy/backup 通过 Docker 私网访问 `app:8090`。需要本机调试时才显式叠加 `deploy/docker-compose.debug.yml`。
 
-## 2. 首次部署步骤
+## 2. 生产环境变量
+
+真实 `.env` 只保存在 ECS `/opt/chatcircle/.env`，不得提交 Git。
+
+首次部署：
 
 ```bash
 cp .env.example .env
-# 编辑 .env：必填 PB_SUPERUSER_EMAIL / PB_SUPERUSER_PASSWORD（backup 服务注入用，secrets 不入库）
-
-docker compose up --build -d
-
-# 创建生产超级管理员（一次性；凭据即 .env 中注入的那一对，二者需一致，
-# 否则 backup 服务登录失败、备份标记为 failure）
-docker compose exec app ./pocketbase superuser create "$PB_SUPERUSER_EMAIL" "$PB_SUPERUSER_PASSWORD" --dir /pb/pb_data
+chmod 600 .env
 ```
 
-冒烟清单（AC-01）：参与者端 `/`、机构管理端 `/admin/login`、超级管理端 `/super/login`、
-`/api/health` 均正常；创建一个测试机构走通邀请码注册。
+至少配置：
 
-升级：`docker compose up --build -d`（镜像重建，`pb_data`/`backups` 卷不受影响；
-迁移由 PocketBase 启动时自动应用 `pb_migrations`）。
+```env
+CC_ENVIRONMENT=production
+CC_SMS_PROVIDER=aliyun
+CC_PHONE_HASH_KEY=<至少32字符的稳定随机密钥>
 
-## 3. 备份
+ALIBABA_CLOUD_ACCESS_KEY_ID=<号码认证 RAM AccessKey ID>
+ALIBABA_CLOUD_ACCESS_KEY_SECRET=<号码认证 RAM AccessKey Secret>
+CC_SMS_SIGN_NAME=<阿里云短信签名>
+CC_SMS_TEMPLATE_LOGIN_REGISTER_CODE=100001
+CC_SMS_TEMPLATE_BIND_NEW_CODE=100004
+CC_SMS_TEMPLATE_VERIFY_BOUND_CODE=100005
 
-每日自动备份由 compose `backup` 服务的 crond 触发 `deploy/backup.sh`：
+PB_SUPERUSER_EMAIL=<生产超管邮箱>
+PB_SUPERUSER_PASSWORD=<生产超管密码>
+```
 
-- 调 PocketBase 备份 API（`POST /api/backups`，内部为 SQLite 在线备份，对 WAL 活跃库一致），
-  ZIP 含 data.db、auxiliary.db 与上传文件；
-- 超管凭据经 `PB_SUPERUSER_EMAIL/PASSWORD` 环境变量注入（0.28.4 实测：下载需先
-  `POST /api/files/token` 换文件 token，脚本已处理）；
-- 归档下载到 `backups` 卷后删除 `pb_data/backups` 内的服务端副本（含 `.attrs` 边车）；
-- 滚动清理 30 天前归档（`BACKUP_RETENTION_DAYS` 可调）；
-- 每次结果写 `backups` 卷内 `last_backup.json` 标记（result/file/bytes/duration/reason/finished_at）；
-- 同时写 `audit_logs`（actor=system，action=`backup.success`/`backup.failed`），驱动
-  `/super` 后台 backup-status 告警（AC-23）；审计写入为尽力而为，失败不影响备份结果，
-  登录失败等拿不到超管 token 的早期失败无法写审计，以 `last_backup.json` 标记为准。
+`ALIBABA_CLOUD_SECURITY_TOKEN` 仅在使用 STS 临时凭据时填写；`CC_SMS_SCHEME_NAME` 可选。
 
-手工触发一次：`docker compose exec backup sh /etc/periodic/daily/backup`，
-然后查看标记：`docker compose exec backup cat /backups/last_backup.json`。
+旧 `CC_SMS_TEMPLATE_CODE` 仅为迁移兼容变量，新后端不再读取。
 
-### 备份分工（与 super.pb.js 的关系）
-
-| 入口 | 触发 | 结果去向 |
-| --- | --- | --- |
-| `deploy/backup.sh`（本目录） | 每日 cron 自动 | `backups/last_backup.json` 标记文件 + `audit_logs`（backup.success/failed），驱动 `/super` 后台 `backup-status` 告警 |
-| `POST /api/cc/super/backup/run`（产品端点） | 已下线（410 Gone，2026-08 安全加固） | 不再写审计；手动演练改用 `docker compose exec backup sh /etc/periodic/daily/backup` |
-
-备份结果写 `audit_logs` 复用脚本已有的超管 token 直插集合 API（createRule 对超管放行，
-口径与 `tests/integration/suite_backup.py` 的播种一致），无需新增 hook 端点。
-早期失败（健康等待超时、超管登录失败等拿不到 token 的场景）无法写审计，
-请巡检 `last_backup.json`（建议接入外部监控轮询该标记）。
-
-## 4. 恢复演练（AC-19，M5 冻结前在测试环境实测签字）
-
-恢复是运维操作，V1 无产品化一键恢复；执行前须二次确认并事后补写恢复审计（§5.8）。
+首次创建全新 `pb_data` 卷时，环境变量本身不会自动创建 PocketBase `_superusers` 账号。应用启动后必须执行一次：
 
 ```bash
-# 0) 二次确认：目标环境、备份文件、当前数据将被覆盖
-# 1) 停机
-docker compose stop app
-# 2) 取最近备份并解压到临时目录
-docker compose run --rm --no-deps -v chatcircleweb_backups:/b alpine:3.20 \
-  sh -c 'mkdir /tmp/r && cd /tmp/r && unzip -o /b/$(ls -t /b | grep "^cc_daily_.*\.zip$" | head -1)'
-#   （卷名以 docker volume ls 实际为准；也可先 docker cp 出来再操作）
-# 3) 用解压出的 data.db / auxiliary.db（及 storage/ 如有）覆盖 pb_data 卷后启动
-docker compose start app
-# 4) 校验：/api/health 正常；机构、活动、账号、报名、签到、问卷、答卷抽查可找回
-# 5) 记录演练结果（AC-19 验收依据），并按 §5.8 补写恢复审计
+docker compose up --build -d
+docker compose exec app ./pocketbase superuser create \
+  "$PB_SUPERUSER_EMAIL" "$PB_SUPERUSER_PASSWORD" \
+  --dir /pb/pb_data
 ```
 
-备选路径：把备份 ZIP 放到 `pb_data/backups/` 后用 PocketBase 自带恢复
-（`POST /api/backups/{key}/restore`，超管鉴权，恢复后需重启进程）。
+已有生产数据卷且超级管理员已经存在时不要重复创建；这一步只用于首次初始化。该账号同时用于 `/super` 与 `backup` 服务认证，所以漏掉会导致超级管理端无法登录、定时备份认证失败。
 
-## 5. HTTPS 与反向代理
+**不再需要：**
 
-- 生产禁止明文 HTTP（PRD §11.2）：compose `caddy` 服务终止 TLS，转发到 app:8090，
-  全站 HTTPS；**生产默认不向 host 发布 app 的 8090**（2026-09 安全加固，见 §5「安全加固」），
-  仅经 Docker 私网供 Caddy/backup 访问。需要本机直连调试或经 SSH 隧道让 MCP 访问后端时，
-  显式附加 `docker compose -f docker-compose.yml -f deploy/docker-compose.debug.yml up -d`（`deploy/docker-compose.debug.yml`，
-  含「本地伪造 XFF」风险警示，仅限知悉下使用）。
-- 反代选型 **Caddy**（镜像 `deploy/caddy.Dockerfile` 编译进 `caddy-dns/alidns` 插件），
-  配置 `deploy/Caddyfile`，站点 `chatcircle.empact.cn`。
-- **未备案期间的特殊处置（2026-08 首次部署）**：境内 ECS（上海）80/443 被阿里云拦截，
-  故 ① 对外端口临时用 **8443**（访问 `https://chatcircle.empact.cn:8443`，安全组放行 8443）；
-  ② 证书签发改走 **DNS-01 挑战**（HTTP-01/TLS-ALPN-01 依赖 80/443，不可用），凭据为
-  RAM AccessKey（当前为 `AliyunDNSFullAccess`，过宽，待按下文「运维行动项清单」②
-  收窄为单 hosted zone 最小权限），经 `.env` 的
-  `ALIYUN_ACCESS_KEY_ID/SECRET` 注入。
-- **备案完成后的切换步骤**：Caddyfile 站点地址去掉 `:8443` → compose 端口映射改
-  `443:443`（可加 `80:80` 让 Caddy 自动跳 HTTPS）→ 安全组放行 80/443 →
-  `docker compose up -d` 重建 caddy；证书会自动按新地址重签，无需其他改动。
+```env
+ALIYUN_ACCESS_KEY_ID=...
+ALIYUN_ACCESS_KEY_SECRET=...
+```
 
-### 安全响应头与 PB 管理台封闭（2026-08 安全加固）
+这两个变量只服务于未备案时期 Caddy DNS-01 临时方案。完成本次 443 切换并验证成功后可从生产 `.env` 删除。
 
-- Caddyfile 统一下发安全响应头：`Strict-Transport-Security`（max-age=31536000;
-  includeSubDomains）、`X-Content-Type-Options: nosniff`、`Referrer-Policy:
-  strict-origin-when-cross-origin`、`Content-Security-Policy: default-src 'self';
-  img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'`
-  （`style-src 'unsafe-inline'` 为 React 内联样式所需），另加 `X-Frame-Options: DENY`
-  兼容不支持 frame-ancestors 的旧浏览器。
-- **PB 管理台（`/_/`）生产封闭**：`handle /_/* { respond 403 }`。日常运营不需要暴露
-  PocketBase dashboard（统一走产品内 `/super` 后台）；临时排障时注释 Caddyfile 中该
-  `handle /_/*` 段并 `docker compose restart caddy`，用完立即恢复封闭。
-- **X-Forwarded-For 覆盖**：`reverse_proxy` 显式 `header_up X-Forwarded-For
-  {remote_host}`，客户端伪造的 XFF 不会进入后端——访问日志与审计中的来源 IP 可信，
-  这也是后续在 Caddy/应用层做按 IP 限流的前提（伪造 XFF 会绕过或误伤限流）。
+## 3. ICP 备案完成后的 8443 → 80/443 切换
 
-### 运维行动项清单（安全加固后续）
+### 3.1 合并正式 443 配置前必须完成
 
-1. **删除服务器上的 `docker-compose.override.yml`**：过渡期明文 HTTP 8443 配置
-   （见「自动部署」节）已不需要，保留会让明文入口继续暴露；删除后
-   `docker compose up -d` 重建确认无残留端口映射。
-2. **RAM 权限收窄**：caddy DNS-01 用的 AccessKey 由 `AliyunDNSFullAccess` 改为
-   自定义策略，仅放行 chatcircle.empact.cn 所在 hosted zone 的
-   `DescribeDomains`/`AddDomainRecord`/`DeleteDomainRecord`/`DescribeDomainRecords`
-   （见 `.env.example` 注释）。
-3. **备份加密与异地同步（§5.8 待落地）**：backups 卷目前为本地明文留存，需确定
-   加密方案与异地同步目标存储、凭据下发方式。
+1. `chatcircle.empact.cn` 的 DNS A/AAAA 记录必须指向目标 ECS。
+2. 阿里云 ECS 安全组放行入方向 TCP **80** 和 **443**。
+3. 如主机启用了 firewalld/iptables，同样允许 80/443。
+4. 确认宿主机没有其他进程占用 80/443：
 
-## 6. 自动部署（GitHub Actions）
+```bash
+ss -lntp | grep -E ':(80|443)\s' || true
+```
 
-`.github/workflows/deploy.yml`：push / 合并到 `main` 后，runner 经 SSH 登录 ECS，分两阶段完成——
-先在临时 worktree 中用生产 `.env` 校验 Compose 配置、构建候选镜像，并在候选 app 容器内预检
-`CC_PHONE_HASH_KEY >= 32` 以及 `CC_ENVIRONMENT=production` 且 `CC_SMS_PROVIDER=aliyun` 时的全部
-短信必填变量（只输出缺失变量名，绝不输出变量值）；预检通过后才
-`git merge --ff-only origin/main && docker compose up --build -d`，随后按容器 healthcheck 状态轮询
-（`docker compose ps -q app` + `docker inspect ... .State.Health.Status`，最多约 90 秒）判定 healthy，
-**不再请求已不可达的宿主机 `127.0.0.1:8090`**。也可在 Actions 页面手动触发（workflow_dispatch）。
+5. 删除未备案时期遗留的服务器侧 Compose override。先备份：
 
-- 所需 Secrets：`ECS_SSH_PRIVATE_KEY`（部署专用密钥对，公钥在服务器
-  `authorized_keys`，comment `github-actions-deploy-chatcircle`）、`ECS_HOST`、`ECS_USER`。
-- 服务器仓库有本地 `docker-compose.override.yml`（过渡期明文 HTTP 8443，不入库），
-  checkout/pull 不会触碰；`concurrency` 串行化部署，避免并发重建。
-  **该 override 待删除**，见 §5「运维行动项清单」①。
+```bash
+cd /opt/chatcircle
+if [ -f docker-compose.override.yml ]; then
+  cp docker-compose.override.yml ~/docker-compose.override.yml.pre-443
+  rm docker-compose.override.yml
+fi
+```
 
-## 7. 验证记录（如实声明）
+新的 Deploy workflow 对 `/opt/chatcircle/docker-compose.override.yml` **fail-closed**；该文件仍存在时不会修改生产版本。
 
-- `deploy/backup.sh`：本机以真实 PocketBase 0.28.4 实例进程级验证成功路径
-  （建备份→下载→PK 校验→删服务端副本→写标记）与失败路径（错误凭据→failure 标记）；
-  本机无 wget/Docker，wget 语义以 curl shim 模拟，**busybox wget 真实兼容性未验证**。
-- 2026-08 安全加固改动（trap 兜底标记、保留天数校验、`--post-file` 登录、失败路径
-  清理服务端副本、原子写标记）：`sh -n` 语法检查通过；本机以 wget shim 进程级冒烟
-  5 场景 18 断言全过（成功路径含 `"`/`\` 凭据的 JSON 转义往返、非法保留天数、
-  登录失败、下载失败服务端副本清理、模拟 set -e 中断的 trap 兜底标记）；
-  仍**未经 busybox/容器内真实环境验证**。
-- 2026-08 审计接入改动（record_audit 写 audit_logs）：`sh -n` 语法检查通过；
-  本机以真实 PocketBase 0.28.4 实例进程级验证（wget 语义以 curl shim 模拟）：
-  成功路径（建备份→下载→PK 校验→写标记→写 backup.success 审计→
-  backup-status 返回 alert=false 且含文件名/时间）与失败路径（失败→failure 标记
-  + backup.failed 审计含 reason）均实测通过；**busybox wget 真实兼容性仍未验证**。
-- `docker-compose.yml`：通过 YAML 语法与结构自查（depends_on/healthcheck/环境插值）；
-  安全加固新增项（三服务 logging、backup TZ + tzdata 安装）经 YAML 解析与结构断言；
-  **未经 `docker compose config` 与真实构建验证**（本机无 Docker）。
-- 2026-09 部署健康检查与短信生产闭环：`node deploy/verify-release-config.mjs` 与
-  `node --test deploy/verify-release-config.test.mjs` 本机全过；`deploy.yml` 改用容器
-  healthcheck 状态轮询并在预检中新增 production+aliyun 短信必填变量检查，均为静态核对，
-  **未在真实 Docker / ECS 环境运行**（本机无 Docker），首次部署时以 §2 冒烟清单核对。
-- `deploy/Caddyfile`：安全头 / `/_/` 封闭 / XFF 覆盖为人工语法核对，**本机无 caddy，
-  未经 `caddy validate`**；首次部署时请先 `docker compose exec caddy caddy validate
-  --config /etc/caddy/Caddyfile`。
-- `Dockerfile`：PB_SHA256 取自官方 release `checksums.txt` 并经本机下载真实 zip 实测
-  比对一致，`sha256sum -c` 校验命令形式本机实测可用；**镜像未真实构建**（本机无 Docker）。
-- 定时触发（crond 每日）未验证：已验证的仅为脚本本体，cron 接线沿用既有占位实现。
+### 3.2 正式部署
+
+PR 合并到 `main` 后 GitHub Actions 自动：
+
+1. SSH 到 ECS，只执行 `git fetch`；
+2. 在临时 detached worktree 复制生产 `.env`；
+3. `docker compose config -q`；
+4. 预拉取 Caddy/backup 运行时镜像；
+5. 构建候选镜像；
+6. 检查 `CC_PHONE_HASH_KEY >= 32` 和 production+aliyun 短信必填变量；
+7. 全部通过后才 fast-forward `/opt/chatcircle/main`；
+8. `docker compose up --build -d`；
+9. 轮询 app 容器 healthcheck，90 秒内必须进入 `healthy`。
+
+缺 Secret、Compose 配置错误、镜像拉取失败或 build 失败都会发生在生产工作区更新之前。
+
+### 3.3 部署后验证
+
+```bash
+cd /opt/chatcircle
+docker compose ps
+docker compose logs --tail=100 caddy
+```
+
+外部验证：
+
+```bash
+curl -I http://chatcircle.empact.cn
+curl -I https://chatcircle.empact.cn
+curl -fsS https://chatcircle.empact.cn/api/health
+```
+
+预期：
+
+- HTTP 自动跳转 HTTPS；
+- HTTPS 不需要 `:8443`；
+- `/api/health` 正常；
+- `docker compose ps` 中 app 为 healthy、caddy 正常运行；
+- Caddy 日志没有持续的 ACME/证书错误。
+
+确认 443 正常后：
+
+- 从阿里云安全组关闭旧的 TCP 8443 入站规则；
+- 删除 `.env` 中旧 `ALIYUN_ACCESS_KEY_ID/SECRET`；
+- 保留短信使用的 `ALIBABA_CLOUD_ACCESS_KEY_ID/SECRET`，两者不是同一组变量。
+
+## 4. Caddy / HTTPS
+
+生产 Compose 使用官方 `caddy:2-alpine`，发布：
+
+```text
+80:80
+443:443
+```
+
+`deploy/Caddyfile` 的站点地址是：
+
+```text
+chatcircle.empact.cn
+```
+
+没有显式 `tls { dns ... }` 配置。Caddy 使用 Automatic HTTPS 自动申请与续期证书，并负责 HTTP → HTTPS 跳转。因此：
+
+- 80/443 必须从公网可达；
+- 不再需要 `caddy-dns/alidns` 插件；
+- 不再需要 Caddy 专用阿里云 DNS AccessKey；
+- `caddy_data` 与 `caddy_config` 卷持久化 ACME 账户、证书和运行配置。
+
+安全边界继续保持：
+
+- `/_/*` 返回 403，生产不暴露 PocketBase 管理台；
+- HSTS、CSP、nosniff、X-Frame-Options 等安全头由 Caddy 下发；
+- Caddy 覆盖客户端传入的 `X-Forwarded-For`，后端来源 IP 以代理实际连接为准。
+
+## 5. 备份与恢复
+
+每日备份由 Compose `backup` 服务中的 cron 执行 `deploy/backup.sh`：
+
+- 使用 PocketBase 备份 API 创建 SQLite + 上传文件一致性 ZIP；
+- 下载到 `backups` 持久化卷；
+- 默认滚动保留 `BACKUP_RETENTION_DAYS=30` 天；
+- 结果写 `last_backup.json`；
+- 尽力写入 `audit_logs` 的 `backup.success` / `backup.failed`，供超级管理后台告警。
+
+手工触发：
+
+```bash
+docker compose exec backup sh /etc/periodic/daily/backup
+docker compose exec backup cat /backups/last_backup.json
+```
+
+恢复属于运维操作，执行前必须确认目标环境和备份文件，并事后补写恢复审计。最小流程：停止 app → 从最近一致备份恢复 `pb_data` → 启动 app → 校验账号、机构、活动、报名、签到、问卷与答卷。
+
+生产备份仍需后续补充加密和异地同步。
+
+## 6. 常用排障
+
+查看服务：
+
+```bash
+docker compose ps
+```
+
+查看 app：
+
+```bash
+docker compose logs --tail=120 app
+```
+
+查看 Caddy/证书：
+
+```bash
+docker compose logs --tail=150 caddy
+```
+
+验证 Compose 环境变量：
+
+```bash
+docker compose config -q
+```
+
+只确认短信 Secret 是否存在、不打印值：
+
+```bash
+for v in \
+  CC_PHONE_HASH_KEY \
+  ALIBABA_CLOUD_ACCESS_KEY_ID \
+  ALIBABA_CLOUD_ACCESS_KEY_SECRET \
+  CC_SMS_SIGN_NAME \
+  CC_SMS_TEMPLATE_LOGIN_REGISTER_CODE \
+  CC_SMS_TEMPLATE_BIND_NEW_CODE \
+  CC_SMS_TEMPLATE_VERIFY_BOUND_CODE; do
+  if grep -q "^${v}=." .env; then echo "OK   $v"; else echo "MISS $v"; fi
+done
+```
+
+不要把 `.env`、AccessKey Secret、手机号 HMAC key 或超管密码贴进 issue/PR/聊天截图。
+
+## 7. 发布前人工门禁
+
+自动化无法替代以下检查：
+
+- DNS 指向正确生产 ECS；
+- 安全组和主机防火墙开放 80/443；
+- 80/443 无端口冲突；
+- 服务器无 legacy `docker-compose.override.yml`；
+- 真机短信登录/注册、绑定、换绑三类模板均成功；
+- `https://chatcircle.empact.cn` 正常，无 `:8443`；
+- `/api/health`、管理端、超级管理端和参与者端均正常；
+- 备份最近一次成功；
+- 公安备案审核通过后按要求在网站页脚补公安备案信息（属于合规展示，不影响当前 80/443 技术切换）。
