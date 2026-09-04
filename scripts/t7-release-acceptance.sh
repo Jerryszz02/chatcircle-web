@@ -22,9 +22,17 @@ npm run typecheck --prefix frontend
 npm run test --prefix frontend
 npm run build --prefix frontend
 
-echo '[T7] 生产依赖安全审计（production lockfile，moderate）'
-npm audit --prefix frontend --package-lock-only --omit=dev --audit-level=moderate
-npm audit --prefix mcp --package-lock-only --omit=dev --audit-level=moderate
+echo '[T7] 生产依赖安全审计（OSV-Scanner，dev-only 排除）'
+if ! command -v osv-scanner >/dev/null 2>&1; then
+  echo 'ERROR: 缺少 osv-scanner。macOS 可执行: brew install osv-scanner' >&2
+  echo 'CI 中的 dependency-audit 会使用固定版本的官方 OSV GitHub Action。' >&2
+  exit 127
+fi
+osv-scanner scan source \
+  --config=.github/osv-production.toml \
+  --lockfile=frontend/package-lock.json \
+  --lockfile=mcp/package-lock.json \
+  --verbosity=info
 
 echo '[T7] 迁移往返冒烟'
 bash backend/tests/migration_smoke.sh
