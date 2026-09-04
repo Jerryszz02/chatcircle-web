@@ -33,16 +33,36 @@ export function hasActiveAdminConsoleBlock(caddyfile) {
   return /\bhandle\s+\/_\/\*\s*\{[^{}]*\brespond\s+403(?:\s|$)[^{}]*\}/m.test(activeConfig);
 }
 
-export function hasLoopbackOnlyPocketBasePort(compose) {
+function shortPortMappings(compose) {
   const activeCompose = stripConfigComments(compose);
-  const shortMappings = [...activeCompose.matchAll(/^\s*-\s*(?:'([^']+)'|"([^"]+)"|([^\s]+))\s*$/gm)]
-    .map((match) => match[1] || match[2] || match[3])
+  return [...activeCompose.matchAll(/^\s*-\s*(?:'([^']+)'|"([^"]+)"|([^\s]+))\s*$/gm)]
+    .map((match) => match[1] || match[2] || match[3]);
+}
+
+export function hasLoopbackOnlyPocketBasePort(compose) {
+  const mappings = shortPortMappings(compose)
     .filter((mapping) => /(^|:)8090(?:\/tcp)?$/.test(mapping));
 
   // 无 8090 映射（生产默认不向 host 发布 PocketBase 端口，仅在 Docker 私网供 Caddy/backup
   // 访问 —— 2026-09 安全加固）同样满足「不得暴露到公网」；有映射则必须全部只绑 127.0.0.1。
-  return shortMappings.length === 0
-    || shortMappings.every((mapping) => /^127\.0\.0\.1:\d+:8090(?:\/tcp)?$/.test(mapping));
+  return mappings.length === 0
+    || mappings.every((mapping) => /^127\.0\.0\.1:\d+:8090(?:\/tcp)?$/.test(mapping));
+}
+
+export function hasStandardCaddyPublicPorts(compose) {
+  const mappings = shortPortMappings(compose);
+  const has80 = mappings.some((mapping) => /^(?:0\.0\.0\.0:)?80:80(?:\/tcp)?$/.test(mapping));
+  const has443 = mappings.some((mapping) => /^(?:0\.0\.0\.0:)?443:443(?:\/tcp)?$/.test(mapping));
+  const has8443 = mappings.some((mapping) => /(^|:)8443(?::|\/tcp|$)/.test(mapping));
+  return has80 && has443 && !has8443;
+}
+
+export function usesStandardAutomaticHttps(caddyfile) {
+  const active = stripConfigComments(caddyfile);
+  return /^\s*chatcircle\.empact\.cn\s*\{/m.test(active)
+    && !/chatcircle\.empact\.cn:8443/.test(active)
+    && !/\bdns\s+alidns\b/.test(active)
+    && !/ALIYUN_ACCESS_KEY_(?:ID|SECRET)/.test(active);
 }
 
 function getWorkflowStep(workflow, stepName) {
@@ -82,6 +102,17 @@ export function hasPreflightComposeValidation(workflow) {
 
 export function hasCandidateImagePreflightBuild(workflow) {
   return /^\s*docker compose --project-name "\$preflight_project" build\s*$/m.test(preflightStep(workflow));
+}
+
+export function hasRuntimeImagePreflightPull(workflow) {
+  return /^\s*docker compose --project-name "\$preflight_project" pull caddy backup\s*$/m.test(preflightStep(workflow));
+}
+
+export function rejectsLegacyServerOverride(workflow) {
+  const step = preflightStep(workflow);
+  return /^\s*if \[ -f docker-compose\.override\.yml \]; then\s*$/m.test(step)
+    && /legacy \/opt\/chatcircle\/docker-compose\.override\.yml/.test(step)
+    && /^\s*exit 1\s*$/m.test(step);
 }
 
 export function hasPreflightPhoneKeyValidation(workflow) {
