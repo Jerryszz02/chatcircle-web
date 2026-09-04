@@ -22,9 +22,9 @@ npm run typecheck --prefix frontend
 npm run test --prefix frontend
 npm run build --prefix frontend
 
-echo '[T7] 生产依赖安全审计（production，moderate）'
-npm audit --prefix frontend --omit=dev --audit-level=moderate
-npm audit --prefix mcp --omit=dev --audit-level=moderate
+echo '[T7] 生产依赖安全审计（production lockfile，moderate）'
+npm audit --prefix frontend --package-lock-only --omit=dev --audit-level=moderate
+npm audit --prefix mcp --package-lock-only --omit=dev --audit-level=moderate
 
 echo '[T7] 迁移往返冒烟'
 bash backend/tests/migration_smoke.sh
