@@ -87,7 +87,9 @@ jobs:
 
   dependency-audit:
     # production dependency 安全门禁（test-plan §8 / production-readiness-batch-1-plan §7.4）：
-    # 只审计生产依赖，moderate / high / critical 任一公告都会使该 job 失败。
+    # 只审计 production lockfile；moderate / high / critical 任一公告都会使该 job 失败。
+    # 使用 --package-lock-only，避免 npm audit 因已安装 node_modules 的树形态/fallback quick endpoint
+    # 产生 "Invalid package tree" 基础设施型失败；阈值与审计范围不因此降低。
     # 不使用 continue-on-error、|| true 或调高阈值绕过；审计需要访问 npm registry 网络，
     # 新增公告导致未来构建失败是安全门禁的预期行为。
     # 该 job 是独立 check，可被仓库管理员设为 required；代码无法替代 repository settings。
@@ -104,7 +106,5 @@ jobs:
           cache-dependency-path: |
             frontend/package-lock.json
             mcp/package-lock.json
-      - run: npm ci --prefix frontend
-      - run: npm audit --prefix frontend --omit=dev --audit-level=moderate
-      - run: npm ci --prefix mcp
-      - run: npm audit --prefix mcp --omit=dev --audit-level=moderate
+      - run: npm audit --prefix frontend --package-lock-only --omit=dev --audit-level=moderate
+      - run: npm audit --prefix mcp --package-lock-only --omit=dev --audit-level=moderate
