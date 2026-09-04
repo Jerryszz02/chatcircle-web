@@ -1,0 +1,8 @@
+# Production dependency vulnerability gate for OSV-Scanner.
+# Dev-only packages are intentionally excluded to preserve the previous
+# `npm audit --omit=dev` scope. Runtime/production dependencies remain scanned.
+
+[[PackageOverrides]]
+group = "dev"
+vulnerability.ignore = true
+reason = "CI production dependency gate excludes dev-only dependencies"
