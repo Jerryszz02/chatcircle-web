@@ -10,6 +10,10 @@ import {
   hasPreflightComposeValidation,
   hasPreflightPhoneKeyValidation,
   hasPreflightSmsValidation,
+  hasRuntimeImagePreflightPull,
+  hasStandardCaddyPublicPorts,
+  rejectsLegacyServerOverride,
+  usesStandardAutomaticHttps,
 } from './release-config-checks.mjs';
 
 const workflow = ({ preflight = '', deploy = '' } = {}) => `
@@ -62,7 +66,6 @@ test('accepts only an active loopback PocketBase short port mapping, or no mappi
     ports:
       - '127.0.0.1:8090:8090'
   `), true);
-  // 无 8090 映射（生产不发布 host 端口）同样不暴露到公网 → 通过
   assert.equal(hasLoopbackOnlyPocketBasePort(`
     # 生产默认不向 host 发布 PocketBase 端口
     volumes:
@@ -79,10 +82,58 @@ test('accepts only an active loopback PocketBase short port mapping, or no mappi
   `), false);
 });
 
+test('requires formal Caddy 80/443 ports and rejects legacy 8443', () => {
+  assert.equal(hasStandardCaddyPublicPorts(`
+    caddy:
+      ports:
+        - '80:80'
+        - '443:443'
+  `), true);
+  assert.equal(hasStandardCaddyPublicPorts(`
+    caddy:
+      ports:
+        - '443:443'
+  `), false);
+  assert.equal(hasStandardCaddyPublicPorts(`
+    caddy:
+      ports:
+        - '80:80'
+        - '443:443'
+        - '8443:8443'
+  `), false);
+});
+
+test('requires Caddy standard Automatic HTTPS without DNS-01 credentials', () => {
+  assert.equal(usesStandardAutomaticHttps(`
+    chatcircle.empact.cn {
+      reverse_proxy app:8090
+    }
+  `), true);
+  assert.equal(usesStandardAutomaticHttps(`
+    chatcircle.empact.cn:8443 {
+      reverse_proxy app:8090
+    }
+  `), false);
+  assert.equal(usesStandardAutomaticHttps(`
+    chatcircle.empact.cn {
+      tls {
+        dns alidns {
+          access_key_id {$ALIYUN_ACCESS_KEY_ID}
+        }
+      }
+    }
+  `), false);
+});
+
 test('accepts active deployment safeguards in their intended steps', () => {
   const source = workflow({
     preflight: `
+          if [ -f docker-compose.override.yml ]; then
+            echo "ERROR: 检测到 legacy /opt/chatcircle/docker-compose.override.yml" >&2
+            exit 1
+          fi
           docker compose config -q
+          docker compose --project-name "$preflight_project" pull caddy backup
           docker compose --project-name "$preflight_project" build
           if [ "\${#CC_PHONE_HASH_KEY}" -lt 32 ]; then
           if [ "\${CC_ENVIRONMENT:-}" = "production" ] && [ "\${CC_SMS_PROVIDER:-}" = "aliyun" ]; then
@@ -93,7 +144,9 @@ test('accepts active deployment safeguards in their intended steps', () => {
           status="$(docker inspect --format '{{.State.Health.Status}}' "$app_id" 2>/dev/null || echo '')"`,
   });
 
+  assert.equal(rejectsLegacyServerOverride(source), true);
   assert.equal(hasPreflightComposeValidation(source), true);
+  assert.equal(hasRuntimeImagePreflightPull(source), true);
   assert.equal(hasCandidateImagePreflightBuild(source), true);
   assert.equal(hasPreflightPhoneKeyValidation(source), true);
   assert.equal(hasPreflightSmsValidation(source), true);
@@ -112,18 +165,22 @@ test('rejects host-level PocketBase health checks after host port removal', () =
 test('rejects commented safeguards and commands in the wrong step', () => {
   const source = workflow({
     preflight: `
+          # if [ -f docker-compose.override.yml ]; then
           # docker compose config -q
+          # docker compose --project-name "$preflight_project" pull caddy backup
           # docker compose --project-name "$preflight_project" build
-          # if [ "\${#CC_PHONE_HASH_KEY}" -lt 32 ]; then
-          # if docker compose exec -T app wget -qO- http://127.0.0.1:8090/api/health >/dev/null 2>&1; then`,
+          # if [ "\${#CC_PHONE_HASH_KEY}" -lt 32 ]; then`,
     deploy: `
           docker compose config -q
+          docker compose --project-name "$preflight_project" pull caddy backup
           docker compose --project-name "$preflight_project" build
           docker compose up --build -d
           if [ "\${#CC_PHONE_HASH_KEY}" -lt 32 ]; then`,
   });
 
+  assert.equal(rejectsLegacyServerOverride(source), false);
   assert.equal(hasPreflightComposeValidation(source), false);
+  assert.equal(hasRuntimeImagePreflightPull(source), false);
   assert.equal(hasCandidateImagePreflightBuild(source), false);
   assert.equal(hasPreflightPhoneKeyValidation(source), false);
   assert.equal(hasPreflightSmsValidation(source), false);
@@ -145,7 +202,6 @@ test('production SMS preflight requires every required variable', () => {
           for name in ${allRequired.join(' ')}; do`,
   })), true);
 
-  // 缺少任一生产必填变量时预检失败（逐项验证）。
   for (const missing of allRequired) {
     const subset = allRequired.filter((name) => name !== missing);
     assert.equal(hasPreflightSmsValidation(workflow({
@@ -165,7 +221,6 @@ test('production SMS preflight still passes without optional STS token or scheme
     'CC_SMS_TEMPLATE_VERIFY_BOUND_CODE',
   ].join(' ');
 
-  // 可选变量 ALIBABA_CLOUD_SECURITY_TOKEN 与 CC_SMS_SCHEME_NAME 不出现仍应通过。
   assert.equal(hasPreflightSmsValidation(workflow({
     preflight: `
           for name in ${required}; do`,
