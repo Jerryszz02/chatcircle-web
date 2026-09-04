@@ -53,6 +53,17 @@ PB_SUPERUSER_PASSWORD=<生产超管密码>
 
 旧 `CC_SMS_TEMPLATE_CODE` 仅为迁移兼容变量，新后端不再读取。
 
+首次创建全新 `pb_data` 卷时，环境变量本身不会自动创建 PocketBase `_superusers` 账号。应用启动后必须执行一次：
+
+```bash
+docker compose up --build -d
+docker compose exec app ./pocketbase superuser create \
+  "$PB_SUPERUSER_EMAIL" "$PB_SUPERUSER_PASSWORD" \
+  --dir /pb/pb_data
+```
+
+已有生产数据卷且超级管理员已经存在时不要重复创建；这一步只用于首次初始化。该账号同时用于 `/super` 与 `backup` 服务认证，所以漏掉会导致超级管理端无法登录、定时备份认证失败。
+
 **不再需要：**
 
 ```env
