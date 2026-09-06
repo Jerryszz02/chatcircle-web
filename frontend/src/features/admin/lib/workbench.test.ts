@@ -149,14 +149,14 @@ describe('computeStructureExtras 参与者结构', () => {
     { participant_id: 'p5', activity_id: 'act', status: 'approved', submitted_at: '2026-08-15 10:00:00.000Z' },
     { participant_id: 'p6', activity_id: 'act', status: 'pending', submitted_at: '2026-08-15 10:00:00.000Z' },
   ];
-  const orgApproved: RegistrationLike[] = [
-    ...activityRegs.filter((r) => r.status === 'approved'),
+  const orgCheckins = [
+
     // p2 半年前参加过本机构另一场活动 → 回访 + 历史 2 次
-    { participant_id: 'p2', activity_id: 'old', status: 'approved', submitted_at: '2026-03-01 10:00:00.000Z' },
+    { participant_id: 'p2', activity_id: 'old', status: 'valid', checked_in_at: '2026-03-01 10:00:00.000Z' },
   ];
 
   it('按本场 approved 聚合新老年/历史次数/报名提前量', () => {
-    const extras = computeStructureExtras(activityRegs, orgApproved, '2026-09-01 09:00:00.000Z');
+    const extras = computeStructureExtras(activityRegs, orgCheckins, '2026-09-01 09:00:00.000Z', '2026-09-02T00:00:00Z');
     expect(extras.baseCount).toBe(5);
     // 5 个 approved：4 新 1 回访 → 回访桶 <5，全维度抑制
     expect(extras.newcomer.every((b) => b.suppressed)).toBe(true);
@@ -194,8 +194,9 @@ describe('computeStructureExtras 参与者结构', () => {
     }
     const extras = computeStructureExtras(
       many.filter((r) => r.activity_id === 'act'),
-      many,
+      many.filter((r) => r.activity_id === 'old').map((r) => ({ ...r, status: 'valid', checked_in_at: r.submitted_at })),
       '2026-09-01 09:00:00.000Z',
+      '2026-09-02T00:00:00Z',
     );
     expect(extras.newcomer).toEqual([
       { key: 'new', label: '新参与者', count: 5, suppressed: false },
@@ -365,5 +366,21 @@ describe('buildWorkbenchCsv 导出当前视图', () => {
       activity_code: 'CC_T4',
     } as ActivityRecord);
     expect(csv).toContain('"含,逗号""引号"');
+  });
+});
+
+describe('真实签到历史边界', () => {
+  it('去重同场签到，忽略撤销、本场和未来记录，未到场报名不增加次数', () => {
+    const regs: RegistrationLike[] = Array.from({ length: 5 }, (_, i) => ({ participant_id: `p${i}`, activity_id: 'current', status: 'approved', submitted_at: '2026-08-01T00:00:00Z' }));
+    const checkins = regs.flatMap((r) => [
+      { ...r, activity_id: 'old', status: 'valid', checked_in_at: '2026-08-01T00:00:00Z' },
+      { ...r, activity_id: 'old', status: 'valid', checked_in_at: '2026-08-01T01:00:00Z' },
+      { ...r, activity_id: 'revoked', status: 'revoked', checked_in_at: '2026-08-01T00:00:00Z' },
+      { ...r, activity_id: 'future', status: 'valid', checked_in_at: '2026-10-01T00:00:00Z' },
+      { ...r, status: 'valid', checked_in_at: '2026-08-01T00:00:00Z' },
+    ]);
+    const result = computeStructureExtras(regs, checkins, '2026-09-01T00:00:00Z', '2026-08-30T00:00:00Z');
+    expect(result.history).toEqual([{ key: 'once', label: '此前参加 1 次', count: 5, suppressed: false }]);
+    expect(computeStructureExtras(regs, [], '2026-09-01T00:00:00Z').history).toEqual([{ key: 'zero', label: '此前未签到', count: 5, suppressed: false }]);
   });
 });

@@ -82,7 +82,7 @@ def run(ctx):
     form_config = copy.get('form_config_json') or {}
     rep.check('DUP-03 报名表配置（form_config_json）随复制保留',
               isinstance(form_config, dict)
-              and len(form_config.get('fields') or []) == 2
+              and len(form_config.get('fields') or []) == 3
               and any(f.get('field_def_id') == custom_field['id']
                       for f in form_config.get('fields') or []), form_config)
     rep.check('DUP-04 签到 token 重新生成、现场编号/配对状态重置、恒为草稿',

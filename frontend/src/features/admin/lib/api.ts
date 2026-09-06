@@ -55,8 +55,8 @@ export function runActivityAction(id: string, action: AdminActivityAction): Prom
  * 复制活动（PRD §4.1）：服务端重新生成活动代码、签到 token 与问卷入口 token，
  * 不复制历史报名/签到/配对/答卷/审计；新活动恒为 draft。
  */
-export function duplicateActivity(activityId: string): Promise<DuplicateActivityResponse> {
-  return apiPost(adminClient(), ACCOUNT_EVENT_ENDPOINTS.duplicateActivity(activityId));
+export function duplicateActivity(activityId: string, asTemplate = false): Promise<DuplicateActivityResponse> {
+  return apiPost(adminClient(), ACCOUNT_EVENT_ENDPOINTS.duplicateActivity(activityId), { as_template: asTemplate });
 }
 
 /** 开始配对（幂等，重复调用只补齐等待队列，不重排旧组，api-design §4.1）。 */
@@ -162,7 +162,7 @@ export function revokeTrainingCheckin(id: string, reason: string): Promise<unkno
 /** 从模板复制创建活动问卷（FR-SUR-011：取模板当前版本物化题目）。 */
 export function createActivitySurvey(
   activityId: string,
-  input: { template_version_id: string; title: string; role_scope: RoleScope },
+  input: { template_version_id: string; title: string; role_scope: RoleScope; phase?: 'before' | 'onsite' | 'after'; planned_open_at?: string },
 ): Promise<unknown> {
   return apiPost(adminClient(), `/api/cc/activities/${activityId}/surveys`, input);
 }

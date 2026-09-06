@@ -169,3 +169,9 @@ export function hasRole(role: Role): boolean {
 export function hasAnySession(): boolean {
   return currentRole() !== null;
 }
+
+/** 内置邮箱 OTP 成功后统一接管管理员会话，保持三角色互斥。 */
+export function saveAdminEmailAuth(response: ParticipantAuthResponse): void {
+  clearOtherRoleSessions('admin');
+  pbClients.admin.authStore.save(response.token, response.record);
+}

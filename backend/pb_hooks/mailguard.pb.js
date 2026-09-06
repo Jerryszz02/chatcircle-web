@@ -7,13 +7,13 @@
 // 钩子与语义（0.28.4，同 authguard.pb.js 实测模式）：
 // - onRecordRequestVerificationRequest / onRecordRequestOTPRequest /
 //   onRecordRequestPasswordResetRequest 在发信处理前触发，事件内 e.record 为目标账号
-//   （邮箱不存在时钩子不触发，PB 自身即返回 204 不发信）；
+//   （邮箱不存在时不发信；验证/找回返回 204，OTP 返回 200 + 随机 otpId）；
 // - e.request 为 undefined，可用 e.realIP() / e.requestInfo() / e.noContent / e.collection / e.record；
 // - 不调用 e.next() 即静默取消后续处理。
 //
 // ⚠️ 防账号枚举设计（review 修订）：这三个钩子只在邮箱**存在**时触发。若超限响应 429，
-// 探测者可用「第 N 次请求是否 429」区分已注册邮箱（429）与不存在邮箱（恒 204），
-// 形成账号枚举 oracle。因此本文件的限流一律**静默拦截**：任何输入恒返回 204，
+// 探测者可用「第 N 次请求是否 429」区分已注册邮箱（429）与不存在邮箱（正常响应），
+// 形成账号枚举 oracle。因此本文件的限流一律**静默拦截**：验证/找回返回 204；OTP 返回 200 + 随机 otpId，
 // 超限时不调 e.next()（不发信）并写审计 auth.mail.throttled，响应与正常/不存在完全一致。
 //
 // 规则（窗口与数值见 security-privacy §9）：
@@ -30,7 +30,7 @@
 
 // ---------------------------------------------------------------------------
 // 三个请求钩子同构：per-email（按用途分桶）+ per-IP（三端点共桶）限流，
-// 超限一律静默 204 + 审计（防枚举，见文件头）。JSVM 各钩子作用域隔离，
+// 超限返回该端点的正常响应形状 + 审计（防枚举，见文件头）。JSVM 各钩子作用域隔离，
 // 函数在每个钩子内就地展开（勿提取跨钩子共享）。
 // ---------------------------------------------------------------------------
 
@@ -137,7 +137,8 @@ onRecordRequestOTPRequest((e) => {
       action: 'auth.mail.throttled', targetType: 'admin_account',
       targetId: rec ? rec.id : '', result: 'failure', reason: reason,
     });
-    e.noContent(204);
+    // 正常/未知邮箱均返回小写字母数字组成的 15 位 otpId；超限不创建有效验证码。
+    e.json(200, { otpId: $security.randomStringWithAlphabet(15, 'abcdefghijklmnopqrstuvwxyz0123456789') });
   };
 
   const ip = e.realIP();

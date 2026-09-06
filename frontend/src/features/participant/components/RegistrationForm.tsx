@@ -267,6 +267,7 @@ export function RegistrationForm({
         提交报名
       </Button>
       <p className="cc-hint">提交后进入待审核，不能自行修改或取消（FR-REG-004）。</p>
+    <p className="cc-hint">个人信息用途与保存期限见 <a href="/privacy" target="_blank" rel="noopener noreferrer">隐私政策</a>。必要活动通知不代表营销同意。</p>
     </form>
   );
 }

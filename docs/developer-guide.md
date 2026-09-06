@@ -13,6 +13,18 @@
 
 ---
 
+## 2026-09-06 上线整改
+
+本轮基于 `origin/main@7b95d9a`，实现与部署分开验收，结果以 [发布清单](release-checklist.md) 为准。
+
+- `release.pb.js` 与迁移 `1788600000_cc_release_completion.js` 保证标准 `FULL_NAME` 存在、启用、必填、敏感且适用于两种角色；创建/更新活动不能关闭该字段，报名端拒绝缺失或全空白姓名，不伪造历史答案。
+- 向导与活动设置写 `planned_checkin_at/pairing_enabled`，问卷写 `phase/planned_open_at`；计划时间只作提示，现场仍手动开放。关闭配对时 start/reassign 服务端拒绝；首次开始后不能反转开关。
+- 机构模板复用 activities 的 `is_template` 草稿与既有复制事务，保留配置/问卷但不带人员历史；模板不能直接发布。复制清空签到/问卷预计开放时间，原活动开始/结束及报名窗口仍复制，使用者须调整。
+- 工作台历史次数以本机构其他活动有效签到去重，截止本场开始与快照时间的较早值；没有签到的 approved 报名不算参加。该辅助聚合独立于 live-summary 的主快照请求，拉取失败明确提示不可用，小样本仍抑制。
+- `/posts/:postId` 阅读完整 Markdown，忽略原始 HTML，远程 Markdown 图片仅显示替代文字；`/privacy` 展示完整政策。公开文章沿用 posts 的可见性规则。
+- `/admin/email-login`、`/admin/verify-email`、`/admin/reset-password` 补齐邮箱登录/验证/找回；邮箱 token 使用 fragment，页面读取后移除。OTP 限流仍返回 `200 + otpId`，与正常/不存在邮箱同形；验证/找回静默 `204`。SMTP 和 APP_URL 配置见 [运营手册](privacy-operations.md)。
+- 备份接续脚本与实际服务器启用步骤见 [异地备份](../deploy/offsite-backup.md)。业务个人信息到期处置是运营流程，尚无自动清理任务。
+
 ## 1. 项目一页纸
 
 **Chat Circles** 是 Empact 统一运营的**多机构活动管理 / 报名审核 / 签到 / 问卷 / 聆听者培训平台**。它把公益心理陪伴活动的报名、签到、问卷从微信群和零散表格搬到统一网站上。正式域名 `chatcircle.empact.cn`。
@@ -294,7 +306,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 ### 5.7 后端测试体系（`backend/tests/`）
 
-- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 22 个 suite（当前 601 断言）：越权矩阵、名额/配对并发、状态机、手机号认证、Realtime ACL、复制活动、问卷资格、v1/v2 导出准确性与敏感门禁、限流、备份告警、无硬删除和安全加固等。
+- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 全部 suite（2026-09-06 本轮 624 断言）：越权矩阵、名额/配对并发、状态机、手机号认证、Realtime ACL、复制活动、问卷资格、v1/v2 导出准确性与敏感门禁、限流、备份告警、无硬删除和安全加固等。
 - `migration_smoke.sh`：seed 及后续迁移局部回滚 → 全量 down → sqlite3 直查 26 个业务/内部集合清零 → 再 up，随后 serve 抽查，共 62 项。
 - **两条强制规则**：① authguard 对内置 auth-with-password 按 IP 限 25 次/10min，一轮全量当前使用 22 次（余量 3）——新增套件仍应避免消耗这项预算，管理员登录态用 impersonate，参与者走 `/api/cc/auth/participant`；② 新增带 `organization_id` 的接口，**必须同 PR 补机构越权用例**（通用端点放 `suite_acl.py`，领域聚合端点可放对应 suite）。
 
@@ -345,7 +357,7 @@ src/
 | 区 | 路由 |
 |---|---|
 | 参与者 `/`（公开页不要求登录） | `/` 落地页（现有活动最近 2 场、往期活动公开推文最近 2 篇）、`/activities` 现有活动（仅未结束场次）、`/activities/past` 全部公开推文、`/a/:activityId` 详情、`/a/:activityId/register` 报名、`/login`；需会话：`/me` 我的、`/checkin/:token` 扫码签到、`/survey/:qrToken` 填问卷、`/trainings`、`/training-checkin/:token` |
-| 机构 `/admin` | 公开：`/admin/login`、`/admin/register`（邀请码 + 用户名 + 邮箱 + 密码）；守卫：`/admin/activities`（+`/new` T4 分步创建向导、`/:activityId` 生命周期面板 + 五 tab 详情含「现场工作台」）、`/admin/trainings`(+`/:id`)、`/admin/dashboard`、`/admin/exports`、`/admin/audit` |
+| 机构 `/admin` | 公开：`/admin/login`、`/admin/email-login`、`/admin/verify-email`、`/admin/reset-password`、`/admin/register`（邀请码 + 用户名 + 邮箱 + 密码）；守卫：`/admin/activities`（+`/new` T4 分步创建向导、`/:activityId` 生命周期面板 + 五 tab 详情含「现场工作台」）、`/admin/trainings`(+`/:id`)、`/admin/dashboard`、`/admin/exports`、`/admin/audit` |
 | 超管 `/super` | 公开：`/super/login`；守卫：`/super/organizations`（机构+邀请码+开关）、`/super/approvals`、`/super/activities`、`/super/posts`（内容推文）、`/super/dashboard`、`/super/exports`、`/super/audit`、`/super/system`（备份告警+模板管理） |
 
 ### 6.6 样式体系
@@ -401,7 +413,7 @@ MCP 是由 WorkBuddy、Kimi、Claude、Codex 等本地客户端启动的 STDIO �
 
 | 层 | 位置 | 运行 | 覆盖 |
 |---|---|---|---|
-| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 当前 55 files / 410 tests：页面/组件行为、路由守卫、手机号交互、Realtime 失效化、工作台口径、配对卡五态与导出向导 |
+| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 随功能变更运行并读取实际通过数：页面/组件行为、路由守卫、手机号交互、Realtime 失效化、工作台口径、配对卡五态与导出向导 |
 | 后端集成 + 迁移冒烟 | `backend/tests/` | `bash backend/tests/run_integration.sh`、`migration_smoke.sh` | 越权矩阵、状态机、并发名额、导出、限流、无硬删除……（AC-01~23 映射见 docs/planning/test-plan.md） |
 | E2E 主链路 | `e2e/` | `cd e2e && npm test`（环境全自动自举，与本地库隔离） | 手机号登录→报名→审核→双角色签到/配对/Realtime→问卷→细粒度导出，外加培训链路 |
 | T7 发布验收 | `scripts/t7-release-acceptance.sh` | `bash scripts/t7-release-acceptance.sh` | 串联配置 15 项、hooks/备份语法、前端、迁移、后端集成与 E2E；不部署、不读真实 `.env` |

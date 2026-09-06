@@ -76,6 +76,15 @@
 
 `onsite_code` 由服务端按 `onsite_role + onsite_sequence` 派生：`speaker → S01`，`listener → L01`；`pair_code` 由 `pair_sequence` 派生为 `P01`。代码只用于展示，数据库唯一约束使用数值字段。
 
+### 4.1.1 2026-09-06 向导与模板补充
+
+- activities create/update 接受 `planned_checkin_at`、`pairing_enabled`；计划时间仅提示。`is_template=true` 只允许 draft/archived，不可直接发布。
+- duplicate 请求可带 `{as_template:true}` 另存机构模板，缺省复制为普通活动；复制重置预计签到/问卷时间和现场历史，保留配对开关与问卷 phase。
+- `POST /api/cc/activities/{id}/surveys` 增加可选 `phase`（before/onsite/after，缺省 onsite）与 `planned_open_at`（日期），响应 survey 同步返回这两个字段；非法值 400。
+- 标准 FULL_NAME 由服务端强制启用、必填、敏感、both；缺姓名/空白姓名返回 `400 REQUIRED_FIELD_MISSING`，标准定义缺失时 fail closed。活动配置不能覆盖此约束。
+- `pairing_enabled=false` 时 start/reassign 返回 `400 pairing_disabled`；本人快照增加可选兼容字段 `pairing_enabled`，前端显示未启用，不显示等待开始配对。
+- 新老参与者/历史次数为管理员端辅助聚合，查询本机构 `valid` checkins，按不同活动去重；截止本场开始与快照时间较早值，排除本场。不是 live-summary 原子主快照的一部分。
+
 ### 4.2 快照口径
 
 - 现场问卷完成率的分子和分母都只取“当前 valid 签到 + 角色符合”的人群交集。

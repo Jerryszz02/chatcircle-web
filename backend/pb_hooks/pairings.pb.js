@@ -406,6 +406,7 @@ routerAdd('POST', '/api/cc/activities/{id}/pairings/start', (e) => {
       try {
         $app.runInTransaction((txApp) => {
           const activity = txApp.findRecordById('activities', activityId);
+          if (!activity.get('pairing_enabled')) ccError(400, 'pairing_disabled', '本活动未启用现场配对');
           if (activity.get('status') !== 'published' && activity.get('status') !== 'closed') {
             ccError(400, 'pairing_unavailable', '活动当前不可开始配对');
           }
@@ -601,6 +602,7 @@ routerAdd('POST', '/api/cc/activities/{id}/pairings/reassign', (e) => {
       try {
         $app.runInTransaction((txApp) => {
           const activity = txApp.findRecordById('activities', activityId);
+          if (!activity.get('pairing_enabled')) ccError(400, 'pairing_disabled', '本活动未启用现场配对');
           if (activity.get('status') !== 'published' && activity.get('status') !== 'closed') {
             ccError(400, 'pairing_unavailable', '活动当前状态不可调整配对');
           }
@@ -789,6 +791,7 @@ routerAdd('GET', '/api/cc/activities/{id}/my-pairing', (e) => {
       contract_version: '2026-08-28.t0-v1',
       activity_id: activityId,
       state: 'not_checked_in',
+      pairing_enabled: !!activity.get('pairing_enabled'),
       updated_at: now,
     };
     const valid = one(

@@ -83,6 +83,7 @@ export function AdminActivityDetailPage() {
       const cc = adminCollections();
       const record = await cc.activities.getOne(activityId);
       setActivity(record);
+      if (record.is_template) setTab((current) => current === 'surveys' ? current : 'settings');
       const [orgRecord, approved] = await Promise.all([
         cc.organizations.getOne(record.organization_id),
         cc.registrations.getFullList({
@@ -108,7 +109,7 @@ export function AdminActivityDetailPage() {
     [activity, counts],
   );
 
-  const actions = activity && org ? availableActivityActions(activity.status, org.require_activity_approval) : [];
+  const actions = activity && org && !activity.is_template ? availableActivityActions(activity.status, org.require_activity_approval) : [];
 
   const confirmAction = async () => {
     if (!activity || !pendingAction) return;
@@ -166,6 +167,7 @@ export function AdminActivityDetailPage() {
         </div>
       }
     >
+      {activity.is_template ? <p role="note">这是机构模板，只保存配置和问卷。请回到活动列表选择“从模板创建活动”，新活动调整时间后再发布。</p> : null}
       <Card>
         <div className="admin-stats">
           <span>
@@ -213,12 +215,12 @@ export function AdminActivityDetailPage() {
         ) : null}
       </Card>
 
-      {org ? (
+      {org && !activity.is_template ? (
         <LifecyclePanel activity={activity} org={org} counts={counts} onOpenTab={setTab} />
       ) : null}
 
       <div className="admin-tabs" role="tablist">
-        {(Object.keys(TAB_LABELS) as DetailTab[]).map((key) => (
+        {(Object.keys(TAB_LABELS) as DetailTab[]).filter((key) => !activity.is_template || key === 'settings' || key === 'surveys').map((key) => (
           <button
             key={key}
             type="button"

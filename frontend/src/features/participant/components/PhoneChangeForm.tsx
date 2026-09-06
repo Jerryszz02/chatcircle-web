@@ -131,6 +131,7 @@ export function PhoneChangeForm({ onSuccess }: { onSuccess: () => void }) {
       <Button type="submit" block loading={loading}>
         确认换绑
       </Button>
+    <p className="cc-hint">个人信息用途与保存期限见 <a href="/privacy" target="_blank" rel="noopener noreferrer">隐私政策</a>。必要活动通知不代表营销同意。</p>
     </form>
   );
 }

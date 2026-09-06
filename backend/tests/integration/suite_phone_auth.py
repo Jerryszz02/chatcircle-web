@@ -6,7 +6,7 @@ from cc_client import biz_code, call
 import cc_fixture as fx
 
 
-PRIVACY_VERSION = '2026-08-28.v1'
+PRIVACY_VERSION = '2026-09-05.v1'
 MOCK_CODE = '246810'
 
 

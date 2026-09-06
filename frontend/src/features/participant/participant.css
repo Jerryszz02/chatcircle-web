@@ -1089,3 +1089,10 @@ a.cc-btn {
 .ccp-pairing-stale {
   margin: 12px 0 0;
 }
+
+/* 全文阅读与隐私政策：长文本在手机上自然折行。 */
+.ccp-reading { max-width: 760px; margin: 0 auto; line-height: 1.8; overflow-wrap: anywhere; }
+.ccp-reading h1 { font-size: clamp(1.6rem, 5vw, 2.2rem); }
+.ccp-reading h2 { margin-top: 2rem; font-size: 1.25rem; }
+.ccp-reading pre { white-space: pre-wrap; }
+.ccp-reading img { max-width: 100%; }

@@ -125,6 +125,10 @@ routerAdd('POST', '/api/cc/activities/{id}/surveys', (e) => {
   }
 
   const body = e.requestInfo().body || {};
+  const phase = body.phase || 'onsite';
+  if (['before', 'onsite', 'after'].indexOf(phase) < 0) return jsonError(e, 400, 'validation_failed', '问卷阶段无效');
+  const plannedOpen = body.planned_open_at || '';
+  if (plannedOpen && (typeof plannedOpen !== 'string' || !Number.isFinite(Date.parse(plannedOpen)))) return jsonError(e, 400, 'validation_failed', '预计开放时间无效');
   const roleScope = body.role_scope;
   if (['speaker', 'listener', 'both'].indexOf(roleScope) < 0) {
     return jsonError(e, 400, 'validation_failed', 'role_scope 必须为 speaker / listener / both');
@@ -173,6 +177,8 @@ routerAdd('POST', '/api/cc/activities/{id}/surveys', (e) => {
       survey.set('survey_code', surveyCode);
       survey.set('title', title);
       survey.set('role_scope', roleScope);
+      survey.set('phase', phase);
+      survey.set('planned_open_at', plannedOpen);
       survey.set('status', 'draft');
       survey.set('qr_token', qrToken);
       txApp.save(survey);
@@ -214,6 +220,8 @@ routerAdd('POST', '/api/cc/activities/{id}/surveys', (e) => {
       survey_code: created.get('survey_code'),
       title: created.get('title'),
       role_scope: created.get('role_scope'),
+      phase: created.get('phase'),
+      planned_open_at: String(created.get('planned_open_at') || ''),
       status: created.get('status'),
       qr_token: created.get('qr_token'),
     },

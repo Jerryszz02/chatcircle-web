@@ -81,7 +81,8 @@ export function OnsitePanel({
   const [checkinSession, setCheckinSession] = useState<CheckinSessionRecord | null>(null);
   const [surveys, setSurveys] = useState<ActivitySurveyRecord[]>([]);
   const [registrations, setRegistrations] = useState<RegistrationRecord[]>([]);
-  const [orgApproved, setOrgApproved] = useState<RegistrationRecord[]>([]);
+  const [orgCheckins, setOrgCheckins] = useState<CheckinRecord[]>([]);
+  const [structureError, setStructureError] = useState('');
   const [actionError, setActionError] = useState('');
   const [actionNote, setActionNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -131,7 +132,7 @@ export function OnsitePanel({
     (async () => {
       try {
         const cc = adminCollections();
-        const [sessions, surveyList, regs, orgRegs] = await Promise.all([
+        const [sessions, surveyList, regs, historyCheckins] = await Promise.all([
           cc.checkinSessions.getFullList({
             filter: `activity_id = "${activity.id}" && status = "open"`,
           }),
@@ -140,18 +141,19 @@ export function OnsitePanel({
             filter: `activity_id = "${activity.id}"`,
             fields: 'id,participant_id,activity_id,status,submitted_at',
           }),
-          cc.registrations.getFullList({
-            filter: `status = "approved" && activity_id.organization_id = "${activity.organization_id}"`,
-            fields: 'id,participant_id,activity_id,status,submitted_at',
+          cc.checkins.getFullList({
+            filter: `status = "valid" && activity_id.organization_id = "${activity.organization_id}"`,
+            fields: 'id,participant_id,activity_id,status,checked_in_at',
           }),
         ]);
         if (cancelled) return;
         setCheckinSession(sessions[0] ?? null);
         setSurveys(surveyList);
         setRegistrations(regs);
-        setOrgApproved(orgRegs);
+        setOrgCheckins(historyCheckins);
+        setStructureError('');
       } catch {
-        // 辅助数据失败不打断快照展示；下一轮快照更新会重试
+        if (!cancelled) setStructureError('签到历史加载失败，以下结构数据暂不可用，请稍后重试。');
       }
     })();
     return () => {
@@ -160,8 +162,8 @@ export function OnsitePanel({
   }, [activity.id, activity.organization_id, refreshKey]);
 
   const structureExtras = useMemo(
-    () => computeStructureExtras(registrations, orgApproved, activity.start_time),
-    [registrations, orgApproved, activity.start_time],
+    () => computeStructureExtras(registrations, orgCheckins, activity.start_time, refreshKey),
+    [registrations, orgCheckins, activity.start_time, refreshKey],
   );
 
   const lastUpdated = snapshot ? formatDateTime(snapshot.generated_at) : '—';
@@ -299,6 +301,7 @@ export function OnsitePanel({
           </Card>
 
           <Card title="签到">
+            {activity.planned_checkin_at ? <p>预计开放：{formatDateTime(activity.planned_checkin_at)}（手动控制）</p> : null}
             <div className="admin-stats">
               <span>
                 有效签到<strong>{snapshot.checkins.valid.total}</strong> / 已通过{' '}
@@ -352,6 +355,7 @@ export function OnsitePanel({
           </Card>
 
           <Card title="配对">
+            {activity.pairing_enabled === false ? <p>本活动未启用现场配对。</p> : null}
             <div className="admin-stats">
               <span>
                 已签到：倾诉者<strong>{snapshot.checkins.valid.speaker}</strong> · 聆听者
@@ -367,10 +371,10 @@ export function OnsitePanel({
               </span>
             </div>
             <div className="admin-row-actions admin-section">
-              <Button onClick={() => void startPairing()} loading={busy}>
+              <Button onClick={() => void startPairing()} loading={busy} disabled={activity.pairing_enabled === false}>
                 {snapshot.onsite.pairing_started_at ? '再次补齐配对' : '开始配对'}
               </Button>
-              <Button variant="secondary" onClick={() => setShowPairing((v) => !v)}>
+              <Button variant="secondary" disabled={activity.pairing_enabled === false} onClick={() => setShowPairing((v) => !v)}>
                 {showPairing ? '收起配对管理' : '配对管理'}
               </Button>
             </div>
@@ -445,12 +449,14 @@ export function OnsitePanel({
                 },
               ]}
             />
+            {structureError ? <p role="alert" className="cc-error">{structureError}</p> : <>
             <StructureGroup title="新老参与者" buckets={structureExtras.newcomer} />
             <StructureGroup title="历史参与次数" buckets={structureExtras.history} />
             <StructureGroup title="报名提前量" buckets={structureExtras.leadTime} />
+            </>}
             <p className="admin-muted admin-section">
               口径：本场已通过报名（{structureExtras.baseCount} 人）聚合；任一分组人数不足 5
-              人时该维度合并为「样本不足」，不做减法反推（PRD §4.3）。
+              人时该维度合并为「样本不足」。历史次数按本机构其他活动的有效签到去重，截止本场开始与当前快照中较早时间；不计未到场报名和撤销签到。
             </p>
             <p className="admin-card-foot">最后更新：{lastUpdated}</p>
           </Card>

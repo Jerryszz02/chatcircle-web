@@ -138,11 +138,15 @@ routerAdd('POST', '/api/cc/activities/{id}/register', (e) => {
     }
     return map;
   };
+  if (!defs.some((def) => def.get('field_code') === 'FULL_NAME' && !def.get('organization_id'))) {
+    ccError(503, 'REGISTRATION_CONFIG_INVALID', '报名配置暂不可用，请联系工作人员');
+  }
   const fieldConfig = ccFormFieldMap(activity.get('form_config_json'));
   const defById = {};
   const enabledById = {}; // 全部启用字段（含角色不适用项，用于区分 field_not_applicable）
   for (const def of defs) {
-    const cfg = fieldConfig[def.id] || {};
+    const cfg = def.get('field_code') === 'FULL_NAME' && !def.get('organization_id')
+      ? { enabled: true, required: true } : fieldConfig[def.id] || {};
     if (cfg.enabled === false) continue; // 活动级停用
     const item = {
       def: def,
@@ -214,7 +218,7 @@ routerAdd('POST', '/api/cc/activities/{id}/register', (e) => {
   for (const defId in defById) {
     if (!defById[defId].required) continue;
     const ans = answers.find((a) => a && a.field_def_id === defId);
-    if (!ans || ans.value == null || ans.value === '' ||
+    if (!ans || ans.value == null || (typeof ans.value === 'string' && ans.value.trim() === '') ||
         (Array.isArray(ans.value) && ans.value.length === 0)) {
       ccError(400, 'REQUIRED_FIELD_MISSING', '存在未填写的必填项：' + defById[defId].def.get('label'));
     }

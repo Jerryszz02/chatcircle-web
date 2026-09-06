@@ -1,3 +1,6 @@
+import { AdminEmailPage } from './features/admin/pages/AdminEmailPage';
+import { PrivacyPage } from './features/participant/pages/PrivacyPage';
+import { PostPage } from './features/participant/pages/PostPage';
 import { Route, Routes } from 'react-router-dom';
 import { RequireRole } from './shared/guards';
 import {
@@ -49,6 +52,8 @@ export function AppRoutes() {
       {/* 参与者端（公开页：首页、关于我们、活动广场、往期活动、活动详情、报名链路、登录） */}
       <Route path="/" element={<HomePage />} />
       <Route path="/about" element={<AboutPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/posts/:postId" element={<PostPage />} />
       <Route path="/activities" element={<ActivitiesPage />} />
       <Route path="/activities/past" element={<PastActivitiesPage />} />
       <Route path="/a/:activityId" element={<ActivityDetailPage />} />
@@ -98,6 +103,9 @@ export function AppRoutes() {
 
       {/* 机构管理端 */}
       <Route path="/admin/login" element={<AdminLoginPage />} />
+      <Route path="/admin/email-login" element={<AdminEmailPage key="otp" mode="otp" />} />
+      <Route path="/admin/verify-email" element={<AdminEmailPage key="verify" mode="verify" />} />
+      <Route path="/admin/reset-password" element={<AdminEmailPage key="reset" mode="reset" />} />
       <Route path="/admin/register" element={<AdminRegisterPage />} />
       <Route
         path="/admin/activities"

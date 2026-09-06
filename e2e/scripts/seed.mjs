@@ -122,6 +122,8 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     ['age', 'number', '年龄', false, false],
     ['wechat_id', 'text', '微信号', false, true],
   ]) {
+    const existing = await call('GET', `${pbUrl}/api/collections/registration_field_defs/records?filter=${encodeURIComponent(`field_code="${code}" && organization_id=""`)}`, undefined, ST);
+    if (existing.items.length) { fieldDefs[code] = existing.items[0].id; continue; }
     const r = await call('POST', `${pbUrl}/api/collections/registration_field_defs/records`, {
       organization_id: '', field_code: code, field_type: type, label,
       source_type: 'standard', is_sensitive: sensitive, options_json: null,

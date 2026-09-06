@@ -59,6 +59,7 @@ export function AdminLayout({
           </NavLink>
         </nav>
         <div className="admin-sidebar-foot">
+          <Link to="/admin/verify-email" className="admin-foot-link">验证邮箱 / 账号安全</Link>
           <span className="admin-nav-user">{record?.display_name || record?.username || ''}</span>
           <div className="admin-sidebar-foot-actions">
             <Link to="/" className="admin-foot-link">

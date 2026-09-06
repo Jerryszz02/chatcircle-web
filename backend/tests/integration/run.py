@@ -124,6 +124,7 @@ def main():
     import suite_hardening
     import suite_reports
     import suite_live_summary
+    import suite_release_completion
     import suite_phone_auth
 
     for mod in (suite_flow, suite_acl, suite_capacity, suite_transitions, suite_checkins, suite_pairings,
@@ -131,7 +132,7 @@ def main():
                 suite_trainings, suite_surveys, suite_exports, suite_exports_v2, suite_auth, suite_admin_email,
                 suite_posts, suite_outcome, suite_backup,
                 suite_nodelete, suite_templates, suite_hardening, suite_reports,
-                suite_live_summary, suite_phone_auth):
+                suite_live_summary, suite_phone_auth, suite_release_completion):
         mod.run(ctx)
 
     ok = rep.summary()

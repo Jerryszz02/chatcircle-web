@@ -296,6 +296,7 @@ export interface MyPairingResponse {
   contract_version: typeof ACCOUNT_EVENT_CONTRACT_VERSION;
   activity_id: string;
   state: MyPairingState;
+  pairing_enabled?: boolean;
   onsite_code?: string;
   pair_code?: string;
   partner?: {

@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import type { PostRecord } from '../../../shared/api/types';
 import { COLLECTION_NAMES } from '../../../shared/api/collections';
 import { pbClients } from '../../../shared/pocketbase';
@@ -37,6 +38,7 @@ export function PublicPostCard({ post }: { post: PostRecord }) {
         {post.published_at ? (
           <p className="cc-item-meta">发布于 {formatDateTime(post.published_at)}</p>
         ) : null}
+        {post.body_md?.trim() ? <Link to={`/posts/${post.id}`} className="cc-btn cc-btn-secondary cc-btn-block">阅读全文</Link> : null}
         {post.external_url ? (
           <a
             href={post.external_url}

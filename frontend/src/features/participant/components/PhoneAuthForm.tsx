@@ -143,6 +143,7 @@ export function PhoneAuthForm({
           获取验证码
         </Button>
       )}
+    <p className="cc-hint">个人信息用途与保存期限见 <a href="/privacy" target="_blank" rel="noopener noreferrer">隐私政策</a>。必要活动通知不代表营销同意。</p>
     </form>
   );
 }

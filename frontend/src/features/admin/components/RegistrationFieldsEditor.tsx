@@ -143,6 +143,7 @@ export function RegistrationFieldsEditor({
       {fieldConfigs.map((config) => {
         const def = defById.get(config.field_def_id);
         if (!def) return null;
+        const lockedName = def.field_code === 'FULL_NAME' && !def.organization_id;
         return (
           <div key={config.field_def_id} className="admin-field-row">
             <span className="admin-field-label">
@@ -171,7 +172,8 @@ export function RegistrationFieldsEditor({
             <label className="admin-checkbox-row">
               <input
                 type="checkbox"
-                checked={config.enabled}
+                checked={lockedName || config.enabled}
+                disabled={lockedName}
                 onChange={(e) => onPatchField(config.field_def_id, { enabled: e.target.checked })}
               />
               启用
@@ -179,8 +181,8 @@ export function RegistrationFieldsEditor({
             <label className="admin-checkbox-row">
               <input
                 type="checkbox"
-                checked={config.required}
-                disabled={!config.enabled}
+                checked={lockedName || config.required}
+                disabled={lockedName || !config.enabled}
                 onChange={(e) => onPatchField(config.field_def_id, { required: e.target.checked })}
               />
               必填

@@ -6,7 +6,7 @@
 
 ## 项目是什么
 
-**Chat Circles** 是由 Empact 统一运营的**多机构活动管理、报名审核、签到与问卷数据平台**。2026-09-03 文档审计时，`origin/main@05411bf` 已包含 T0–T7 的代码与自动化发布验收入口；[上线前第一批整改计划](production-readiness-batch-1-plan.md) 记录了当前仍需实现的部署健康检查、短信多模板/生产预检和依赖审计门禁；管理员邮箱注册相关的前后端契约与文档漂移已由 #50 实现。这些计划不代表真实阿里云短信、真机微信、备份恢复、合规或生产部署已验收。
+**Chat Circles** 是由 Empact 运营的多机构活动平台。2026-09-06 同步基于 `origin/main@7b95d9a`：此前部署健康检查、短信模板/预检、邮箱注册、依赖审计与标准 HTTPS 已分别由 #49/#52、#50、#51、#53 合入。当前 [上线整改](production-readiness-completion-plan.md) 补齐姓名必填、现场/问卷计划、机构模板、真实签到历史、隐私/备案、文章全文和邮箱页面；具体验证与生产边界见 [发布清单](../release-checklist.md)。仓库通过不代表真实服务已经验收。
 
 - 多机构集中管理：Empact 集中式平台，统一数据库，机构间按 `organization_id` 逻辑隔离。
 - 活动全生命周期：活动创建/发布/传播（链接与二维码；另设公开活动广场页 `/activities`，仅展示已发布/已关闭活动）→ 报名与人工审核（角色名额硬限制、误判回退）→ 现场固定二维码签到（含补签/撤销）→ 多份问卷发布与填写 → 基础项目管理看板 → 规范化 ZIP/CSV 数据导出。
@@ -45,11 +45,13 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 |---|---|
 | 生成请求 | 归档 2026-08-27 专项升级，并于 2026-08-28 实施 T0 共享契约和 T1 手机号账号 |
 | 初始生成 | 2026-08-05 |
-| 最近同步 | 2026-09-03：新增上线前第一批整改计划；PR 1（部署健康检查与短信生产闭环）与 PR 2（管理员邮箱注册，见 #50）已实现，PR 3 仍`计划中`，生产短信与外部/人工验收仍`待确认`。 |
-| 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb`；当前文档分支基于 `origin/main@05411bf`。 |
-| 本次关键代码证据 | 生产 compose 不发布 app `8090`；deploy workflow 已改用容器 healthcheck 状态判定（不再请求宿主机 8090）；phone hook 已按业务场景选择短信模板；管理员注册 email 契约已由 #50 对齐（前端已收集/提交 email）。 |
-| 本次验证命令 | `npm audit --omit=dev`（frontend：2 个 moderate；mcp：1 个受影响包、2 个 moderate advisory）；本次为计划归档，未重新运行完整 T7 验收。 |
+| 最近同步 | 2026-09-06：同步上线整改实现、测试、运营与备份流程。真实短信、SMTP、微信、异地上传/恢复仍待部署后验收。 |
+| 已检查的项目根目录 | `/Users/jerryszz/Desktop/实习/Empact/chatcircleWeb`；独立工作树 `/tmp/chatcircle-production-ready`，基于 `origin/main@7b95d9a`。 |
+| 本次关键代码证据 | 发布迁移/release hooks、管理员向导/模板/邮箱页、有效签到聚合、隐私/文章页、OSS 接续脚本；默认分支前序修复已通过 git log 核对。 |
+| 本次验证命令 | 前端 lint/typecheck/test/build、后端 integration/migration_smoke、Playwright、发布配置检查、异地脚本模拟测试、planning 链接审计。最终结果在发布清单中记录。 |
 | 目标技术决策 | 保持 React 18 + Vite + TypeScript + PocketBase + SQLite；T1–T6 共用 `2026-08-28.t0-v1`。 |
+
+本轮实施计划：[上线整改实施计划](production-readiness-completion-plan.md)。运营执行：[隐私运营手册](../privacy-operations.md)、[异地备份](../../deploy/offsite-backup.md)。
 
 ## 已生成文档
 
@@ -62,7 +64,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | [test-plan.md](test-plan.md) | 测试与 CI 策略：测试分层、AC-01~26 验收映射（AC-24~26 为 2026-08 后端改版续编）、越权自动化测试与 CI 流水线 |
 | [ui-design.md](ui-design.md) | 前端视觉与交互规范：色彩/字体/间距/动效 token、组件规则、响应式与无障碍基线、文案语气、图表样式；仅含纯前端 UI，业务口径以 PRD 与本目录其他文档为准 |
 | [account-event-workflow-prd.md](account-event-workflow-prd.md) | **2026-08-27 专项升级主入口**：手机号账号、机构活动全流程、实时看板、现场编号与配对、参与者端展示、细粒度导出、隐私边界、API 草案、并行任务和验收清单 |
-| [production-readiness-batch-1-plan.md](production-readiness-batch-1-plan.md) | **上线前第一批整改实施任务书**：部署健康检查、短信场景模板与生产预检、管理员注册邮箱、文档同步、依赖修复与审计门禁；PR 1 已实现，PR 2/PR 3 仍`计划中` |
+| [production-readiness-batch-1-plan.md](production-readiness-batch-1-plan.md) | 历史第一批任务书；代码已由 #49/#50/#51/#52/#53 落地，真实外部验收仍按发布清单执行 |
 | [release-checklist.md](../release-checklist.md) | **T7 当前发布验收入口**：自动化门禁、测试环境、真机/合规/生产放行；运维操作细节链接 `deploy/README.md` |
 
 ## 有意跳过的目录文档

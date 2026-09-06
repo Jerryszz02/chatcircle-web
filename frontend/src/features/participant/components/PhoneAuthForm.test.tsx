@@ -40,10 +40,10 @@ describe('PhoneAuthForm 手机号验证码入口', () => {
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
     expect(mock.bodyOf(0)).toEqual({
-      phone: '+8613812345678', purpose: 'login_or_register', privacy_notice_version: '2026-08-28.v1',
+      phone: '+8613812345678', purpose: 'login_or_register', privacy_notice_version: '2026-09-05.v1',
     });
     expect(mock.bodyOf(1)).toEqual({
-      phone: '+8613812345678', challenge_id: 'ch1', code: '246810', privacy_notice_version: '2026-08-28.v1',
+      phone: '+8613812345678', challenge_id: 'ch1', code: '246810', privacy_notice_version: '2026-09-05.v1',
     });
     expect(participantAuth.record).toMatchObject({ id: 'p1', phone_migration_status: 'phone_bound' });
     expect(participantAuth.record).not.toHaveProperty('username');

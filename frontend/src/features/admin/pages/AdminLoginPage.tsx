@@ -47,7 +47,7 @@ export function AdminLoginPage() {
       </div>
       <form onSubmit={handleSubmit} noValidate>
         <Input
-          label="用户名"
+          label="用户名或邮箱"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           autoComplete="username"
@@ -70,6 +70,7 @@ export function AdminLoginPage() {
           登录
         </Button>
       </form>
+      <p><Link to="/admin/email-login">邮箱验证码登录</Link> · <Link to="/admin/reset-password">忘记密码</Link> · <Link to="/admin/verify-email">验证邮箱</Link></p>
       <p className="admin-muted admin-section">
         还没有账号？请使用超级管理员发放的一次性邀请码 <Link to="/admin/register">注册管理员账号</Link>
         。
