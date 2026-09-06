@@ -66,7 +66,7 @@ def run(ctx):
 
     org = fx.create_org(base, st, 'T3 实时快照机构')
     _, admin_token = fx.create_admin_via_impersonate(base, st, org, 't3_live_admin')
-    full_name = _create_field(base, admin_token, org, 'FULL_NAME', '姓名')
+    full_name = ctx['fields']['FULL_NAME']
     gender = _create_field(base, admin_token, org, 'GENDER', '性别', 'single_choice')
     age_range = _create_field(base, admin_token, org, 'AGE_RANGE', '年龄段', 'single_choice')
     fields = [

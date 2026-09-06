@@ -16,6 +16,7 @@ from cc_client import call
 # 套件内统一使用的演示密码（一次性临时实例，无真实凭据）
 PASSWORD = 'cc_it_pass_123'
 _SUPER_TOKEN = ''
+_FULL_NAME_ID = ''
 
 
 def configure_super_token(token):
@@ -40,6 +41,7 @@ def ensure_standard_fields(base, st):
     """平台标准报名字段（已存在则复用）。phone 为敏感字段，供导出过滤断言。返回 {field_code: id}。"""
     defs = [
         # (field_code, type, label, required_default, is_sensitive, options_json)
+        ('FULL_NAME', 'text', '姓名', True, True, None),
         ('nickname', 'text', '昵称', True, False, None),
         ('phone', 'text', '手机号', False, True, None),
         ('age', 'number', '年龄', False, False, None),
@@ -59,6 +61,8 @@ def ensure_standard_fields(base, st):
                      'required_default': reqd, 'status': 'active'}, st)
         assert s == 200, '创建标准字段 %s 失败：%s' % (code, r)
         out[code] = r['id']
+    global _FULL_NAME_ID
+    _FULL_NAME_ID = out['FULL_NAME']
     return out
 
 
@@ -194,10 +198,17 @@ def self_checkin(base, qr_token, pt):
     return call(base, 'POST', '/api/cc/checkin/self', {'token': qr_token}, pt)
 
 
+def with_full_name(answers):
+    assert _FULL_NAME_ID, '标准姓名 fixture 未初始化'
+    if any(a.get('field_def_id') == _FULL_NAME_ID for a in answers):
+        return answers
+    return answers + [{'field_def_id': _FULL_NAME_ID, 'value': '测试姓名'}]
+
+
 def register(base, pt, act_id, role, answers):
     """提交报名并断言成功，返回 registration id。"""
     s, r = call(base, 'POST', '/api/cc/activities/%s/register' % act_id,
-                {'activity_role': role, 'answers': answers}, pt)
+                {'activity_role': role, 'answers': with_full_name(answers)}, pt)
     assert s == 200, '报名失败：%s' % r
     return r['registration']['id']
 
@@ -219,7 +230,7 @@ def field_answers(field_ids, nickname='测试昵称', phone=None, age=None):
         ans.append({'field_def_id': field_ids['phone'], 'value': phone})
     if age is not None:
         ans.append({'field_def_id': field_ids['age'], 'value': age})
-    return ans
+    return with_full_name(ans)
 
 
 def nick_field_cfg(field_ids):

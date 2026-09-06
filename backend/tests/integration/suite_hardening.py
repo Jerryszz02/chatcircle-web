@@ -160,7 +160,7 @@ def run(ctx):
     P3, PT3, _ = fx.create_participant(base, 'hd_user3')
     s, r = call(base, 'POST', '/api/cc/activities/%s/register' % act,
                 {'activity_role': 'listener',
-                 'answers': [{'field_def_id': fields['nickname'], 'value': '=1+1'}]}, PT3)
+                 'answers': fx.with_full_name([{'field_def_id': fields['nickname'], 'value': '=1+1'}])}, PT3)
     reg3 = (r.get('registration') or {}).get('id')
     rep.check('HG-30 含公式开头答案的报名可正常提交（=1+1 为合法文本）', s == 200 and bool(reg3), r)
     s, exp = call(base, 'POST', '/api/cc/exports',

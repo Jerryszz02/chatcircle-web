@@ -12,19 +12,10 @@ import { adminAuth } from '../../../shared/auth';
 import { normalizeApiError } from '../../../shared/api/http';
 import { Button, Card, Input, Loading } from '../../../shared/ui';
 import { RegistrationFieldsEditor } from '../components/RegistrationFieldsEditor';
-import {
-  adminCollections,
-  createActivitySurvey,
-  runActivityAction,
-} from '../lib/api';
+import { adminCollections, duplicateActivity, createActivitySurvey, runActivityAction } from '../lib/api';
 import { fromInputDateTime, formatDateTime } from '../lib/format';
 import { FIELD_TYPE_LABELS, ROLE_SCOPE_LABELS } from '../lib/labels';
-import {
-  mergeFormConfig,
-  parseFormConfig,
-  setFormFieldConfig,
-  type ActivityFormFieldConfig,
-} from '../lib/rules';
+import { mergeFormConfig, parseFormConfig, setFormFieldConfig, type ActivityFormFieldConfig } from '../lib/rules';
 import {
   findMissingItems,
   validateWizardBasics,
@@ -38,8 +29,7 @@ import {
  *
  * - 创建仍走 activities 集合 API（createRule 限定本机构；checkin_qr_token 由服务端
  *   生成，初始状态固定 draft），与 ActivityForm 的创建路径一致；
- * - 「现场设置」为说明步：签到方式（固定二维码）与现场配对无活动级配置项，
- *   该步解释创建后的现场能力与入口；
+ * - 「现场设置」保存预计签到时间和配对开关；预计时间为提示，实际开放仍手动；
  * - 「问卷」步勾选的模板在草稿创建成功后逐个复制为活动问卷（draft 状态），
  *   部分失败不阻塞活动创建，结果在完成页展示；
  * - 预览步同时展示参与者端活动详情与报名表效果、缺失项与下一步（PRD §4.1 第 5 步）。
@@ -59,10 +49,15 @@ interface SurveyPick {
   templateId: string;
   title: string;
   roleScope: RoleScope;
+  phase: 'before' | 'onsite' | 'after';
+  plannedOpen: string;
 }
 
 export function ActivityCreateWizard() {
   const navigate = useNavigate();
+  const [activityTemplates, setActivityTemplates] = useState<ActivityRecord[]>([]);
+  const [templateError, setTemplateError] = useState('');
+  const [templateBusy, setTemplateBusy] = useState(false);
   const [step, setStep] = useState<WizardStep>('basics');
 
   // 基本信息
@@ -82,6 +77,10 @@ export function ActivityCreateWizard() {
   const [fieldDefs, setFieldDefs] = useState<RegistrationFieldDefRecord[] | null>(null);
   const [fieldConfigs, setFieldConfigs] = useState<ActivityFormFieldConfig[]>([]);
   const [defsError, setDefsError] = useState('');
+
+  const [pairingEnabled, setPairingEnabled] = useState(true);
+  const [plannedCheckin, setPlannedCheckin] = useState('');
+  const [onsiteError, setOnsiteError] = useState('');
 
   // 问卷
   const [templates, setTemplates] = useState<SurveyTemplateRecord[] | null>(null);
@@ -104,6 +103,14 @@ export function ActivityCreateWizard() {
   useEffect(() => {
     let cancelled = false;
     const cc = adminCollections();
+    cc.activities
+      .getFullList({ filter: 'is_template = true && status = "draft"', sort: '-created' })
+      .then((list) => {
+        if (!cancelled) setActivityTemplates(list);
+      })
+      .catch(() => {
+        if (!cancelled) setTemplateError('机构模板加载失败，可以继续手动创建或刷新页面重试。');
+      });
     cc.registrationFieldDefs
       .getFullList({ filter: 'status = "active"', sort: 'created' })
       .then((defs) => {
@@ -170,7 +177,24 @@ export function ActivityCreateWizard() {
       fullNameReady,
       surveyCount: surveyPicks.length,
     });
-  }, [title, activityCode, description, location, startTime, endTime, capacityTotal, fieldConfigs, fullNameReady, surveyPicks]);
+  }, [
+    title,
+    activityCode,
+    description,
+    location,
+    startTime,
+    endTime,
+    capacityTotal,
+    fieldConfigs,
+    fullNameReady,
+    surveyPicks,
+  ]);
+
+  const validateOnsite = () => {
+    const invalid = plannedCheckin && (fromInputDateTime(plannedCheckin) ?? '') > (fromInputDateTime(endTime) ?? '');
+    setOnsiteError(invalid ? '预计签到开放时间不得晚于活动结束' : '');
+    return !invalid;
+  };
 
   /** 离开基本信息步前校验；不通过则停留并内联展示错误。 */
   const goNext = () => {
@@ -184,6 +208,7 @@ export function ActivityCreateWizard() {
       setRegErrors(errors);
       if (Object.values(errors).some(Boolean)) return;
     }
+    if (step === 'onsite' && !validateOnsite()) return;
     const next = STEPS[stepIndex + 1];
     if (next) setStep(next.key);
   };
@@ -197,7 +222,10 @@ export function ActivityCreateWizard() {
     setSurveyPicks((prev) => {
       const existing = prev.find((p) => p.templateId === template.id);
       if (existing) return prev.filter((p) => p.templateId !== template.id);
-      return [...prev, { templateId: template.id, title: template.name, roleScope: 'both' }];
+      return [
+        ...prev,
+        { templateId: template.id, title: template.name, roleScope: 'both', phase: 'onsite', plannedOpen: '' },
+      ];
     });
   };
 
@@ -217,6 +245,10 @@ export function ActivityCreateWizard() {
     }
     if (Object.values(regWindowErrors).some(Boolean)) {
       setStep('registration');
+      return;
+    }
+    if (!validateOnsite()) {
+      setStep('onsite');
       return;
     }
     if (!defsReady) {
@@ -240,6 +272,8 @@ export function ActivityCreateWizard() {
         capacity_total: total,
         capacity_speaker: total / 2,
         capacity_listener: total / 2,
+        pairing_enabled: pairingEnabled,
+        planned_checkin_at: fromInputDateTime(plannedCheckin),
         registration_open: registrationOpen,
         registration_start_at: fromInputDateTime(regStart),
         registration_end_at: fromInputDateTime(regEnd),
@@ -258,6 +292,8 @@ export function ActivityCreateWizard() {
             template_version_id: template.current_version_id,
             title: pick.title.trim() || template.name,
             role_scope: pick.roleScope,
+            phase: pick.phase,
+            planned_open_at: fromInputDateTime(pick.plannedOpen),
           });
           results.push({ title: pick.title, ok: true });
         } catch (err) {
@@ -316,9 +352,46 @@ export function ActivityCreateWizard() {
       </ol>
 
       {step === 'basics' ? (
+        <Card title="从机构模板创建" className="admin-section">
+          <p className="admin-muted">使用已保存的配置和问卷新建草稿，再调整日期和报名窗口；不会带入历史人员数据。</p>
+          {templateError ? <p role="alert">{templateError}</p> : null}
+          {activityTemplates.length === 0 ? (
+            <p>暂无机构模板。可在活动列表将已有活动另存为模板。</p>
+          ) : (
+            activityTemplates.map((template) => (
+              <Button
+                key={template.id}
+                variant="secondary"
+                loading={templateBusy}
+                onClick={async () => {
+                  setTemplateBusy(true);
+                  setTemplateError('');
+                  try {
+                    const result = await duplicateActivity(template.id);
+                    navigate(`/admin/activities/${result.activity.id}`);
+                  } catch (err) {
+                    setTemplateError(normalizeApiError(err).message);
+                  } finally {
+                    setTemplateBusy(false);
+                  }
+                }}
+              >
+                {template.title}
+              </Button>
+            ))
+          )}
+        </Card>
+      ) : null}
+      {step === 'basics' ? (
         <Card title="基本信息" className="admin-section">
           <div className="admin-form-grid">
-            <Input label="活动标题" value={title} onChange={(e) => setTitle(e.target.value)} error={basicsErrors.title} required />
+            <Input
+              label="活动标题"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              error={basicsErrors.title}
+              required
+            />
             <Input
               label="活动代码"
               value={activityCode}
@@ -327,8 +400,22 @@ export function ActivityCreateWizard() {
               hint="如 CC_SG_202608_01，全局唯一；创建后不可修改"
               required
             />
-            <Input label="开始时间" type="datetime-local" value={startTime} onChange={(e) => setStartTime(e.target.value)} error={basicsErrors.start_time} required />
-            <Input label="结束时间" type="datetime-local" value={endTime} onChange={(e) => setEndTime(e.target.value)} error={basicsErrors.end_time} required />
+            <Input
+              label="开始时间"
+              type="datetime-local"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+              error={basicsErrors.start_time}
+              required
+            />
+            <Input
+              label="结束时间"
+              type="datetime-local"
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+              error={basicsErrors.end_time}
+              required
+            />
             <Input label="地点" value={location} onChange={(e) => setLocation(e.target.value)} />
             <Input
               label="分组标签（预留）"
@@ -349,7 +436,12 @@ export function ActivityCreateWizard() {
             />
           </div>
           <div className="admin-section">
-            <Input label="活动介绍" value={description} onChange={(e) => setDescription(e.target.value)} hint="展示在公开活动详情页" />
+            <Input
+              label="活动介绍"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              hint="展示在公开活动详情页"
+            />
           </div>
         </Card>
       ) : null}
@@ -392,22 +484,34 @@ export function ActivityCreateWizard() {
                 { field_def_id: createdDef.id, enabled: true, required: createdDef.required_default },
               ]);
             }}
-            onDefChanged={(def) =>
-              setFieldDefs((prev) => (prev ?? []).map((d) => (d.id === def.id ? def : d)))
-            }
+            onDefChanged={(def) => setFieldDefs((prev) => (prev ?? []).map((d) => (d.id === def.id ? def : d)))}
           />
         </Card>
       ) : null}
 
       {step === 'onsite' ? (
         <Card title="现场设置" className="admin-section">
-          <p className="admin-muted">
-            当前现场能力无活动级配置项，以下为创建后自动生效的机制说明：
-          </p>
+          <p className="admin-muted">预计时间用于筹备提示，实际开放签到和开始配对仍由管理员手动控制。</p>
+          <Input
+            label="预计签到开放时间"
+            type="datetime-local"
+            value={plannedCheckin}
+            onChange={(e) => setPlannedCheckin(e.target.value)}
+            error={onsiteError}
+          />
+          <label className="admin-checkbox-row">
+            <input type="checkbox" checked={pairingEnabled} onChange={(e) => setPairingEnabled(e.target.checked)} />
+            启用现场配对
+          </label>
           <ul className="admin-note-list">
             <li>签到方式：固定二维码（FR-CHK-001），创建后由服务端生成，活动现场在详情页「签到管理」开放/关闭。</li>
-            <li>现场编号：签到成功即按角色分配现场序号（倾诉者 S01…/聆听者 L01…），号码发出后不复用（专项 PRD §5.1）。</li>
-            <li>现场配对：配对由管理员在现场工作台点击「开始配对」触发，按现场序号依次配对（专项 PRD §5.2），无需在此配置。</li>
+            <li>
+              现场编号：签到成功即按角色分配现场序号（倾诉者 S01…/聆听者 L01…），号码发出后不复用（专项 PRD §5.1）。
+            </li>
+            <li>
+              现场配对：配对由管理员在现场工作台点击「开始配对」触发，按现场序号依次配对（专项 PRD
+              §5.2）；关闭本场配对后不能启动配对。
+            </li>
             <li>现场工作台：活动详情页「现场工作台」实时集中展示报名、签到、配对与问卷完成情况（专项 PRD §4.3）。</li>
           </ul>
         </Card>
@@ -433,11 +537,7 @@ export function ActivityCreateWizard() {
             return (
               <div key={template.id} className="admin-field-row">
                 <label className="admin-checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={!!pick}
-                    onChange={() => toggleSurveyPick(template)}
-                  />
+                  <input type="checkbox" checked={!!pick} onChange={() => toggleSurveyPick(template)} />
                   {template.name}
                   <span className="admin-muted">（{template.template_code}）</span>
                 </label>
@@ -461,6 +561,22 @@ export function ActivityCreateWizard() {
                         </option>
                       ))}
                     </select>
+                    <select
+                      className="admin-select"
+                      aria-label={`${template.name} 问卷阶段`}
+                      value={pick.phase}
+                      onChange={(e) => patchSurveyPick(template.id, { phase: e.target.value as SurveyPick['phase'] })}
+                    >
+                      <option value="before">活动前</option>
+                      <option value="onsite">现场</option>
+                      <option value="after">活动后</option>
+                    </select>
+                    <Input
+                      label={`${template.name} 预计开放时间`}
+                      type="datetime-local"
+                      value={pick.plannedOpen}
+                      onChange={(e) => patchSurveyPick(template.id, { plannedOpen: e.target.value })}
+                    />
                   </>
                 ) : null}
               </div>
@@ -474,8 +590,8 @@ export function ActivityCreateWizard() {
           {created ? (
             <Card title="活动已创建">
               <p>
-                草稿已创建：{created.title}（代码 <code>{created.activity_code}</code>）。
-                签到二维码 token 由服务端生成，历史数据不会从其他活动带入。
+                草稿已创建：{created.title}（代码 <code>{created.activity_code}</code>）。 签到二维码 token
+                由服务端生成，历史数据不会从其他活动带入。
               </p>
               {surveyResults.length > 0 ? (
                 <ul className="admin-note-list">
@@ -499,12 +615,23 @@ export function ActivityCreateWizard() {
                   <Button variant="secondary">进入活动详情</Button>
                 </Link>
               </div>
-              <p className="admin-muted admin-section">
-                发布后活动详情页公开可见；暂不发布也可稍后在详情页操作。
-              </p>
+              <p className="admin-muted admin-section">发布后活动详情页公开可见；暂不发布也可稍后在详情页操作。</p>
             </Card>
           ) : (
             <>
+              <Card title="现场与问卷计划" className="admin-section">
+                <p>
+                  现场配对：{pairingEnabled ? '启用' : '关闭'} · 预计签到开放：
+                  {plannedCheckin ? formatDateTime(fromInputDateTime(plannedCheckin)) : '未设置'}
+                </p>
+                {surveyPicks.map((pick) => (
+                  <p key={pick.templateId}>
+                    {pick.title} · {{ before: '活动前', onsite: '现场', after: '活动后' }[pick.phase]} ·{' '}
+                    {pick.plannedOpen ? formatDateTime(fromInputDateTime(pick.plannedOpen)) : '开放时间待安排'}
+                  </p>
+                ))}
+                <p className="admin-muted">预计时间仅作提示，实际开放请在活动详情中手动操作。</p>
+              </Card>
               <Card title="参与者端预览" className="admin-section">
                 <div className="admin-preview">
                   <div>

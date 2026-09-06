@@ -140,6 +140,9 @@ export interface ActivityRecord extends BaseRecord {
   /** 活动级报名字段启用/必填配置（草案，database-design D-3）。 */
   form_config_json?: unknown;
   /** T2：首次开始配对与现场锁定的服务端事实。 */
+  is_template?: boolean;
+  pairing_enabled?: boolean;
+  planned_checkin_at?: string;
   pairing_started_at?: string;
   pairing_started_by?: string;
   onsite_locked_at?: string;
@@ -266,6 +269,8 @@ export interface ActivitySurveyRecord extends BaseRecord {
   status: SurveyStatus;
   /** 独立链接/二维码 token，不可连续可猜（PRD §10.3）。 */
   qr_token: string;
+  phase?: 'before' | 'onsite' | 'after';
+  planned_open_at?: string;
   opened_at?: string;
   ended_at?: string;
 }

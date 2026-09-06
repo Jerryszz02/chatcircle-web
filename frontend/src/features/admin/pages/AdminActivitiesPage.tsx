@@ -79,10 +79,10 @@ export function AdminActivitiesPage() {
         <div className="admin-row-actions">
           <Button
             variant="secondary"
-            disabled={!items || items.length === 0}
+            disabled={!items?.some((a) => !a.is_template)}
             onClick={() => {
               setDupError('');
-              setDupSource(items?.[0] ?? null);
+              setDupSource(items?.find((a) => !a.is_template) ?? null);
             }}
           >
             复制上一场活动
@@ -142,7 +142,10 @@ export function AdminActivitiesPage() {
             <tbody>
               {items.map((a) => (
                 <tr key={a.id}>
-                  <td>{a.title}</td>
+                  <td>
+                    {a.is_template ? <span className="cc-tag">机构模板</span> : null}
+                    {a.title}
+                  </td>
                   <td>
                     <code>{a.activity_code}</code>
                   </td>
@@ -161,6 +164,24 @@ export function AdminActivitiesPage() {
                     <Link to={`/admin/activities/${a.id}`}>
                       <Button variant="secondary">管理</Button>
                     </Link>
+                    <Button
+                      variant="secondary"
+                      disabled={dupBusy}
+                      onClick={async () => {
+                        setDupBusy(true);
+                        setError('');
+                        try {
+                          const result = await duplicateActivity(a.id, !a.is_template);
+                          navigate(`/admin/activities/${result.activity.id}`);
+                        } catch (err) {
+                          setError(normalizeApiError(err).message);
+                        } finally {
+                          setDupBusy(false);
+                        }
+                      }}
+                    >
+                      {a.is_template ? '从模板创建活动' : '另存为机构模板'}
+                    </Button>
                   </td>
                 </tr>
               ))}

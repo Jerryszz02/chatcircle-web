@@ -165,10 +165,17 @@ export interface RegistrationLike {
   submitted_at: string;
 }
 
+export interface AttendanceLike {
+  participant_id: string;
+  activity_id: string;
+  status: string;
+  checked_in_at: string;
+}
+
 export interface StructureExtras {
-  /** 新参与者/回访参与者（以本机构 approved 报名的最早提交时间判定首次）。 */
+  /** 新参与者/回访参与者（以本机构其他活动的有效签到判定）。 */
   newcomer: StructureBucket[];
-  /** 历史参与活动次数分布（含本场，按本机构 approved 报名计数）。 */
+  /** 历史参与活动次数分布（不含本场，按本机构有效签到的不同活动计数）。 */
   history: StructureBucket[];
   /** 报名提前量：提交时间距活动开始的天数分桶。 */
   leadTime: StructureBucket[];
@@ -179,44 +186,39 @@ export interface StructureExtras {
 /**
  * 从报名记录聚合新老参与者 / 历史参与次数 / 报名提前量。
  * activityRegistrations 为本场全部报名（取其中 approved），
- * orgApprovedRegistrations 为本机构全部活动的 approved 报名（含本场）。
+ * orgCheckins 为本机构签到；只取本场开始前且不晚于当前快照的有效签到，每场去重。
  */
 export function computeStructureExtras(
   activityRegistrations: RegistrationLike[],
-  orgApprovedRegistrations: RegistrationLike[],
+  orgCheckins: AttendanceLike[],
   activityStart: string,
+  asOf: string = new Date().toISOString(),
 ): StructureExtras {
   const approvedHere = activityRegistrations.filter((r) => r.status === 'approved');
-  const historyCountByParticipant = new Map<string, number>();
-  const firstApprovedAt = new Map<string, number>();
-  for (const reg of orgApprovedRegistrations) {
-    historyCountByParticipant.set(
-      reg.participant_id,
-      (historyCountByParticipant.get(reg.participant_id) ?? 0) + 1,
-    );
-    const t = parsePbDate(reg.submitted_at)?.getTime();
-    if (t === undefined) continue;
-    const prev = firstApprovedAt.get(reg.participant_id);
-    if (prev === undefined || t < prev) firstApprovedAt.set(reg.participant_id, t);
+  const currentActivities = new Set(activityRegistrations.map((r) => r.activity_id));
+  const cutoff = Math.min(parsePbDate(activityStart)?.getTime() ?? 0, parsePbDate(asOf)?.getTime() ?? 0);
+  const historyByParticipant = new Map<string, Set<string>>();
+  for (const checkin of orgCheckins) {
+    const time = parsePbDate(checkin.checked_in_at)?.getTime();
+    if (checkin.status !== 'valid' || currentActivities.has(checkin.activity_id) || time === undefined || time >= cutoff) continue;
+    const activities = historyByParticipant.get(checkin.participant_id) ?? new Set<string>();
+    activities.add(checkin.activity_id);
+    historyByParticipant.set(checkin.participant_id, activities);
   }
 
   let newCount = 0;
   let returningCount = 0;
-  const historyCounts = { once: 0, twice: 0, three_plus: 0 };
+  const historyCounts = { zero: 0, once: 0, twice: 0, three_plus: 0 };
   const leadCounts = { same_day: 0, d1_3: 0, d4_7: 0, d8_plus: 0 };
   const start = parsePbDate(activityStart)?.getTime();
 
   for (const reg of approvedHere) {
     const submittedAt = parsePbDate(reg.submitted_at)?.getTime();
-    const first = firstApprovedAt.get(reg.participant_id);
-    // 本机构最早的 approved 报名不早于本场提交时间 → 新参与者
-    if (first === undefined || submittedAt === undefined || first >= submittedAt) {
-      newCount += 1;
-    } else {
-      returningCount += 1;
-    }
-    const historyCount = historyCountByParticipant.get(reg.participant_id) ?? 1;
-    if (historyCount <= 1) historyCounts.once += 1;
+    const historyCount = historyByParticipant.get(reg.participant_id)?.size ?? 0;
+    if (historyCount === 0) newCount += 1;
+    else returningCount += 1;
+    if (historyCount === 0) historyCounts.zero += 1;
+    else if (historyCount === 1) historyCounts.once += 1;
     else if (historyCount === 2) historyCounts.twice += 1;
     else historyCounts.three_plus += 1;
     if (start !== undefined && submittedAt !== undefined) {
@@ -234,9 +236,10 @@ export function computeStructureExtras(
       { key: 'returning', label: '回访参与者', count: returningCount },
     ]),
     history: suppressSmallBuckets([
-      { key: 'once', label: '第 1 次参加', count: historyCounts.once },
-      { key: 'twice', label: '第 2 次参加', count: historyCounts.twice },
-      { key: 'three_plus', label: '第 3 次及以上', count: historyCounts.three_plus },
+      { key: 'zero', label: '此前未签到', count: historyCounts.zero },
+      { key: 'once', label: '此前参加 1 次', count: historyCounts.once },
+      { key: 'twice', label: '此前参加 2 次', count: historyCounts.twice },
+      { key: 'three_plus', label: '此前参加 3 次及以上', count: historyCounts.three_plus },
     ]),
     leadTime: suppressSmallBuckets([
       { key: 'same_day', label: '当天报名', count: leadCounts.same_day },

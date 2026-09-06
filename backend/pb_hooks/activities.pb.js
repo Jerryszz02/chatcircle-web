@@ -181,7 +181,8 @@ routerAdd('GET', '/api/cc/public/activities/{id}', (e) => {
   const fieldConfig = ccFormFieldMap(activity.get('form_config_json'));
   const formFields = [];
   for (const def of defs) {
-    const cfg = fieldConfig[def.id] || {};
+    const cfg = def.get('field_code') === 'FULL_NAME' && !def.get('organization_id')
+      ? { enabled: true, required: true } : fieldConfig[def.id] || {};
     if (cfg.enabled === false) continue;
     formFields.push({
       id: def.id,
@@ -742,6 +743,9 @@ routerAdd('POST', '/api/cc/activities/{id}/duplicate', (e) => {
     copy.set('start_time', String(fresh.get('start_time') || ''));
     copy.set('end_time', String(fresh.get('end_time') || ''));
     copy.set('status', 'draft');
+    copy.set('is_template', (e.requestInfo().body || {}).as_template === true);
+    copy.set('pairing_enabled', !!fresh.get('pairing_enabled'));
+    copy.set('planned_checkin_at', '');
     copy.set('capacity_total', Number(fresh.get('capacity_total')));
     copy.set('capacity_speaker', Number(fresh.get('capacity_speaker')));
     copy.set('capacity_listener', Number(fresh.get('capacity_listener')));
@@ -769,6 +773,8 @@ routerAdd('POST', '/api/cc/activities/{id}/duplicate', (e) => {
       surveyCopy.set('title', srcSurvey.get('title'));
       surveyCopy.set('role_scope', srcSurvey.get('role_scope') || 'both');
       surveyCopy.set('status', 'draft');
+      surveyCopy.set('phase', srcSurvey.get('phase') || 'onsite');
+      surveyCopy.set('planned_open_at', '');
       surveyCopy.set('qr_token', $security.randomString(24));
       txApp.save(surveyCopy);
       surveyCount += 1;
@@ -799,6 +805,7 @@ routerAdd('POST', '/api/cc/activities/{id}/duplicate', (e) => {
       action: 'activity.duplicate', targetType: 'activity', targetId: copy.id,
       result: 'success',
       metadata: {
+        as_template: (e.requestInfo().body || {}).as_template === true,
         source_activity_id: fresh.id,
         source_activity_code: fresh.get('activity_code'),
         duplicated_surveys: surveyCount,

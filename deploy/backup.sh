@@ -124,7 +124,7 @@ trap on_exit EXIT
 
 # 入口校验：保留天数必须为纯数字（供 find -mtime 使用，非法值直接失败）
 case "$RETENTION_DAYS" in
-    ''|*[!0-9]*) fail "BACKUP_RETENTION_DAYS 非法（须为非负整数）：$RETENTION_DAYS" ;;
+    ''|0|*[!0-9]*) fail "BACKUP_RETENTION_DAYS 非法（须为正整数）：$RETENTION_DAYS" ;;
 esac
 
 # 1. 等待 PocketBase 就绪（容器同启时 app 可能尚未起来）
@@ -186,7 +186,7 @@ BYTES=$(wc -c < "$DEST/$NAME" | tr -d ' ')
 cleanup_server_copy
 
 # 7. 滚动清理：删除超过保留天数的归档
-find "$DEST" -name 'cc_daily_*.zip' -type f -mtime "+${RETENTION_DAYS}" -delete
+find "$DEST" -name 'cc_daily_*.zip' -type f -mtime "+$((RETENTION_DAYS - 1))" -delete
 
 write_marker success "$NAME" "$BYTES" ""
 record_audit success "$NAME" "$BYTES" "" || echo "[backup] warn: 备份成功审计写入失败" >&2

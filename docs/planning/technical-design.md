@@ -212,11 +212,11 @@ chatcircle-web/
 | 端点 | 使用契约 |
 | --- | --- |
 | `POST /api/collections/admin_accounts/auth-with-password` | identity 支持用户名或邮箱（identityFields 配置） |
-| `POST /api/collections/admin_accounts/request-verification` / `confirm-verification` | 注册后邮箱验证：前端注册成功后调 request-verification 发信，用户点链接/输码经 confirm-verification 完成验证 |
+| `POST /api/collections/admin_accounts/request-verification` / `confirm-verification` | 注册后邮箱验证：用户在 `/admin/verify-email` 主动申请邮件，点击落地页确认后经 confirm-verification 完成验证 |
 | `POST /api/collections/admin_accounts/request-otp` / `auth-with-otp` | 邮箱验证码登录；OTP 认证成功即已证明邮箱所有权，账号同步置 `verified=true`（若 PB 原生不自动置位，由 hooks 在认证成功钩子里补齐） |
 | `POST /api/collections/admin_accounts/request-password-reset` / `confirm-password-reset` | **仅 `verified=true` 的邮箱放行**；未验证账号请求时静默拦截——返回 204 但不发邮件、不放行，写审计 `auth.password_reset.suppressed`，避免账号枚举 |
 
-- 统一限流约定：request-verification / request-otp / request-password-reset 三类发信/验证码请求按 **per-email 3 次/小时 + per-IP 20 次/小时** 滑动窗口限流（复用 authguard 的限流模式）。**超限一律静默 204 并写审计 `auth.mail.throttled`，不返回 429**——这些钩子仅在邮箱存在时触发，若超限响应 429，探测者可用「是否 429」区分已注册邮箱与不存在邮箱，形成账号枚举 oracle（响应须与正常/不存在完全一致）。
+- 统一限流约定：request-verification / request-otp / request-password-reset 三类发信/验证码请求按 **per-email 3 次/小时 + per-IP 20 次/小时** 滑动窗口限流（复用 authguard 的限流模式）。**验证/找回超限静默 204，OTP 超限返回 200 + 随机 otpId，并写审计 `auth.mail.throttled`，不发信、不返回 429**——这些钩子仅在邮箱存在时触发，若超限响应 429，探测者可用「是否 429」区分已注册邮箱与不存在邮箱，形成账号枚举 oracle（响应须与各端点正常/不存在的状态码和形状一致）。
 - 换邮箱走 PB 内置 `requestEmailChange` 流程；直连 update 修改 `email` 由 guards.pb.js 禁止。
 - 发信通道：PocketBase 无托管邮件服务，SMTP 在 PB Settings 手工配置（用户方提供发信邮箱），凭据不入库、不进文档，见「待确认」#18。
 
@@ -384,4 +384,4 @@ PRD 要求（§12.3、§12.4）到落地方式的映射：
 | 16 | CI/CD 当前策略与必过检查是否符合最新团队要求 | 仓库与 `.github/workflows/` 已存在，但本文未在本次规划任务中查询远端 required checks | 不阻塞专项设计；发布前需以 GitHub 当前设置复核 |
 | 17 | 是否引入从 schema 生成前端共享类型的工具 | 无证据 | `src/shared/` 类型与 `pb_migrations` 的同步方式；未确认前手工同步 |
 | 18 | SMTP 发信邮箱凭据的下发与配置责任（2026-08 后端改版） | 已确认走 PB Settings 手工配置、凭据不入库，用户方已有可用发信邮箱；但由谁在生产控制台配置、凭据如何安全下发未定 | 阻塞 AC-24 邮件真实投递的上线验收；不阻塞能力层开发（测试环境不配 SMTP，端点可用但仅记录不发信） |
-| 19 | 验证/找回邮件模板与前端路由的对应配置（2026-08 后端改版） | PB 邮件模板中的链接须指向前端落地页路由（确认验证/重置密码页），而前端页面本次不交付；模板文案、APP_URL 与前端路由的对应关系未定 | 阻塞邮件链路端到端可用；模板随 SMTP 一并在 PB Settings 配置，前端页面落地后回填本文 |
+| 19 | 验证/找回邮件模板与前端路由 | 已实现：迁移设置 `/admin/verify-email#token={TOKEN}`、`/admin/reset-password#token={TOKEN}`，页面主动确认且移除 fragment | SMTP、APP_URL 和真实邮件端到端验收仍待服务器配置，见 [运营手册](../privacy-operations.md) |

@@ -191,7 +191,7 @@ docker compose exec backup cat /backups/last_backup.json
 
 恢复属于运维操作，执行前必须确认目标环境和备份文件，并事后补写恢复审计。最小流程：停止 app → 从最近一致备份恢复 `pb_data` → 启动 app → 校验账号、机构、活动、报名、签到、问卷与答卷。
 
-生产备份仍需后续补充加密和异地同步。
+异地 OSS 上传、加密、30 天生命周期、定时任务与恢复验收见 [异地备份手册](offsite-backup.md)。脚本需显式配置后启用，当前未验证真实异地副本。隐私政策、管理员 SMTP 与保留期限执行见 [隐私运营手册](../docs/privacy-operations.md)。
 
 ## 6. 常用排障
 

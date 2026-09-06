@@ -69,7 +69,7 @@ check(
   'compose 必须默认 production + aliyun，且不得注入 mock 验证码',
 );
 
-const privacyVersion = '2026-08-28.v1';
+const privacyVersion = '2026-09-05.v1';
 check(
   '前端、后端与部署的隐私版本一致',
   new RegExp(`^export const PARTICIPANT_PRIVACY_NOTICE_VERSION = '${privacyVersion}';$`, 'm').test(files.phoneUi)

@@ -71,15 +71,7 @@ def run(ctx):
     fields = ctx['fields']
     rep.section('suite_pairings：T2 现场编号/队列/释放调整/权限')
 
-    # FULL_NAME 是 T1/T4 激活前的冻结标准字段；T2 本人快照只允许从它取搭档姓名。
-    s, full_name = call(base, 'POST', '/api/collections/registration_field_defs/records', {
-        'organization_id': '', 'field_code': 'FULL_NAME', 'field_type': 'text',
-        'label': '姓名', 'source_type': 'standard', 'is_sensitive': True,
-        # 全局默认保持 optional，避免测试字段意外改变其他既有活动；本 T2 活动在
-        # form_config 中单独设 required=true，复现未来激活后的目标行为。
-        'required_default': False, 'role_scope': 'both', 'status': 'active'}, st)
-    assert s == 200, '创建 FULL_NAME fixture 失败：%s' % full_name
-    full_name_id = full_name['id']
+    full_name_id = fields['FULL_NAME']
 
     org = fx.create_org(base, st, 'T2 配对机构')
     _, AT1 = fx.create_admin_via_impersonate(base, st, org, 'pair_admin_1')

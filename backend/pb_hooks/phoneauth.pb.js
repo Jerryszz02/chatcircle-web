@@ -17,7 +17,7 @@
 routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
   try {
     const CONTRACT_VERSION = '2026-08-28.t0-v1';
-    const PRIVACY_NOTICE_VERSION = $os.getenv('CC_PARTICIPANT_PRIVACY_NOTICE_VERSION') || '2026-08-28.v1';
+    const PRIVACY_NOTICE_VERSION = $os.getenv('CC_PARTICIPANT_PRIVACY_NOTICE_VERSION') || '2026-09-05.v1';
     const CODE_EXPIRES_SEC = 300;
     const CODE_RETRY_SEC = 60;
     const PHONE_MAX = 3;

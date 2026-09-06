@@ -187,7 +187,7 @@ export function AboutPage() {
             <div className="ccp-card-body">
               <h3 className="ccp-card-title">我想倾诉</h3>
               <p className="ccp-about-text">
-                如果你正处在升学、初入职场等过渡期，想找个安全的地方把心里的话说出来——报名下一场活动，选择一位你看着顺眼的倾听者，聊
+                如果你正处在升学、初入职场等过渡期，想找个安全的地方把心里的话说出来——报名下一场活动，到场签到后由工作人员按现场顺序安排倾听者，聊
                 60 分钟。
               </p>
               <Link to="/activities" className="cc-btn cc-btn-primary cc-btn-block">

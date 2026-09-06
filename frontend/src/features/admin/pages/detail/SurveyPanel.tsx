@@ -14,18 +14,9 @@ import { QrDisplay } from '../../components/QrDisplay';
 import { ReasonModal } from '../../components/ReasonModal';
 import { StatusTag, type StatusTone } from '../../components/StatusTag';
 import { SurveyQuestionEditor } from '../../components/SurveyQuestionEditor';
-import {
-  adminCollections,
-  createActivitySurvey,
-  runSurveyAction,
-  voidSubmission,
-} from '../../lib/api';
-import {
-  ROLE_SCOPE_LABELS,
-  SUBMISSION_STATUS_LABELS,
-  SURVEY_STATUS_LABELS,
-} from '../../lib/labels';
-import { formatDateTime, shortId } from '../../lib/format';
+import { adminCollections, createActivitySurvey, runSurveyAction, voidSubmission } from '../../lib/api';
+import { ROLE_SCOPE_LABELS, SUBMISSION_STATUS_LABELS, SURVEY_STATUS_LABELS } from '../../lib/labels';
+import { formatDateTime, fromInputDateTime, toInputDateTime, shortId } from '../../lib/format';
 import { ADMIN_SURVEY_ACTION_LABELS, availableSurveyActions } from '../../lib/rules';
 import { applyQuestionChanges } from '../../lib/surveyQuestionApply';
 
@@ -179,12 +170,7 @@ export function SurveyPanel({ activity }: { activity: ActivityRecord }) {
           </select>
           {templates.length === 0 ? <p className="cc-hint">暂无可用模板，请联系超级管理员发布。</p> : null}
         </div>
-        <Input
-          label="问卷标题"
-          value={createTitle}
-          onChange={(e) => setCreateTitle(e.target.value)}
-          required
-        />
+        <Input label="问卷标题" value={createTitle} onChange={(e) => setCreateTitle(e.target.value)} required />
         <div className="cc-field">
           <label className="cc-label" htmlFor="survey-role-scope">
             适用角色
@@ -213,17 +199,13 @@ export function SurveyPanel({ activity }: { activity: ActivityRecord }) {
 }
 
 /** 单份活动问卷卡片：状态动作、题目管理、链接二维码、答卷列表。 */
-function SurveyCard({
-  survey,
-  onChanged,
-}: {
-  survey: ActivitySurveyRecord;
-  onChanged: () => Promise<void> | void;
-}) {
+function SurveyCard({ survey, onChanged }: { survey: ActivitySurveyRecord; onChanged: () => Promise<void> | void }) {
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
   const [section, setSection] = useState<'' | 'questions' | 'submissions' | 'link'>('');
 
+  const [phase, setPhase] = useState(survey.phase || 'onsite');
+  const [planned, setPlanned] = useState(toInputDateTime(survey.planned_open_at));
   const surveyUrl = `${window.location.origin}/survey/${survey.qr_token}`;
   const actions = availableSurveyActions(survey.status);
 
@@ -252,6 +234,53 @@ function SurveyCard({
         代码 <code>{survey.survey_code}</code> · 适用角色：{ROLE_SCOPE_LABELS[survey.role_scope]}
         {survey.opened_at ? ` · 开放于 ${formatDateTime(survey.opened_at)}` : ''}
         {survey.ended_at ? ` · 结束于 ${formatDateTime(survey.ended_at)}` : ''}
+      </p>
+      <details className="admin-section">
+        <summary>问卷阶段与预计开放时间</summary>
+        <label>
+          问卷阶段
+          <select
+            className="admin-select"
+            value={phase}
+            onChange={(e) => setPhase(e.target.value as NonNullable<ActivitySurveyRecord['phase']>)}
+          >
+            <option value="before">活动前</option>
+            <option value="onsite">现场</option>
+            <option value="after">活动后</option>
+          </select>
+        </label>
+        <Input
+          label="预计开放时间"
+          type="datetime-local"
+          value={planned}
+          onChange={(e) => setPlanned(e.target.value)}
+          hint="仅作提示，实际开放/结束仍需手动操作。"
+        />
+        <Button
+          variant="secondary"
+          loading={busy}
+          onClick={async () => {
+            setBusy(true);
+            setActionError('');
+            try {
+              await adminCollections().activitySurveys.update(survey.id, {
+                phase,
+                planned_open_at: fromInputDateTime(planned) || '',
+              });
+              await onChanged();
+            } catch (err) {
+              setActionError(normalizeApiError(err).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          保存问卷计划
+        </Button>
+      </details>
+      <p className="admin-muted">
+        阶段：{{ before: '活动前', onsite: '现场', after: '活动后' }[survey.phase || 'onsite']} · 预计开放：
+        {survey.planned_open_at ? formatDateTime(survey.planned_open_at) : '未设置'}
       </p>
       <div className="admin-row-actions">
         {actions.map((action) => (
@@ -426,9 +455,7 @@ function SubmissionList({ survey }: { survey: ActivitySurveyRecord }) {
                   </td>
                   <td>{formatDateTime(s.submitted_at)}</td>
                   <td className="admin-muted">
-                    {s.status === 'voided'
-                      ? `${formatDateTime(s.voided_at)} · ${s.void_reason || '—'}`
-                      : '—'}
+                    {s.status === 'voided' ? `${formatDateTime(s.voided_at)} · ${s.void_reason || '—'}` : '—'}
                   </td>
                   <td>
                     <div className="admin-row-actions">

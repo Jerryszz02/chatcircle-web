@@ -98,6 +98,10 @@ export function MyPairingCardView({
     );
   }
 
+  if (snapshot.pairing_enabled === false && snapshot.state !== 'checkin_revoked') {
+    if (!snapshot.onsite_code) return null;
+    return <Card title="我的现场编号" className="ccp-pairing-card"><p className="ccp-onsite-code">{snapshot.onsite_code}</p><p>本活动未启用现场配对，请听从现场工作人员安排。</p></Card>;
+  }
   const meta = myPairingStateMeta(snapshot.state);
   // not_checked_in：三个入口只展示已签到后的配对状态（PRD §5.3），未签到不渲染卡片。
   if (!meta) return null;

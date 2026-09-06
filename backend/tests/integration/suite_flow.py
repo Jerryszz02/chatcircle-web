@@ -98,8 +98,8 @@ def run(ctx):
     s, det = call(base, 'GET', '/api/cc/public/activities/%s' % AID)
     rf = det.get('registration_fields') or []
     codes = sorted(f.get('field_code') for f in rf)
-    rep.check('D2 公开详情 registration_fields（channel 停用后剩 age/nickname）',
-              s == 200 and codes == ['age', 'nickname'], det if s != 200 else codes)
+    rep.check('D2 公开详情 registration_fields（姓名始终必填，channel 停用后剩 age/nickname）',
+              s == 200 and codes == ['FULL_NAME', 'age', 'nickname'], det if s != 200 else codes)
     nick = next((f for f in rf if f.get('field_code') == 'nickname'), {})
     rep.check('D3 registration.open/reason + 字段形态（id/source_type/is_sensitive/required）',
               det.get('registration', {}).get('open') is True
@@ -120,12 +120,12 @@ def run(ctx):
 
     s, r1 = call(base, 'POST', '/api/cc/activities/%s/register' % AID,
                  {'activity_role': 'speaker',
-                  'answers': [{'field_def_id': fields['nickname'], 'value': '阿一'}]}, P1T)
+                  'answers': [{'field_def_id': fields['FULL_NAME'], 'value': '测试姓名'}, {'field_def_id': fields['nickname'], 'value': '阿一'}]}, P1T)
     R1 = (r1.get('registration') or {}).get('id')
     rep.check('D4 报名提交成功', s == 200 and bool(R1), r1 if s != 200 else '')
     s, r2 = call(base, 'POST', '/api/cc/activities/%s/register' % AID,
                  {'activity_role': 'listener',
-                  'answers': [{'field_def_id': fields['nickname'], 'value': '阿二'}]}, P2T)
+                  'answers': [{'field_def_id': fields['FULL_NAME'], 'value': '测试姓名'}, {'field_def_id': fields['nickname'], 'value': '阿二'}]}, P2T)
     R2 = (r2.get('registration') or {}).get('id')
 
     # D5 签到错误分支：报名未审核
@@ -218,7 +218,7 @@ def run(ctx):
 
     # E12 草稿预填：user_two 存草稿后元信息带 my_answers
     call(base, 'POST', '/api/cc/activity-surveys/%s/draft' % SVID,
-         {'answers': [{'question_code': 'SAT', 'value': 'ok'}]}, P2T)
+         {'answers': [{'field_def_id': fields['FULL_NAME'], 'value': '测试姓名'}, {'question_code': 'SAT', 'value': 'ok'}]}, P2T)
     s, meta2 = call(base, 'GET', '/api/cc/surveys/%s' % QR, token=P2T)
     ma = meta2.get('my_answers') or []
     rep.check('E12 草稿预填 my_answers 下发（元素 {question_code,value}）',
@@ -339,35 +339,35 @@ def run(ctx):
 
     s, r = call(base, 'POST', '/api/cc/activities/%s/register' % act2,
                 {'activity_role': 'listener',
-                 'answers': [{'field_def_id': fields['nickname'], 'value': '角色聆'},
+                 'answers': [{'field_def_id': fields['FULL_NAME'], 'value': '测试姓名'}, {'field_def_id': fields['nickname'], 'value': '角色聆'},
                              {'field_def_id': SPK_F, 'value': '不适用字段答案'}]}, PRL_T)
     rep.check('H3 listener 提交 speaker 专属字段答案 → 400 field_not_applicable',
               s == 400 and biz_code(r) == 'field_not_applicable', r)
     s, r = call(base, 'POST', '/api/cc/activities/%s/register' % act2,
                 {'activity_role': 'listener',
-                 'answers': [{'field_def_id': fields['nickname'], 'value': '角色聆'}]}, PRL_T)
+                 'answers': [{'field_def_id': fields['FULL_NAME'], 'value': '测试姓名'}, {'field_def_id': fields['nickname'], 'value': '角色聆'}]}, PRL_T)
     rep.check('H4 listener 缺 listener 专属必填 → 400 REQUIRED_FIELD_MISSING',
               s == 400 and biz_code(r) == 'REQUIRED_FIELD_MISSING', r)
     s, r = call(base, 'POST', '/api/cc/activities/%s/register' % act2,
                 {'activity_role': 'listener',
-                 'answers': [{'field_def_id': LIS_F, 'value': '三年倾听'}]}, PRL_T)
+                 'answers': [{'field_def_id': fields['FULL_NAME'], 'value': '测试姓名'}, {'field_def_id': LIS_F, 'value': '三年倾听'}]}, PRL_T)
     rep.check('H5 both 必填字段对 listener 生效（缺 nickname → 400）',
               s == 400 and biz_code(r) == 'REQUIRED_FIELD_MISSING', r)
     s, r = call(base, 'POST', '/api/cc/activities/%s/register' % act2,
                 {'activity_role': 'listener',
-                 'answers': [{'field_def_id': fields['nickname'], 'value': '角色聆'},
+                 'answers': [{'field_def_id': fields['FULL_NAME'], 'value': '测试姓名'}, {'field_def_id': fields['nickname'], 'value': '角色聆'},
                              {'field_def_id': LIS_F, 'value': '三年倾听'}]}, PRL_T)
     rep.check('H6 listener 仅适用字段提交成功（speaker 专属不参与校验）', s == 200, r)
 
     s, r = call(base, 'POST', '/api/cc/activities/%s/register' % act2,
                 {'activity_role': 'speaker',
-                 'answers': [{'field_def_id': fields['nickname'], 'value': '角色倾'},
+                 'answers': [{'field_def_id': fields['FULL_NAME'], 'value': '测试姓名'}, {'field_def_id': fields['nickname'], 'value': '角色倾'},
                              {'field_def_id': LIS_F, 'value': '不适用字段答案'}]}, PRS_T)
     rep.check('H7 speaker 提交 listener 专属字段答案 → 400 field_not_applicable',
               s == 400 and biz_code(r) == 'field_not_applicable', r)
     s, r = call(base, 'POST', '/api/cc/activities/%s/register' % act2,
                 {'activity_role': 'speaker',
-                 'answers': [{'field_def_id': fields['nickname'], 'value': '角色倾'},
+                 'answers': [{'field_def_id': fields['FULL_NAME'], 'value': '测试姓名'}, {'field_def_id': fields['nickname'], 'value': '角色倾'},
                              {'field_def_id': SPK_F, 'value': '亲子沟通'}]}, PRS_T)
     rep.check('H8 speaker 无需 listener 专属必填即可提交（both 字段正常校验）', s == 200, r)
 
@@ -393,7 +393,7 @@ def run(ctx):
     _, P3T, _ = fx.create_participant(base, 'flow_user_three')
     s, r3 = call(base, 'POST', '/api/cc/activities/%s/register' % act_ended,
                  {'activity_role': 'speaker',
-                  'answers': [{'field_def_id': fields['nickname'], 'value': '阿三'}]},
+                  'answers': [{'field_def_id': fields['FULL_NAME'], 'value': '测试姓名'}, {'field_def_id': fields['nickname'], 'value': '阿三'}]},
                  P3T)
     rep.check('I2 已结束活动提交报名 → 400 REGISTRATION_CLOSED',
               s == 400 and biz_code(r3) == 'REGISTRATION_CLOSED', r3)

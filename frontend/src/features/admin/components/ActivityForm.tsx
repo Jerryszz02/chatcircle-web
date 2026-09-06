@@ -62,6 +62,8 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
   const [registrationOpen, setRegistrationOpen] = useState(initial?.registration_open ?? true);
   const [regStart, setRegStart] = useState(toInputDateTime(initial?.registration_start_at));
   const [regEnd, setRegEnd] = useState(toInputDateTime(initial?.registration_end_at));
+  const [pairingEnabled, setPairingEnabled] = useState(initial?.pairing_enabled ?? true);
+  const [plannedCheckin, setPlannedCheckin] = useState(toInputDateTime(initial?.planned_checkin_at));
   const [groupTag, setGroupTag] = useState(initial?.group_tag ?? '');
 
   const [fieldDefs, setFieldDefs] = useState<RegistrationFieldDefRecord[] | null>(null);
@@ -134,6 +136,8 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
     if (!start) nextErrors.start_time = '请选择开始时间';
     if (!end) nextErrors.end_time = '请选择结束时间';
     if (start && end && start >= end) nextErrors.end_time = '结束时间须晚于开始时间';
+    const planned = fromInputDateTime(plannedCheckin);
+    if (planned && end && planned > end) nextErrors.planned_checkin_at = '预计签到开放时间不得晚于活动结束';
     const regStartIso = fromInputDateTime(regStart);
     const regEndIso = fromInputDateTime(regEnd);
     if (regStart && !regStartIso) nextErrors.registration_start_at = '报名开始时间格式不正确';
@@ -162,6 +166,8 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
         capacity_total: total,
         capacity_speaker: total / 2,
         capacity_listener: total / 2,
+        pairing_enabled: pairingEnabled,
+        planned_checkin_at: planned || '',
         registration_open: registrationOpen,
         registration_start_at: regStartIso,
         registration_end_at: regEndIso,
@@ -206,6 +212,10 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
 
   return (
     <form onSubmit={handleSubmit} noValidate>
+      <fieldset className="admin-section"><legend>现场设置</legend>
+        <Input label="预计签到开放时间" type="datetime-local" value={plannedCheckin} onChange={(e) => setPlannedCheckin(e.target.value)} error={errors.planned_checkin_at} hint="仅作筹备提示，实际开放仍需手动操作。" />
+        <label className="admin-checkbox-row"><input type="checkbox" checked={pairingEnabled} disabled={!!initial?.pairing_started_at} onChange={(e) => setPairingEnabled(e.target.checked)} />启用现场配对（开始配对后不可更改）</label>
+      </fieldset>
       <div className="admin-form-grid">
         <Input label="活动标题" value={title} onChange={(e) => setTitle(e.target.value)} error={errors.title} required />
         <Input

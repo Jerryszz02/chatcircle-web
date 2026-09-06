@@ -130,3 +130,11 @@ def run(ctx):
     s, r = call(base, 'PATCH', '/api/collections/admin_accounts/records/%s' % my_id,
                 {'email': 'aem_admin_3_new@it.cc.local'}, AT)
     rep.check('AEM-15 管理员直连改本人 email → 403（guards 禁改清单）', s == 403, r)
+
+    otp_responses = []
+    for _ in range(4):
+        status, response = call(base, 'POST', '/api/collections/admin_accounts/request-otp', {'email': 'aemadmin1@it.cc.local'})
+        otp_responses.append((status, response))
+    status, unknown = call(base, 'POST', '/api/collections/admin_accounts/request-otp', {'email': 'does-not-exist@it.cc.local'})
+    rep.check('AEM-15 OTP 限流与不存在邮箱均保持 200 + otpId，防枚举',
+              status == 200 and bool(unknown.get('otpId')) and all(code == 200 and len(body.get('otpId', '')) == len(unknown['otpId']) for code, body in otp_responses), otp_responses)

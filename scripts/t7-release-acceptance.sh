@@ -10,6 +10,7 @@ echo '[T7] 发布配置与隐私不变量'
 node deploy/verify-release-config.mjs
 node --test deploy/verify-release-config.test.mjs
 sh -n deploy/backup.sh
+python3 -m unittest discover -s deploy -p 'test_*.py'
 
 echo '[T7] PocketBase hooks 语法'
 while IFS= read -r -d '' hook; do

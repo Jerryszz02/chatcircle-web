@@ -135,7 +135,10 @@
 | registration_start_at / registration_end_at | date | 否 | — | 报名起止时间；超时后不能新提交（FR-ACT-005） |
 | checkin_qr_token | text | 是 | **唯一** | 固定签到二维码 token；全活动周期不变（FR-CHK-001），有效性由 `checkin_sessions` 开放状态控制 |
 | group_tag | text | 否 | 索引 | **预留分组/标签字段（可空）**，V1 不使用，供后续「项目/系列」扩展（PRD §4.1） |
-| form_config_json | json | 否 | — | 草案：活动级报名字段启用/必填配置（见「待确认」D-3） |
+| form_config_json | json | 否 | — | 已实现：`{fields:[{field_def_id,enabled,required}]}`；标准 FULL_NAME 强制启用且必填 |
+| is_template | bool | 否 | — | 本机构活动模板，仅 draft/archived，不可直接发布；复制为普通活动默认 false |
+| pairing_enabled | bool | 否 | — | 存量活动迁移为 true；新建 HTTP 请求缺省 true；关闭后拒绝 start/reassign；开始配对后不可更改 |
+| planned_checkin_at | date | 否 | — | 预计签到开放时间，不得晚于活动结束；人工提示，不自动开放，复制清空 |
 
 - API Rules 要点：**公开详情页**通过 viewRule 实现——未登录可按 id 查看 `status` 为 `published`/`closed` 的活动；listRule 对参与者保持关闭，公开列表不走集合 API，而由 hook 端点 `GET /api/cc/public/activities` 提供（活动广场页 `/activities`，仅下发 `published`/`closed`，按开始时间倒序；系对 FR-ACT-002「无公开广场」的实现期偏离，初随首页落地，后拆为独立页）。已归档活动公开链接是否仍可访问 PRD 未明确（「待确认」D-5）。
 - 名额修改、状态变更写审计（PRD §11.3）。
@@ -268,6 +271,8 @@
 
 - API Rules 要点：参与者经自定义接口按「登录 + 报名已通过 + 角色匹配 + 状态=open」四条件访问（FR-SUR-006）；不开放参与者直接 list 本表。
 - 开放/结束写审计（PRD §11.3）。
+
+2026-09-06 补充：`activity_surveys.phase` 为可选 `before/onsite/after`，创建端点缺省 onsite；`planned_open_at` 为可选 date，仅运营提示，不自动修改状态。复制保留 phase、清空 planned_open_at。标准姓名字段由发布迁移幂等建立并锁定 text/active/both/sensitive/required，不修改既有答案。
 
 #### 5.2.15 survey_questions — 活动问卷题目（base）
 
@@ -645,7 +650,7 @@ down 迁移只允许在新字段/集合尚无业务数据时回滚 schema。一�
 | 编号 | 事项 | 缺少什么证据 | 当前处理 |
 |---|---|---|---|
 | D-2 | 标准问卷完整题目与哪些题 `locked` | 模板内容未经确认（PRD §16.2） | 结构按版本 + `locked` 实现；题目内容不入库草案 |
-| D-3 | 活动级报名字段「启用/必填」配置的存储位置 | PRD §9.1 未给出对应集合 | 草案暂放 `activities.form_config_json`；若配置复杂度上升，评审后可拆关联表 |
+| D-3 | 活动级报名字段「启用/必填」配置 | 已实现 | `activities.form_config_json`；标准姓名不可关闭，其他字段继续按活动配置 |
 | D-4 | 全部枚举机器码（活动/报名/签到/问卷/答卷/邀请码状态值） | PRD 只定义中文状态名，无英文机器码约定 | 本文值为草案建议；首个迁移落地后冻结，只增不改 |
 | D-5 | 已归档（archived）活动的公开详情页是否仍可访问 | PRD §4.3 仅述「只读为主、可导出、不进入默认活动列表」，未明确公开入口 | 草案 viewRule 暂不含 `archived`；确认后调整 |
 | D-6 | `audit_logs.action` 动作代码全集与 `metadata` 结构约定 | PRD §11.3/FR-AUD-004 给出事件类别，未给代码表 | 由 security-privacy.md 细化；首版实现时随代码冻结 |
