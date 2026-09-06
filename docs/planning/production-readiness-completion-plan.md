@@ -14,6 +14,6 @@
 
 ## 验证结果与交付边界
 
-2026-09-06 本地：前端 lint/typecheck/生产构建通过，Vitest 57 文件 / 416 项；后端集成 622/622；迁移 up/down/up 冒烟 62/62；Playwright Chromium 360px 共 5/5；发布静态配置 23/23 与配置单测 12/12；异地脚本模拟测试 2/2；hooks/备份脚本语法、planning 链接审计及 git diff --check 通过。本机未安装 OSV-Scanner，生产依赖审计交由 PR 的 dependency-audit 执行，不能声称整条 T7 本地命令已通过。
+2026-09-06 本地：前端 lint/typecheck/生产构建通过，Vitest 57 文件 / 416 项；后端集成 624/624；迁移 up/down/up 冒烟 62/62；Playwright Chromium 360px 共 5/5；发布静态配置 23/23 与配置单测 12/12；异地脚本模拟测试 2/2；hooks/备份脚本语法、planning 链接审计及 git diff --check 通过。本机未安装 OSV-Scanner，生产依赖审计交由 PR 的 dependency-audit 执行，不能声称整条 T7 本地命令已通过。
 
 代码未在本任务中部署，未发送真实短信或邮件，未进行生产个人信息删除或 OSS 资源创建。合入、部署和真实完整活动/邮件/异地恢复的放行顺序见 [发布清单](../release-checklist.md)。

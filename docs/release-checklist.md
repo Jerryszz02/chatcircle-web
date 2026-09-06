@@ -5,7 +5,7 @@
 
 ## 2026-09-06 本轮交付与部署注意
 
-本轮整改见 [实施计划](planning/production-readiness-completion-plan.md)，本地验证已通过：前端 416、后端 622、迁移 62、E2E 5、静态配置 23、配置单测 12、异地脚本模拟测试 2；lint/typecheck/build、hooks/备份语法及文档链接检查通过。本地缺少 OSV-Scanner，依赖审计以 PR dependency-audit 为准；以下生产事项未因代码完成自动勾选。
+本轮整改见 [实施计划](planning/production-readiness-completion-plan.md)，本地验证已通过：前端 416、后端 624、迁移 62、E2E 5、静态配置 23、配置单测 12、异地脚本模拟测试 2；lint/typecheck/build、hooks/备份语法及文档链接检查通过。本地缺少 OSV-Scanner，依赖审计以 PR dependency-audit 为准；以下生产事项未因代码完成自动勾选。
 
 部署本轮前确认：
 

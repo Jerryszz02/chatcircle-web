@@ -67,3 +67,8 @@ def run(ctx):
     rep.check('REL-17 模板不能直接公开发布', s == 400, body)
     s, body = call(base, 'POST', '/api/cc/activities/%s/duplicate' % template.get('id'), {}, at)
     rep.check('REL-18 从模板创建的是独立普通活动', s == 200 and body.get('activity', {}).get('is_template') is False and body.get('activity', {}).get('id') != template.get('id'), body)
+
+    for invalid_shape in [[], 7]:
+        s, body = call(base, 'PATCH', path, {'form_config_json': invalid_shape}, at)
+        form = body.get('form_config_json')
+        rep.check('REL-19 非对象配置归一化后仍保存强制姓名', s == 200 and isinstance(form, dict) and any(item.get('field_def_id') == name_id and item.get('required') for item in form.get('fields', [])), body)

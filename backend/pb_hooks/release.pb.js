@@ -13,6 +13,7 @@ onRecordCreate((e) => {
   } catch (_) {
     config = {};
   }
+  if (typeof config !== 'object' || Array.isArray(config)) config = {};
   const fields = Array.isArray(config.fields) ? config.fields : [];
   config.fields = fields.filter((f) => f && f.field_def_id !== field.id);
   config.fields.push({ field_def_id: field.id, enabled: true, required: true });
@@ -42,6 +43,7 @@ onRecordUpdate((e) => {
   } catch (_) {
     config = {};
   }
+  if (typeof config !== 'object' || Array.isArray(config)) config = {};
   const fields = Array.isArray(config.fields) ? config.fields : [];
   config.fields = fields.filter((f) => f && f.field_def_id !== field.id);
   config.fields.push({ field_def_id: field.id, enabled: true, required: true });
