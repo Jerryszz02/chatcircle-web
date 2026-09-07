@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""T1 手机号验证码登录、存量绑定、换绑与安全边界。"""
+"""T1/T2 手机号验证码登录、注册（用户名+密码+手机号）、找回密码、存量绑定换绑与安全边界。"""
 from concurrent.futures import ThreadPoolExecutor
 
 from cc_client import biz_code, call
@@ -12,7 +12,7 @@ MOCK_CODE = '246810'
 
 def request_code(base, phone, purpose='login_or_register', token=None, device='phone-it-device'):
     body = {'phone': phone, 'purpose': purpose}
-    if purpose == 'login_or_register':
+    if purpose in ('login_or_register', 'register'):
         body['privacy_notice_version'] = PRIVACY_VERSION
     return call(base, 'POST', '/api/cc/auth/participant/request-code', body, token,
                 headers={'X-CC-Device-Session': device})
@@ -22,6 +22,21 @@ def verify(base, phone, challenge_id, code=MOCK_CODE):
     return call(base, 'POST', '/api/cc/auth/participant/verify-code', {
         'phone': phone, 'challenge_id': challenge_id, 'code': code,
         'privacy_notice_version': PRIVACY_VERSION,
+    })
+
+
+def register(base, phone, username, challenge_id, code=MOCK_CODE, password='secret123'):
+    return call(base, 'POST', '/api/cc/auth/participant/register', {
+        'phone': phone, 'challenge_id': challenge_id, 'code': code,
+        'username': username, 'password': password,
+        'privacy_notice_version': PRIVACY_VERSION,
+    })
+
+
+def reset_password(base, phone, challenge_id, code=MOCK_CODE, new_password='newsecret1'):
+    return call(base, 'POST', '/api/cc/auth/participant/reset-password', {
+        'phone': phone, 'challenge_id': challenge_id, 'code': code,
+        'new_password': new_password,
     })
 
 
@@ -56,27 +71,44 @@ def run(ctx):
     rep.check('未知短信用途被拒绝且不回落其他模板', status == 400 and biz_code(body) == 'code_invalid', body)
 
     phone = '13800002002'
-    status, sent = request_code(base, phone, device='phone-it-signup')
-    rep.check('发送验证码返回统一 challenge 形状', status == 200 and sent.get('accepted') is True and
+    status, sent = request_code(base, phone, 'register', device='phone-it-signup')
+    rep.check('注册发送验证码返回统一 challenge 形状', status == 200 and sent.get('accepted') is True and
               sent.get('expires_in_seconds') == 300, sent)
-    rep.check('登录/注册选择登录模板', status == 200 and
+    rep.check('注册选择登录模板', status == 200 and
               challenge_template_marker(base, st, sent.get('challenge_id')).startswith('mock-login_register-'),
               sent)
-    status, auth = verify(base, phone, sent.get('challenge_id'))
-    record = auth.get('record') or {}
-    rep.check('新手机号创建并登录', status == 200 and auth.get('created') is True and
-              record.get('phone_migration_status') == 'phone_bound', auth)
-    rep.check('手机号认证响应不泄露内部身份字段',
-              not any(key in record for key in ('username', 'phone_e164', 'phone_lookup_hash')), record)
+    status, reg = register(base, phone, 't2_reg_user', sent.get('challenge_id'))
+    record = reg.get('record') or {}
+    rep.check('用户名+密码+手机号注册并登录', status == 200 and reg.get('created') is True and
+              record.get('phone_migration_status') == 'phone_bound', reg)
+    rep.check('注册响应不泄露内部身份字段',
+              not any(key in record for key in ('username', 'phone_e164', 'phone_lookup_hash', 'password')), record)
     participant_id = record.get('id')
 
-    status, reused = verify(base, phone, sent.get('challenge_id'))
+    status, reused = register(base, phone, 't2_reg_user', sent.get('challenge_id'))
     rep.check('challenge 只能消费一次', status == 409 and biz_code(reused) == 'challenge_consumed', reused)
 
-    status, sent_again = request_code(base, phone, device='phone-it-login')
+    _, sent_again = request_code(base, phone, device='phone-it-login')
     status, auth_again = verify(base, phone, sent_again.get('challenge_id'))
-    rep.check('已有手机号幂等登录同一账号', status == 200 and auth_again.get('created') is False and
+    rep.check('已注册手机号验证码幂等登录同一账号', status == 200 and auth_again.get('created') is False and
               auth_again.get('record', {}).get('id') == participant_id, auth_again)
+
+    # 注册后账号密码登录（用户名与手机号均可）
+    status, pw_login = call(base, 'POST', '/api/cc/auth/participant', {
+        'username': 't2_reg_user', 'password': 'secret123',
+    })
+    rep.check('注册后可用用户名+密码登录', status == 200 and
+              pw_login.get('record', {}).get('id') == participant_id, pw_login)
+    status, phone_login = call(base, 'POST', '/api/cc/auth/participant', {
+        'phone': phone, 'password': 'secret123',
+    })
+    rep.check('注册后可用手机号+密码登录', status == 200 and
+              phone_login.get('record', {}).get('id') == participant_id, phone_login)
+    status, wrong_pw = call(base, 'POST', '/api/cc/auth/participant', {
+        'phone': phone, 'password': 'wrong_pass_999',
+    })
+    rep.check('手机号+错误密码 → 400 INVALID_CREDENTIALS', status == 400 and
+              biz_code(wrong_pw) == 'INVALID_CREDENTIALS', wrong_pw)
 
     legacy_id, legacy_token, _ = fx.create_participant(base, 't1_legacy_user')
     bind_phone = '13800002003'
@@ -128,7 +160,10 @@ def run(ctx):
     rep.check('短信提供方失败使用稳定业务错误', status == 503 and
               biz_code(provider_fail) == 'provider_unavailable', provider_fail)
 
-    concurrent_phone = '13800002005'
+    concurrent_phone = '13800002011'
+    _, conc_reg_sent = request_code(base, concurrent_phone, 'register', device='phone-it-conc-signup')
+    status, conc_reg = register(base, concurrent_phone, 't2_conc_user', conc_reg_sent.get('challenge_id'))
+    rep.check('并发用例前置注册成功', status == 200 and conc_reg.get('created') is True, conc_reg)
     _, concurrent_sent = request_code(base, concurrent_phone, device='phone-it-concurrent')
     challenge_id = concurrent_sent.get('challenge_id')
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -138,11 +173,60 @@ def run(ctx):
 
     # 超管停用后，验证码仍按统一形状发送；验证阶段才返回停用状态，避免请求阶段枚举。
     disabled_phone = '13800002006'
-    _, disabled_sent = request_code(base, disabled_phone, device='phone-it-disabled-create')
-    _, disabled_auth = verify(base, disabled_phone, disabled_sent.get('challenge_id'))
-    disabled_id = disabled_auth.get('record', {}).get('id')
+    _, disabled_sent = request_code(base, disabled_phone, 'register', device='phone-it-disabled-create')
+    _, disabled_reg = register(base, disabled_phone, 't2_disabled_user', disabled_sent.get('challenge_id'))
+    disabled_id = disabled_reg.get('record', {}).get('id')
     call(base, 'PATCH', '/api/collections/participant_accounts/records/%s' % disabled_id,
          {'status': 'disabled'}, st)
     status, disabled_sent2 = request_code(base, disabled_phone, device='phone-it-disabled-login')
     status, disabled = verify(base, disabled_phone, disabled_sent2.get('challenge_id'))
     rep.check('停用账号在验证后拒绝登录', status == 403 and biz_code(disabled) == 'account_disabled', disabled)
+
+    # ---------- T2 新增：验证码登录不再自动建号 ----------
+    unreg_phone = '13800002009'
+    _, unreg_sent = request_code(base, unreg_phone, device='phone-it-unreg')
+    status, unreg = verify(base, unreg_phone, unreg_sent.get('challenge_id'))
+    rep.check('未注册手机号验证码登录被拒且不建号', status == 400 and
+              biz_code(unreg) == 'phone_not_registered', unreg)
+
+    # ---------- 注册冲突 ----------
+    dup_phone = '13800002007'
+    _, dup_sent = request_code(base, dup_phone, 'register', device='phone-it-dup-username')
+    status, dup_user = register(base, dup_phone, 't2_reg_user', dup_sent.get('challenge_id'))
+    rep.check('用户名重复注册 → 409 username_taken', status == 409 and
+              biz_code(dup_user) == 'username_taken', dup_user)
+
+    _, conflict_sent = request_code(base, '13800002002', 'register', device='phone-it-conflict-reg')
+    status, conflict_reg = register(base, '13800002002', 't2_phone_cf',
+                                    conflict_sent.get('challenge_id'))
+    rep.check('手机号重复注册 → 409 phone_conflict', status == 409 and
+              biz_code(conflict_reg) == 'phone_conflict', conflict_reg)
+
+    # ---------- 找回密码全流程 ----------
+    reset_phone = '13800002008'
+    _, reset_reg_sent = request_code(base, reset_phone, 'register', device='phone-it-reset-signup')
+    status, reset_reg = register(base, reset_phone, 't2_reset_user', reset_reg_sent.get('challenge_id'))
+    rep.check('重置前注册成功', status == 200 and reset_reg.get('created') is True, reset_reg)
+    _, reset_sent = request_code(base, reset_phone, 'reset_password', device='phone-it-reset-code')
+    status, reset_done = reset_password(base, reset_phone, reset_sent.get('challenge_id'),
+                                        new_password='newsecret1')
+    rep.check('手机号验证码重置密码成功并返回会话', status == 200 and
+              bool(reset_done.get('token')), reset_done)
+    status, old_pw = call(base, 'POST', '/api/cc/auth/participant', {
+        'phone': reset_phone, 'password': 'secret123',
+    })
+    rep.check('重置后旧密码失效', status == 400 and
+              biz_code(old_pw) == 'INVALID_CREDENTIALS', old_pw)
+    status, new_pw = call(base, 'POST', '/api/cc/auth/participant', {
+        'phone': reset_phone, 'password': 'newsecret1',
+    })
+    rep.check('重置后新密码可登录', status == 200 and
+              new_pw.get('record', {}).get('id') == reset_reg.get('record', {}).get('id'), new_pw)
+
+    # 未注册手机号重置密码
+    reset_unreg_phone = '13800002010'
+    _, reset_unreg_sent = request_code(base, reset_unreg_phone, 'reset_password',
+                                       device='phone-it-reset-unreg')
+    status, reset_unreg = reset_password(base, reset_unreg_phone, reset_unreg_sent.get('challenge_id'))
+    rep.check('未注册手机号重置密码 → 400 phone_not_registered', status == 400 and
+              biz_code(reset_unreg) == 'phone_not_registered', reset_unreg)

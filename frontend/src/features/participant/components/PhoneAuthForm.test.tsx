@@ -36,7 +36,7 @@ describe('PhoneAuthForm 手机号验证码入口', () => {
     fireEvent.click(screen.getByRole('button', { name: '获取验证码' }));
     expect(await screen.findByRole('textbox', { name: /^验证码/ })).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: /^验证码/ }), { target: { value: '246810' } });
-    fireEvent.click(screen.getByRole('button', { name: '登录 / 注册' }));
+    fireEvent.click(screen.getByRole('button', { name: '登录' }));
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
     expect(mock.bodyOf(0)).toEqual({

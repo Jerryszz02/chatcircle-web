@@ -3,30 +3,25 @@ import type { FormEvent } from 'react';
 import { normalizeApiError } from '../../../shared/api/http';
 import { saveParticipantPhoneAuth } from '../../../shared/auth';
 import { Button, Input } from '../../../shared/ui';
-import { requestParticipantPhoneCode, verifyParticipantPhoneCode } from '../api';
-import {
-  normalizeMainlandPhone,
-  PARTICIPANT_PHONE_PRIVACY_NOTICE,
-  PARTICIPANT_PRIVACY_NOTICE_VERSION,
-  validateMainlandPhone,
-  validatePhoneCode,
-} from '../lib/phone';
+import { requestParticipantPhoneCode, resetParticipantPassword } from '../api';
+import { normalizeMainlandPhone, validateMainlandPhone, validatePhoneCode } from '../lib/phone';
+import { validatePassword } from '../lib/username';
 
-/** 手机号验证码登录入口（T2 备选登录方式；新用户注册请走注册表单）。 */
-export function PhoneAuthForm({
-  submitLabel = '登录',
-  onSuccess,
-}: {
-  submitLabel?: string;
-  onSuccess: () => void;
-}) {
+/**
+ * 找回密码（T2）：手机号 + 短信验证码 → 设置新密码，成功即登录。
+ * 两步：请求验证码（purpose=reset_password）→ 输入验证码与新密码提交。
+ */
+export function ResetPasswordForm({ onSuccess }: { onSuccess: () => void }) {
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
-  const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [challengeId, setChallengeId] = useState('');
-  const [phoneError, setPhoneError] = useState<string>();
-  const [codeError, setCodeError] = useState<string>();
-  const [formError, setFormError] = useState<string>();
+  const [phoneError, setPhoneError] = useState<string | undefined>();
+  const [codeError, setCodeError] = useState<string | undefined>();
+  const [passwordError, setPasswordError] = useState<string | undefined>();
+  const [confirmError, setConfirmError] = useState<string | undefined>();
+  const [formError, setFormError] = useState<string | undefined>();
   const [requesting, setRequesting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -35,16 +30,11 @@ export function PhoneAuthForm({
     setPhoneError(error ?? undefined);
     setFormError(undefined);
     if (error) return;
-    if (!privacyAccepted) {
-      setFormError('请阅读并同意隐私说明后继续');
-      return;
-    }
     setRequesting(true);
     try {
       const response = await requestParticipantPhoneCode({
         phone: normalizeMainlandPhone(phone)!,
-        purpose: 'login_or_register',
-        privacy_notice_version: PARTICIPANT_PRIVACY_NOTICE_VERSION,
+        purpose: 'reset_password',
       });
       setChallengeId(response.challenge_id);
     } catch (err) {
@@ -56,21 +46,22 @@ export function PhoneAuthForm({
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!challengeId) {
-      await requestCode();
-      return;
-    }
-    const error = validatePhoneCode(code);
-    setCodeError(error ?? undefined);
+    if (!challengeId) return;
+    const cErr = validatePhoneCode(code);
+    const pErr = validatePassword(newPassword);
+    const cfErr = confirmPassword !== newPassword ? '两次输入的密码不一致' : null;
+    setCodeError(cErr ?? undefined);
+    setPasswordError(pErr ?? undefined);
+    setConfirmError(cfErr ?? undefined);
     setFormError(undefined);
-    if (error) return;
+    if (cErr || pErr || cfErr) return;
     setSubmitting(true);
     try {
-      const response = await verifyParticipantPhoneCode({
+      const response = await resetParticipantPassword({
         phone: normalizeMainlandPhone(phone)!,
         challenge_id: challengeId,
         code: code.trim(),
-        privacy_notice_version: PARTICIPANT_PRIVACY_NOTICE_VERSION,
+        new_password: newPassword,
       });
       saveParticipantPhoneAuth(response);
       onSuccess();
@@ -83,6 +74,7 @@ export function PhoneAuthForm({
 
   return (
     <form onSubmit={submit} noValidate>
+      <p className="cc-notice">输入注册时使用的手机号，验证通过后即可设置新密码。</p>
       <Input
         label="手机号"
         type="tel"
@@ -107,28 +99,27 @@ export function PhoneAuthForm({
             inputMode="numeric"
             autoComplete="one-time-code"
           />
-          <button
-            type="button"
-            className="cc-link-button"
-            onClick={() => {
-              setChallengeId('');
-              setCode('');
-              setCodeError(undefined);
-            }}
-          >
-            更换手机号
-          </button>
-        </>
-      ) : (
-        <label className="cc-consent">
-          <input
-            type="checkbox"
-            checked={privacyAccepted}
-            onChange={(e) => setPrivacyAccepted(e.target.checked)}
+          <Input
+            label="新密码"
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            hint="至少 8 位"
+            error={passwordError}
+            required
+            autoComplete="new-password"
           />
-          <span>{PARTICIPANT_PHONE_PRIVACY_NOTICE}</span>
-        </label>
-      )}
+          <Input
+            label="确认新密码"
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            error={confirmError}
+            required
+            autoComplete="new-password"
+          />
+        </>
+      ) : null}
       {formError ? (
         <p className="cc-error" role="alert">
           {formError}
@@ -136,14 +127,13 @@ export function PhoneAuthForm({
       ) : null}
       {challengeId ? (
         <Button type="submit" block loading={submitting}>
-          {submitLabel}
+          重置密码并登录
         </Button>
       ) : (
         <Button type="button" block loading={requesting} onClick={requestCode}>
           获取验证码
         </Button>
       )}
-    <p className="cc-hint">个人信息用途与保存期限见 <a href="/privacy" target="_blank" rel="noopener noreferrer">隐私政策</a>。必要活动通知不代表营销同意。</p>
     </form>
   );
 }

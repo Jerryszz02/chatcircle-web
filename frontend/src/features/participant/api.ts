@@ -7,8 +7,10 @@ import {
   type BindPhoneResponse,
   type ChangePhoneInput,
   type ParticipantPhoneAuthResponse,
+  type RegisterParticipantInput,
   type RequestPhoneCodeInput,
   type RequestPhoneCodeResponse,
+  type ResetParticipantPasswordInput,
   type VerifyPhoneCodeInput,
 } from '../../shared/api/accountEvent';
 import type {
@@ -63,11 +65,25 @@ export function requestParticipantPhoneCode(
   });
 }
 
-/** 验证手机号并登录/注册。调用方负责把响应写入 participant authStore。 */
+/** 验证手机号并登录。调用方负责把响应写入 participant authStore。 */
 export function verifyParticipantPhoneCode(
   input: VerifyPhoneCodeInput,
 ): Promise<ParticipantPhoneAuthResponse> {
   return apiPost(pbClients.participant, ACCOUNT_EVENT_ENDPOINTS.verifyPhoneCode, input);
+}
+
+/** 用户名+密码+手机号验证码注册（T2）。调用方负责把响应写入 participant authStore。 */
+export function registerParticipant(
+  input: RegisterParticipantInput,
+): Promise<ParticipantPhoneAuthResponse> {
+  return apiPost(pbClients.participant, ACCOUNT_EVENT_ENDPOINTS.registerParticipant, input);
+}
+
+/** 手机号验证码找回/重置密码（T2），成功响应即为新会话。 */
+export function resetParticipantPassword(
+  input: ResetParticipantPasswordInput,
+): Promise<ParticipantPhoneAuthResponse> {
+  return apiPost(pbClients.participant, ACCOUNT_EVENT_ENDPOINTS.resetParticipantPassword, input);
 }
 
 /** 存量账号绑定手机号。 */

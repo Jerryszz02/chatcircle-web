@@ -26,14 +26,15 @@ async function newAdminPage(browser: Browser): Promise<Page> {
   return page;
 }
 
-/** 参与者经通用登录页登录（FR-AUTH-008），登录后落「我的」中心。 */
+/** 参与者经通用登录页登录（FR-AUTH-008；T2 手机验证码为备选登录方式），登录后落「我的」中心。 */
 async function participantLogin(page: Page, phone: string) {
   await page.goto(`${webUrl}/login`);
+  await page.getByRole('button', { name: '手机验证码登录' }).click();
   await page.getByRole('textbox', { name: /^手机号/ }).fill(phone);
   await page.getByRole('checkbox').check();
   await page.getByRole('button', { name: '获取验证码' }).click();
   await page.getByRole('textbox', { name: /^验证码/ }).fill(fixture.phoneCode);
-  await page.getByRole('button', { name: '登录 / 注册' }).click();
+  await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.waitForURL('**/me');
 }
 

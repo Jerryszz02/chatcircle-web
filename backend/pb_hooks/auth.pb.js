@@ -1,11 +1,11 @@
 // auth.pb.js — 认证 hooks：存量参与者登录 + 管理员邀请码注册
 //
 // 端点契约（technical-design §5.4，统一端点契约）：
-// - POST /api/cc/auth/participant {username, password}
-//     T1 后仅供存量用户名账号迁移：用户名小写归一化，只校验已存在账号；
-//     不存在与密码错误返回相同响应，绝不创建未验证手机号的新账号；返回 { token, record }；
-//     同人同 IP 连续失败限流（FR-AUTH-007，常量 5 次 / 10 分钟滑动窗口）；
-//     同 IP 跨用户名失败累计限流（防密码喷洒，30 次 / 10 分钟）；
+// - POST /api/cc/auth/participant {username | phone, password}
+//     参与者账号密码登录：username（小写归一化）或 phone（+86 手机号 HMAC 查找）二选一；
+//     不存在与密码错误返回相同响应，绝不创建账号；返回 { token, record }；
+//     同身份同 IP 连续失败限流（FR-AUTH-007，常量 5 次 / 10 分钟滑动窗口）；
+//     同 IP 跨身份失败累计限流（防密码喷洒，30 次 / 10 分钟）；
 //     密码格式校验前置到账号 lookup 之前（消除账号枚举 oracle）。
 // - POST /api/cc/auth/admin-register {invite_code, username, email, password}
 //     事务内消费一次性邀请码创建管理员（FR-ORG-002/003、AC-02；邮箱为 2026-08 改版新增，AC-24）：
@@ -20,8 +20,12 @@
 // 各 handler 顶部的共享函数与 lib/*.pb.js 契约同源（由生成器按引用自动内联，勿手工改副本）。
 
 // ---------------------------------------------------------------------------
-// POST /api/cc/auth/participant — 存量参与者登录（T1 迁移兼容、AC-06/AC-21）
+// POST /api/cc/auth/participant — 参与者账号密码登录（用户名或手机号 + 密码）
 // ---------------------------------------------------------------------------
+// body 二选一身份字段：{username, password} 或 {phone, password}（+86 大陆手机号，
+// 按 HMAC-SHA256(CC_PHONE_HASH_KEY, phone_e164) 精确查找，与 phoneauth.pb.js 同源）。
+// 账号不存在与密码错误返回相同响应，绝不创建账号或签发 token；
+// 限流/停用语义对两种身份一致。
 routerAdd('POST', '/api/cc/auth/participant', (e) => {
   try {
   // 统一错误：抛出标记对象，由 handler 顶层 catch 转为统一 JSON 错误响应
@@ -143,9 +147,27 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
   const CC_SPRAY_MAX_FAILURES = 30;
   const CC_SPRAY_WINDOW_SEC = 600;
   const body = e.requestInfo().body || {};
-  const username = String(body.username == null ? '' : body.username).trim().toLowerCase();
-  if (!CC_USERNAME_RE.test(username)) {
-    ccError(400, 'INVALID_USERNAME', '用户名须为 4–20 位字母、数字或下划线');
+  // 身份二选一：username（小写归一化）或 phone（+86 大陆手机号，HMAC 精确查找）
+  const rawPhone = String(body.phone == null ? '' : body.phone).replace(/[\s-]/g, '');
+  let username = '';
+  let phoneLookupHash = '';
+  if (rawPhone !== '') {
+    let local = rawPhone;
+    if (local.indexOf('+86') === 0) local = local.slice(3);
+    else if (local.indexOf('0086') === 0) local = local.slice(4);
+    if (!/^1[3-9][0-9]{9}$/.test(local)) {
+      ccError(400, 'INVALID_PHONE', '请输入有效的中国大陆手机号');
+    }
+    const phoneHashKey = $os.getenv('CC_PHONE_HASH_KEY');
+    if (!phoneHashKey || phoneHashKey.length < 32) {
+      ccError(503, 'provider_unavailable', '登录服务暂不可用，请稍后再试');
+    }
+    phoneLookupHash = $security.hs256('+86' + local, phoneHashKey);
+  } else {
+    username = String(body.username == null ? '' : body.username).trim().toLowerCase();
+    if (!CC_USERNAME_RE.test(username)) {
+      ccError(400, 'INVALID_USERNAME', '用户名须为 4–20 位字母、数字或下划线');
+    }
   }
   const password = body.password;
   if (typeof password !== 'string' || password === '') {
@@ -157,24 +179,26 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
     ccError(400, 'INVALID_PASSWORD', '密码长度须为 ' + CC_PASSWORD_MIN + '–' + CC_PASSWORD_MAX + ' 位');
   }
 
-  // 限流（原子「检查即预占」）：同一用户名 + 来源 IP 连续失败达阈值后临时拒绝；
+  // 限流（原子「检查即预占」）：同一身份 + 来源 IP 连续失败达阈值后临时拒绝；
   // 响应不泄露账号是否存在。rateKey 预占格在成功时清空（连续失败语义），
   // sprayKey 预占格在成功时回滚（只计失败语义，避免共享出口正常用户互相误伤）。
-  const rateKey = 'participant|' + username + '|' + e.realIP();
-  // 喷洒限流：同一来源 IP 跨用户名累计失败（成功不清零，窗口滑出自动恢复）
+  const rateIdentity = phoneLookupHash !== '' ? 'phone|' + phoneLookupHash : 'name|' + username;
+  const rateKey = 'participant|' + rateIdentity + '|' + e.realIP();
+  // 喷洒限流：同一来源 IP 跨身份累计失败（成功不清零，窗口滑出自动恢复）
   const sprayKey = 'participant_ip|' + e.realIP();
   if (!checkRateLimit(rateKey, CC_LOGIN_MAX_FAILURES, CC_LOGIN_WINDOW_SEC) ||
       !checkRateLimit(sprayKey, CC_SPRAY_MAX_FAILURES, CC_SPRAY_WINDOW_SEC)) {
     ccError(429, 'TOO_MANY_ATTEMPTS', '尝试次数过多，请稍后再试');
   }
 
-  const lookup = () => ccOne($app, 'participant_accounts', 'username = {:u}', { u: username });
+  const lookup = phoneLookupHash !== ''
+    ? () => ccOne($app, 'participant_accounts', 'phone_lookup_hash = {:h}', { h: phoneLookupHash })
+    : () => ccOne($app, 'participant_accounts', 'username = {:u}', { u: username });
   const record = lookup();
-  // T1 后用户名入口仅用于迁移已有账号。未知用户名与错误密码必须同形响应，
-  // 且不能创建账号或签发 token，否则可绕过手机号验证直接进入参与者业务端点。
+  // 账号不存在与密码错误同形响应，且不能创建账号或签发 token。
   if (!record || !record.validatePassword(password)) {
     // 失败：rateKey / sprayKey 的预占格在 checkRateLimit 时已计入窗口，无需再 record
-    ccError(400, 'INVALID_CREDENTIALS', '用户名或密码错误');
+    ccError(400, 'INVALID_CREDENTIALS', phoneLookupHash !== '' ? '手机号或密码错误' : '用户名或密码错误');
   }
   if (record.get('status') !== 'active') {
     ccError(403, 'ACCOUNT_DISABLED', '账号已停用');
