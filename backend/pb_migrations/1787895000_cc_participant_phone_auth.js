@@ -36,7 +36,7 @@ migrate((app) => {
     name: 'phone_binding_source',
     required: false,
     maxSelect: 1,
-    values: ['sms_signup', 'legacy_bind', 'manual_merge'],
+    values: ['sms_signup', 'password_signup', 'legacy_bind', 'manual_merge'],
   }));
   participants.fields.add(new Field({
     type: 'select',
@@ -77,7 +77,7 @@ migrate((app) => {
         name: 'purpose',
         required: true,
         maxSelect: 1,
-        values: ['login_or_register', 'bind_phone', 'change_phone'],
+        values: ['login_or_register', 'register', 'reset_password', 'bind_phone', 'change_phone'],
       },
       {
         type: 'select',

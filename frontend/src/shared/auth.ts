@@ -7,9 +7,11 @@ import { pbClients, pbForRole, ROLE_COLLECTIONS, type Role } from './pocketbase'
 /**
  * 三类角色的认证封装（technical-design §5.4、FR-AUTH-001~009）。
  *
- * - 参与者 participant_accounts：T1 新账号统一走手机号验证码；
- *   `POST /api/cc/auth/participant` 仅供存量用户名账号校验密码并进入绑定流程，
- *   未知用户名不得创建账号或签发 token（AC-06）。
+ * - 参与者 participant_accounts：T2 起为「用户名/手机号 + 密码」主入口
+ *   （`POST /api/cc/auth/participant`，identity 为手机号或用户名），注册走
+ *   `POST /api/cc/auth/participant/register`（用户名+密码+手机验证码），
+ *   找回密码走 `POST /api/cc/auth/participant/reset-password`（手机验证码重置）；
+ *   手机号验证码登录（request-code/verify-code）保留为备选登录方式，不再自动建号。
  * - 管理员 admin_accounts：标准 authWithPassword 登录；注册走一次性邀请码端点
  *   `POST /api/cc/auth/admin-register`（FR-ORG-002，由管理端注册页调用 api 层）。
  * - 超级管理员 _superusers：标准 authWithPassword 登录；初始部署时创建，无产品注册入口。
@@ -81,15 +83,17 @@ function clearOtherRoleSessions(role: Role): void {
   }
 }
 
-/** 参与者：仅登录存量用户名账号；未知用户名由服务端统一拒绝。 */
-export const participantAuth: RoleAuth = makeRoleAuth('participant', async (username, password) => {
+/**
+ * 参与者：用户名或手机号 + 密码登录（T2）。identity 命中大陆手机号形态时按手机号
+ * 提交（服务端 HMAC 查找），否则按用户名提交；账号不存在与密码错误同形响应。
+ */
+export const participantAuth: RoleAuth = makeRoleAuth('participant', async (identity, password) => {
+  const compact = identity.trim().replace(/[\s-]/g, '');
+  const isPhone = /^(\+86|0086)?1[3-9][0-9]{9}$/.test(compact);
   const res = await apiPost<ParticipantAuthResponse>(
     pbClients.participant,
     '/api/cc/auth/participant',
-    {
-      username,
-      password,
-    },
+    isPhone ? { phone: compact, password } : { username: compact.toLowerCase(), password },
   );
   pbClients.participant.authStore.save(res.token, res.record);
   return res.record;

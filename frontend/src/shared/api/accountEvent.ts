@@ -19,9 +19,14 @@ export const ACCOUNT_EVENT_CONTRACT_VERSION = '2026-08-28.t0-v1' as const;
 
 // ---------- 手机号账号 ----------
 
-export type PhoneBindingSource = 'sms_signup' | 'legacy_bind' | 'manual_merge';
+export type PhoneBindingSource = 'sms_signup' | 'password_signup' | 'legacy_bind' | 'manual_merge';
 export type PhoneMigrationStatus = 'legacy_unbound' | 'phone_bound' | 'merge_required';
-export type PhoneCodePurpose = 'login_or_register' | 'bind_phone' | 'change_phone';
+export type PhoneCodePurpose =
+  | 'login_or_register'
+  | 'register'
+  | 'reset_password'
+  | 'bind_phone'
+  | 'change_phone';
 
 /** participant_accounts 的服务端持久化字段；T1 迁移前均不存在。 */
 export interface ParticipantPhonePersistenceFields {
@@ -71,11 +76,30 @@ export interface VerifyPhoneCodeInput {
   privacy_notice_version?: string;
 }
 
+/** 用户名+密码+手机号注册（T2）：challenge 需为 purpose=register 的验证码。 */
+export interface RegisterParticipantInput {
+  username: string;
+  password: string;
+  phone: string;
+  challenge_id: string;
+  code: string;
+  privacy_notice_version?: string;
+}
+
+/** 手机号验证码找回密码（T2）：成功后直接返回会话。 */
+export interface ResetParticipantPasswordInput {
+  phone: string;
+  challenge_id: string;
+  code: string;
+  new_password: string;
+}
+
 export interface ParticipantPhoneAuthResponse {
   contract_version: typeof ACCOUNT_EVENT_CONTRACT_VERSION;
   token: string;
   record: ParticipantPhoneAuthRecord;
-  created: boolean;
+  /** verify-code/register 返回；reset-password 不返回该字段。 */
+  created?: boolean;
 }
 
 export interface BindPhoneInput {
@@ -457,6 +481,8 @@ const activityPath = (activityId: string, suffix: string) =>
 export const ACCOUNT_EVENT_ENDPOINTS = {
   requestPhoneCode: '/api/cc/auth/participant/request-code',
   verifyPhoneCode: '/api/cc/auth/participant/verify-code',
+  registerParticipant: '/api/cc/auth/participant/register',
+  resetParticipantPassword: '/api/cc/auth/participant/reset-password',
   bindPhone: '/api/cc/auth/participant/bind-phone',
   changePhone: '/api/cc/auth/participant/change-phone',
   exportPreview: '/api/cc/exports/preview',

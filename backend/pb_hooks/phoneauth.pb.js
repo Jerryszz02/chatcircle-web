@@ -1,4 +1,11 @@
-// phoneauth.pb.js — T1 参与者手机号验证码登录/注册、存量绑定与换绑。
+// phoneauth.pb.js — T1 参与者手机号验证码登录、T2 用户名+密码注册与手机号找回、存量绑定与换绑。
+//
+// 动作（同一路由 handler）：request-code / verify-code / register / reset-password /
+// bind-phone / change-phone。
+// - request-code purpose：login_or_register（验证码登录）/ register（注册，强制隐私版本）/
+//   reset_password（找回密码）/ bind_phone / change_phone（后两者需已登录）；
+// - verify-code 仅登录已注册账号，不再自动建号（注册必须经 register 设置用户名+密码）；
+// - register：用户名+密码+手机验证码建号；reset-password：手机验证码重置密码并直接登录。
 //
 // 内部契约：frontend/src/shared/api/accountEvent.ts（2026-08-28.t0-v1）。
 // 外部 provider：阿里云号码认证服务 Dypnsapi/2017-05-25，使用
@@ -303,8 +310,11 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
 
     // §4.1 短信模板按业务场景选择：每条短信按实际用途选对应阿里云赠送模板。
     // 未知 purpose/changeRole 组合在此抛稳定的 provider 配置错误，绝不回落到登录模板。
+    // register/reset_password 与登录注册共用同一验证码模板（文案为通用验证码，不含登录字样）。
     const smsTemplateScenario = (purpose, changeRole) => {
       if (purpose === 'login_or_register') return 'login_register';
+      if (purpose === 'register') return 'login_register';
+      if (purpose === 'reset_password') return 'login_register';
       if (purpose === 'bind_phone') return 'bind_new';
       if (purpose === 'change_phone' && changeRole === 'old') return 'verify_bound';
       if (purpose === 'change_phone' && changeRole === 'new') return 'bind_new';
@@ -463,13 +473,14 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
     // -----------------------------------------------------------------------
     if (action === 'request-code') {
       const purpose = String(body.purpose || '');
-      if (['login_or_register', 'bind_phone', 'change_phone'].indexOf(purpose) < 0) {
+      if (['login_or_register', 'register', 'reset_password', 'bind_phone', 'change_phone'].indexOf(purpose) < 0) {
         ccError(400, 'code_invalid', '验证码用途无效');
       }
-      const participant = purpose === 'login_or_register' ? null : requireParticipant();
+      const anonymousPurposes = ['login_or_register', 'register', 'reset_password'];
+      const participant = anonymousPurposes.indexOf(purpose) >= 0 ? null : requireParticipant();
       const phone = normalizePhone(body.phone);
       const hash = phoneHash(phone);
-      if (purpose === 'login_or_register') {
+      if (purpose === 'login_or_register' || purpose === 'register') {
         if (String(body.privacy_notice_version || '') !== PRIVACY_NOTICE_VERSION) {
           ccError(400, 'privacy_notice_required', '请阅读并同意隐私说明后继续');
         }
@@ -532,7 +543,7 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
     }
 
     // -----------------------------------------------------------------------
-    // verify-code — 匿名手机号登录/注册
+    // verify-code — 匿名手机号验证码登录（仅已注册账号；注册走 register）
     // -----------------------------------------------------------------------
     if (action === 'verify-code') {
       const phone = normalizePhone(body.phone);
@@ -546,7 +557,7 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
       verifyChallengeProvider(challenge, phone, body.code);
 
       let participant = null;
-      let created = false;
+      let registered = true;
       let disabled = false;
       $app.runInTransaction((txApp) => {
         const txChallenge = loadChallenge(txApp, {
@@ -561,59 +572,169 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
           'phone_lookup_hash = {:hash}',
           { hash: hash },
         );
+        // T2 起注册必须经 register 设置用户名+密码；验证码登录不再自动建号，
+        // 否则会产生用户自己不知道密码的账号（绕过账号密码体系）。
         if (!participant) {
-          let savedNewParticipant = false;
-          const collection = txApp.findCollectionByNameOrId('participant_accounts');
-          participant = new Record(collection);
-          participant.set(
-            'username',
-            'p_' + $security.randomStringWithAlphabet(18, 'abcdefghijklmnopqrstuvwxyz0123456789'),
-          );
-          participant.set('password', $security.randomString(32));
-          participant.set('status', 'active');
-          participant.set('phone_e164', phone.e164);
-          participant.set('phone_lookup_hash', hash);
-          participant.set('phone_verified_at', ccNow());
-          participant.set('phone_binding_source', 'sms_signup');
-          participant.set('phone_migration_status', 'phone_bound');
-          try {
-            txApp.save(participant);
-            savedNewParticipant = true;
-          } catch (err) {
-            if (!ccUniqueErr(err)) throw err;
-            participant = ccOne(
-              txApp,
-              'participant_accounts',
-              'phone_lookup_hash = {:hash}',
-              { hash: hash },
-            );
-            if (!participant) throw err;
-          }
-          if (savedNewParticipant) {
-            created = true;
-            writeAudit(txApp, {
-              actorId: participant.id,
-              actorRole: 'participant',
-              action: 'phone.signup',
-              targetId: participant.id,
-              result: 'success',
-              metadata: {
-                phone_masked: phoneMask(phone),
-                phone_lookup_hash: hash,
-                privacy_notice_version: txChallenge.get('privacy_notice_version'),
-              },
-            });
-          }
+          registered = false;
+          return;
         }
         disabled = participant.get('status') !== 'active';
         consumeChallenge(txApp, txChallenge);
       });
+      if (!registered) ccError(400, 'phone_not_registered', '该手机号尚未注册，请先注册账号');
       if (disabled) ccError(403, 'account_disabled', '账号已停用');
       return e.json(200, {
         contract_version: CONTRACT_VERSION,
         token: participant.newAuthToken(),
         record: publicPhoneRecord(participant),
-        created: created,
+        created: false,
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // register — 用户名 + 密码 + 手机号（验证码）注册（T2 账号密码体系）
+    // -----------------------------------------------------------------------
+    if (action === 'register') {
+      const phone = normalizePhone(body.phone);
+      const hash = phoneHash(phone);
+      // 用户名规则与 auth.pb.js / 迁移 1785888180 一致：4–20 位小写字母/数字/下划线
+      const username = String(body.username == null ? '' : body.username).trim().toLowerCase();
+      if (!/^[a-z0-9_]{4,20}$/.test(username)) {
+        ccError(400, 'invalid_username', '用户名须为 4–20 位字母、数字或下划线');
+      }
+      const password = body.password;
+      if (typeof password !== 'string' || password.length < 8 || password.length > 71) {
+        ccError(400, 'invalid_password', '密码长度须为 8–71 位');
+      }
+      const challenge = loadChallenge($app, {
+        challengeId: body.challenge_id,
+        hash: hash,
+        purpose: 'register',
+        participantId: '',
+      });
+      verifyChallengeProvider(challenge, phone, body.code);
+
+      let participant = null;
+      let conflictCode = '';
+      $app.runInTransaction((txApp) => {
+        const txChallenge = loadChallenge(txApp, {
+          challengeId: body.challenge_id,
+          hash: hash,
+          purpose: 'register',
+          participantId: '',
+        });
+        if (ccOne(txApp, 'participant_accounts', 'username = {:u}', { u: username })) {
+          conflictCode = 'username_taken';
+          return;
+        }
+        if (ccOne(txApp, 'participant_accounts', 'phone_lookup_hash = {:hash}', { hash: hash })) {
+          conflictCode = 'phone_conflict';
+          return;
+        }
+        const collection = txApp.findCollectionByNameOrId('participant_accounts');
+        participant = new Record(collection);
+        participant.set('username', username);
+        participant.set('password', password);
+        participant.set('status', 'active');
+        participant.set('phone_e164', phone.e164);
+        participant.set('phone_lookup_hash', hash);
+        participant.set('phone_verified_at', ccNow());
+        participant.set('phone_binding_source', 'password_signup');
+        participant.set('phone_migration_status', 'phone_bound');
+        try {
+          txApp.save(participant);
+        } catch (err) {
+          // 并发抢注兜底：唯一索引冲突按字段区分（竞态窗口极小，预检已拦截常规情形）
+          if (!ccUniqueErr(err)) throw err;
+          conflictCode =
+            String((err && err.message) || '').indexOf('username') >= 0
+              ? 'username_taken'
+              : 'phone_conflict';
+          participant = null;
+          return;
+        }
+        consumeChallenge(txApp, txChallenge);
+        writeAudit(txApp, {
+          actorId: participant.id,
+          actorRole: 'participant',
+          action: 'password.signup',
+          targetId: participant.id,
+          result: 'success',
+          metadata: {
+            phone_masked: phoneMask(phone),
+            phone_lookup_hash: hash,
+            privacy_notice_version: txChallenge.get('privacy_notice_version'),
+          },
+        });
+      });
+      if (conflictCode === 'username_taken') ccError(409, 'username_taken', '用户名已被使用，请换一个');
+      if (conflictCode === 'phone_conflict') ccError(409, 'phone_conflict', '该手机号已注册，请直接登录');
+      return e.json(200, {
+        contract_version: CONTRACT_VERSION,
+        token: participant.newAuthToken(),
+        record: publicPhoneRecord(participant),
+        created: true,
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // reset-password — 手机号验证码找回/重置密码（T2）
+    // -----------------------------------------------------------------------
+    if (action === 'reset-password') {
+      const phone = normalizePhone(body.phone);
+      const hash = phoneHash(phone);
+      const newPassword = body.new_password;
+      if (typeof newPassword !== 'string' || newPassword.length < 8 || newPassword.length > 71) {
+        ccError(400, 'invalid_password', '密码长度须为 8–71 位');
+      }
+      const challenge = loadChallenge($app, {
+        challengeId: body.challenge_id,
+        hash: hash,
+        purpose: 'reset_password',
+        participantId: '',
+      });
+      verifyChallengeProvider(challenge, phone, body.code);
+
+      let participant = null;
+      let registered = true;
+      let disabled = false;
+      $app.runInTransaction((txApp) => {
+        const txChallenge = loadChallenge(txApp, {
+          challengeId: body.challenge_id,
+          hash: hash,
+          purpose: 'reset_password',
+          participantId: '',
+        });
+        participant = ccOne(
+          txApp,
+          'participant_accounts',
+          'phone_lookup_hash = {:hash}',
+          { hash: hash },
+        );
+        if (!participant) {
+          registered = false;
+          return;
+        }
+        disabled = participant.get('status') !== 'active';
+        if (disabled) return;
+        participant.set('password', newPassword);
+        txApp.save(participant);
+        consumeChallenge(txApp, txChallenge);
+        writeAudit(txApp, {
+          actorId: participant.id,
+          actorRole: 'participant',
+          action: 'password.reset',
+          targetId: participant.id,
+          result: 'success',
+          metadata: { phone_masked: phoneMask(phone), phone_lookup_hash: hash },
+        });
+      });
+      if (!registered) ccError(400, 'phone_not_registered', '该手机号尚未注册，请先注册账号');
+      if (disabled) ccError(403, 'account_disabled', '账号已停用');
+      return e.json(200, {
+        contract_version: CONTRACT_VERSION,
+        token: participant.newAuthToken(),
+        record: publicPhoneRecord(participant),
       });
     }
 

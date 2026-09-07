@@ -6,7 +6,8 @@ import { sanitizeRedirect } from '../lib/redirect';
 
 /**
  * 平台通用登录页（/login）。
- * - 手机号 + 验证码是主登录/注册入口；
+ * - 用户名/手机号 + 密码是主登录方式；手机验证码登录为备选入口；
+ * - 新用户在面板内注册（用户名+密码+手机号验证），忘记密码可用手机号找回；
  * - 存量用户名账号可登录后绑定手机号，participant_id 与历史记录不变；
  * - 支持 redirect 参数回跳（从活动/签到/问卷链接跳来，登录后回到原目标）；
  * - 无回跳地址时进入「我的」中心（FR-PAR-004）。
@@ -34,9 +35,7 @@ export function LoginPage() {
       <Card>
         <ParticipantAccessPanel onSuccess={() => navigate(target, { replace: true })} />
       </Card>
-      <p className="cc-hint">
-        首次验证手机号会自动创建账号；已有手机号会直接登录。
-      </p>
+      <p className="cc-hint">支持账号密码与手机验证码登录；没有账号可在面板内注册。</p>
     </PageLayout>
   );
 }

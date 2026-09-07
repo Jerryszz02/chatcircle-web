@@ -34,11 +34,14 @@ describe('LoginPage 平台通用登录', () => {
   beforeEach(clearAllSessions);
   afterEach(unstubApi);
 
-  it('默认提供手机号登录/注册，并保留原账号迁移入口', () => {
+  it('默认提供账号密码登录，并保留注册/找回/原账号迁移入口', () => {
     stubApi({});
     renderLogin('/login');
     expect(screen.getByRole('heading', { name: '平台通用登录' })).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: /^手机号/ })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /^用户名或手机号/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '手机验证码登录' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '注册账号' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '忘记密码' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '使用原用户名账号迁移' })).toBeInTheDocument();
     // 顶部提供返回首页入口
     expect(screen.getByRole('link', { name: '返回首页' })).toHaveAttribute('href', '/');

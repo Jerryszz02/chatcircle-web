@@ -82,7 +82,7 @@ export function ParticipantAuthForm({
         type="password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        hint="至少 8 位；请牢记，平台不提供找回"
+        hint="至少 8 位；忘记密码可用绑定手机号找回"
         error={passwordError}
         required
         autoComplete="current-password"
