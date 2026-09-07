@@ -30,14 +30,15 @@ async function newAdminPage(browser: Browser): Promise<Page> {
   return page;
 }
 
-/** 参与者经手机号验证码登录，用于同场活动双角色独立会话。 */
+/** 参与者经手机号验证码登录（T2 备选登录方式），用于同场活动双角色独立会话。 */
 async function participantLogin(page: Page, phone: string) {
   await page.goto(`${webUrl}/login`);
+  await page.getByRole('button', { name: '手机验证码登录' }).click();
   await page.getByRole('textbox', { name: /^手机号/ }).fill(phone);
   await page.getByRole('checkbox').check();
   await page.getByRole('button', { name: '获取验证码' }).click();
   await page.getByRole('textbox', { name: /^验证码/ }).fill(fixture.phoneCode);
-  await page.getByRole('button', { name: '登录 / 注册' }).click();
+  await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.waitForURL('**/me');
 }
 
@@ -52,16 +53,13 @@ test.describe.serial('V1 主链路', () => {
       await expect(page.getByRole('link', { name: '立即报名' })).toBeVisible();
     });
 
-    // ---------- 2. 点击报名 → 手机号验证码登录（T1） ----------
-    await test.step('报名链路手机号登录', async () => {
+    // ---------- 2. 点击报名 → 账号密码登录（T2 主登录方式，seed 已预置用户名账号） ----------
+    await test.step('报名链路账号密码登录', async () => {
       await page.getByRole('link', { name: '立即报名' }).click();
       await page.waitForURL(`**/a/${fixture.activityId}/register`);
-      await page.getByRole('textbox', { name: /^手机号/ }).fill(fixture.participantPhone);
-      await expect(page.getByText(/我们仅将你的姓名和手机号用于账号验证/)).toBeVisible();
-      await page.getByRole('checkbox').check();
-      await page.getByRole('button', { name: '获取验证码' }).click();
-      await page.getByRole('textbox', { name: /^验证码/ }).fill(fixture.phoneCode);
-      await page.getByRole('button', { name: '登录 / 注册' }).click();
+      await page.getByRole('textbox', { name: /^用户名或手机号/ }).fill(fixture.participantUsername);
+      await page.getByRole('textbox', { name: /^密码$/ }).fill(fixture.participantPassword);
+      await page.getByRole('button', { name: '登录', exact: true }).click();
       await expect(page.getByRole('button', { name: '提交报名' })).toBeVisible();
     });
 
