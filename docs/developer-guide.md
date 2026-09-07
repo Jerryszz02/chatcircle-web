@@ -41,7 +41,7 @@
 |---|---|---|
 | 超级管理员（全平台唯一） | PocketBase `_superusers` | 全平台 |
 | 机构管理员 | `admin_accounts`（auth 集合，带 `organization_id`） | 仅本机构 |
-| 参与者 | `participant_accounts`（auth 集合，不绑机构；已验证手机号为主要登录身份） | 仅本人 |
+| 参与者 | `participant_accounts`（auth 集合，不绑机构；用户名/手机号+密码为 T2 主登录身份，手机验证码登录为备选） | 仅本人 |
 
 「倾诉者 speaker / 聆听者 listener」**不是平台角色**，而是每条报名记录上的 `activity_role`；同一参与者可在不同活动选不同角色。聆听者培训是与活动解绑的独立体系：签到资格 = 该账号在全平台任一活动有 approved 的 listener 报名。
 
@@ -119,7 +119,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 | `organizations` | 机构主数据 + 机构级开关：`status`(active/disabled)、`require_activity_approval`（活动发布需平台审核）、`allow_sensitive_export`（敏感导出开关） |
 | `admin_accounts` (auth) | 机构管理员：username+密码、`organization_id`、`status`；`authRule: status='active'` 拒绝停用账号登录；token 7 天 |
 | `admin_invites` | 一次性管理员邀请码：**只存 `token_hash`**（sha256），明文仅生成时返回一次；`status`(unused/used/revoked/expired)、`expires_at`（默认 7 天） |
-| `participant_accounts` (auth) | 参与者：已验证手机号为主要身份；完整 `phone_e164` 与 HMAC 查找值为 hidden，公开响应仅给掩码/绑定状态；username+密码只保留给存量迁移；token 30 天 |
+| `participant_accounts` (auth) | 参与者：T2 起「用户名/手机号 + 密码」为主登录身份，手机验证码登录为备选；完整 `phone_e164` 与 HMAC 查找值为 hidden，公开响应仅给掩码/绑定状态；token 30 天 |
 | `participant_phone_challenges` | 手机验证码内部 challenge：只存手机号 HMAC、用途、账号关系、provider/状态/过期时间，不存完整手机号或验证码；全部集合 API rules 关闭 |
 
 **活动与报名**
@@ -205,8 +205,10 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 | 端点 | 鉴权 | 说明 |
 |---|---|---|
 | GET `/api/cc/health` | anon | 存活探针 |
-| POST `/api/cc/auth/participant` | anon | **仅存量用户名账号迁移登录**：用户名小写归一，只校验已存在账号；未知用户名与错误密码同形拒绝且不建号、不签发 token；双层限流（同人+IP 5 次/10min、同 IP 跨用户名 30 次/10min 防喷洒） |
-| POST `/api/cc/auth/participant/request-code` `/verify-code` | anon | 手机号验证码请求与登录/注册；响应不区分号码是否已注册，成功响应不含内部 username/完整手机号/HMAC |
+| POST `/api/cc/auth/participant` | anon | 参与者账号密码登录：`username`（小写归一）或 `phone`（+86 手机号 HMAC 查找）二选一；未知身份与错误密码同形拒绝且不建号、不签发 token；双层限流（同人+IP 5 次/10min、同 IP 跨身份 30 次/10min 防喷洒） |
+| POST `/api/cc/auth/participant/request-code` `/verify-code` | anon | 手机号验证码请求与登录；响应不区分号码是否已注册，成功响应不含内部 username/完整手机号/HMAC；verify-code 仅登录已注册账号，不再自动建号（未注册 → 400 `phone_not_registered`） |
+| POST `/api/cc/auth/participant/register` | anon | 用户名+密码+手机号（验证码）注册，事务内建号+消费 challenge+审计；用户名重复 → 409 `username_taken`、手机号已注册 → 409 `phone_conflict` |
+| POST `/api/cc/auth/participant/reset-password` | anon | 手机号验证码重置密码并直接返回会话；未注册手机号 → 400 `phone_not_registered` |
 | POST `/api/cc/auth/participant/bind-phone` `/change-phone` | participant | 存量账号绑定保留 participant_id；换绑需旧号和新号双验证码，冲突不自动覆盖 |
 | POST `/api/cc/auth/admin-register` | anon | 一次性邀请码注册管理员（邀请码 + 用户名 + 必填邮箱 + 密码），事务内消费邀请码+建号+审计 |
 | （非路由）PB 内置 auth-with-password | — | `authguard.pb.js` 补限流：per-IP 20 次/10min + per-身份+IP 5 次失败/10min |
@@ -306,7 +308,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 ### 5.7 后端测试体系（`backend/tests/`）
 
-- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 全部 suite（2026-09-06 本轮 624 断言）：越权矩阵、名额/配对并发、状态机、手机号认证、Realtime ACL、复制活动、问卷资格、v1/v2 导出准确性与敏感门禁、限流、备份告警、无硬删除和安全加固等。
+- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 全部 suite（2026-09-07 本轮 636 断言）：越权矩阵、名额/配对并发、状态机、手机号认证（含注册/找回）、Realtime ACL、复制活动、问卷资格、v1/v2 导出准确性与敏感门禁、限流、备份告警、无硬删除和安全加固等。
 - `migration_smoke.sh`：seed 及后续迁移局部回滚 → 全量 down → sqlite3 直查 26 个业务/内部集合清零 → 再 up，随后 serve 抽查，共 62 项。
 - **两条强制规则**：① authguard 对内置 auth-with-password 按 IP 限 25 次/10min，一轮全量当前使用 22 次（余量 3）——新增套件仍应避免消耗这项预算，管理员登录态用 impersonate，参与者走 `/api/cc/auth/participant`；② 新增带 `organization_id` 的接口，**必须同 PR 补机构越权用例**（通用端点放 `suite_acl.py`，领域聚合端点可放对应 suite）。
 
@@ -344,7 +346,7 @@ src/
 
 - **三角色各一个 PB client 单例**，token 分 key 存 localStorage（`cc_participant_auth`/`cc_admin_auth`/`cc_super_auth`）；任一角色登录成功会**清空另两角色会话**（单会话互斥）。角色→集合映射：participant→participant_accounts、admin→admin_accounts、super→_superusers。
 - PB 地址：`VITE_PB_URL` 或回退 `window.location.origin`（生产同源）。client 关闭了 autoCancellation，并包了两层：stripUndefinedParams（SDK 0.21 会把 `filter: undefined` 序列化成字符串导致 400）+ 管理端 401 统一清会话跳登录页（参与者端不跳，由页面自处理 `?redirect=` 回跳）。
-- 登录/注册路径：参与者在 `/login` 和报名链路使用手机号+验证码，首次验证自动建号；原用户名+密码入口只用于存量账号登录后绑定手机号。机构管理员走 `authWithPassword` + 邀请码注册端点；超管无注册入口。
+- 登录/注册路径：参与者在 `/login` 和报名链路用「用户名/手机号+密码」登录或「用户名+密码+手机号」注册；手机号验证码登录为备选（仅已注册账号）。机构管理员走 `authWithPassword` + 邀请码注册端点；超管无注册入口。
 - 路由守卫 `RequireRole`（`shared/guards.tsx`）：本角色会话有效→放行；持其它角色会话→403 页；未登录→跳对应登录页。**守卫只是 UX，权限永远由服务端 rules/hooks 强制**——改权限不要只改前端。
 - 会话响应式：`useSessionSnapshot()`（useSyncExternalStore 订阅三个 authStore）。
 
@@ -370,7 +372,7 @@ Vitest + jsdom + Testing Library，51 个测试文件与源码 colocate，主力
 
 ## 7. 端到端业务流程（前后端串起来）
 
-**参与者主链路**：广场/详情（`GET /api/cc/public/activities*`）→ 报名页请求并验证手机号验证码（首次自动建号；存量用户名账号先登录再绑定）→ 提交报名（`POST .../register`，按所选角色的 role_scope 字段渲染表单）→ 在 `/me`（`GET /api/cc/me/overview`）看审核状态和绑定/换绑手机号 → 到场扫固定二维码 → `POST /api/cc/checkin/self`（幂等）→ 活动后问卷草稿/提交。
+**参与者主链路**：广场/详情（`GET /api/cc/public/activities*`）→ 登录/注册（用户名/手机号+密码，或手机号验证码；新用户须在 `/login` 或报名链路用「用户名+密码+手机号」注册，首次验证不再自动建号）→ 提交报名（`POST .../register`，按所选角色的 role_scope 字段渲染表单）→ 在 `/me`（`GET /api/cc/me/overview`）看审核状态和绑定/换绑手机号 → 到场扫固定二维码 → `POST /api/cc/checkin/self`（幂等）→ 活动后问卷草稿/提交。
 
 **机构管理员日常**：建活动（draft）→ （如机构开审核则提交审批）→ 发布 → 审核报名（transition，事务内名额硬校验）→ 现场工作台开放签到、配对与问卷 → 用五步向导按范围/数据域/行列生成 XLSX 或 CSV ZIP → 培训同理。旧 v1 固定 13 CSV 仅作一个发布窗口的兼容入口。
 
