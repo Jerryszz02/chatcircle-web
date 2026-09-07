@@ -45,6 +45,19 @@ export function countLockedQuestions(schema: unknown): number {
   return extractTemplateQuestions(schema).filter((q) => q.locked).length;
 }
 
+/**
+ * 从 schema_json 提取原始题目行（保留 options_json/order_index 等完整字段），
+ * 供内容预览用参与者端渲染组件真实渲染；结构不符时返回空数组。
+ */
+export function extractTemplateQuestionRows(schema: unknown): Record<string, unknown>[] {
+  if (typeof schema !== 'object' || schema === null) return [];
+  const questions = (schema as { questions?: unknown }).questions;
+  if (!Array.isArray(questions)) return [];
+  return questions.filter(
+    (q): q is Record<string, unknown> => typeof q === 'object' && q !== null,
+  );
+}
+
 /** 解析并校验发布新版本时输入的 schema JSON 文本。返回错误文案，合法返回 null。 */
 export function validateSchemaJsonText(text: string): string | null {
   if (text.trim() === '') return '请填写题目定义 JSON';

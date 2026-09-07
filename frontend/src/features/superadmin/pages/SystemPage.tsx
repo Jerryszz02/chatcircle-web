@@ -10,15 +10,12 @@ import { SuperLayout } from '../SuperLayout';
 import { useSuperToast } from '../hooks';
 import { createSurveyTemplate, publishTemplateVersion } from '../api';
 import { BackupAlarmBanner } from '../components/BackupAlarmBanner';
+import { TemplatePreviewModal } from '../components/TemplatePreviewModal';
 import { TemplateSchemaEditor } from '../components/TemplateSchemaEditor';
 import { useBackupStatus } from '../hooks';
 import { formatDateTime } from '../lib/format';
 import { ACTIVE_STATUS_LABELS } from '../lib/labels';
-import {
-  countLockedQuestions,
-  extractTemplateQuestions,
-  type TemplateQuestionView,
-} from '../lib/templates';
+import { countLockedQuestions, extractTemplateQuestions } from '../lib/templates';
 
 /**
  * 系统与模板（/super/system）。
@@ -148,11 +145,6 @@ export function SuperSystemPage() {
     }
   };
 
-  const previewQuestions: TemplateQuestionView[] = useMemo(
-    () => (previewVersion ? extractTemplateQuestions(previewVersion.schema_json) : []),
-    [previewVersion],
-  );
-
   const selectedTemplate = templates?.find((t) => t.id === selectedTemplateId) ?? null;
 
   return (
@@ -257,6 +249,13 @@ export function SuperSystemPage() {
                         <div className="sa-actions">
                           <Button
                             variant="secondary"
+                            disabled={!current}
+                            onClick={() => current && setPreviewVersion(current)}
+                          >
+                            预览
+                          </Button>
+                          <Button
+                            variant="secondary"
                             onClick={() =>
                               setSelectedTemplateId(
                                 selectedTemplateId === tpl.id ? null : tpl.id,
@@ -340,35 +339,14 @@ export function SuperSystemPage() {
         ) : null}
       </Card>
 
-      {/* 版本题目预览（锁定题标识） */}
-      <Modal
+      {/* 版本内容预览：真实渲染参与者填写样式（含锁定题/敏感题标识） */}
+      <TemplatePreviewModal
+        key={previewVersion?.id ?? 'preview-closed'}
         open={previewVersion !== null}
-        title={`版本题目：v${previewVersion?.version ?? ''}`}
+        title={`内容预览：v${previewVersion?.version ?? ''}`}
+        schemaJson={previewVersion?.schema_json ?? null}
         onClose={() => setPreviewVersion(null)}
-      >
-        {previewQuestions.length === 0 ? (
-          <p className="sa-muted">该版本未包含可解析的题目定义。</p>
-        ) : (
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {previewQuestions.map((q) => (
-              <li key={q.question_code} className="sa-question-item">
-                <div>
-                  <code>{q.question_code}</code> {q.title}
-                </div>
-                <div className="sa-actions" style={{ marginTop: '0.25rem' }}>
-                  <span className="sa-badge">{q.question_type}</span>
-                  {q.locked ? <span className="sa-badge sa-badge-danger">锁定题（机构不可改）</span> : null}
-                  {q.is_sensitive ? <span className="sa-badge sa-badge-warn">敏感题</span> : null}
-                  {q.required ? <span className="sa-badge sa-badge-info">必填</span> : null}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="sa-muted">
-          锁定题由超级管理员维护，机构不能修改或删除（FR-SUR-001）；敏感题在普通导出中按标记排除（FR-SUR-012）。
-        </p>
-      </Modal>
+      />
 
       {/* 发布新版本（可视化编辑器；已发布版本不可变，FR-SUR-011） */}
       <Modal
