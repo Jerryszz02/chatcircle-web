@@ -6,7 +6,7 @@
 
 | 编号 | 变更 | 验证与边界 |
 | --- | --- | --- |
-| F01 | Docker、Compose、CI 默认 PocketBase 升至 0.39.7；Docker/CI 校验官方压缩包 SHA-256 | 真实 0.28.4 业务测试库升级、数据读取、新版备份下载和隔离恢复、旧版一致副本回滚均通过；生产镜像尚未切换 |
+| F01 | Docker、Compose、CI/E2E 默认 PocketBase 升至 0.39.7；Docker/CI 校验官方压缩包 SHA-256 | 真实 0.28.4 业务测试库升级、数据读取、新版备份下载和隔离恢复、旧版一致副本回滚均通过；生产镜像尚未切换 |
 | F02 | 追加迁移 `1788948000_cc_active_auth_rules.js`，在原有授权规则上要求账号和机构 active；实时消息发送前重新读取身份状态 | 旧 token 的原生集合读写、列表/展开、自定义 API、已有实时连接停用测试通过；重新启用恢复正常，超管和公开文章边界保留 |
 | F03 | 所有同码定义共同判敏；逐答案输出再次检查来源定义；预览、创建、字典使用同一敏感结论 | 标准敏感 FULL_NAME 被机构非敏感同码覆盖时仍要求机构开关与确认；授权后历史值与敏感审计正确 |
 | F04 | 短事务在调用短信提供商前原子预占一次验证额度；网络调用在事务外，消费仍在业务事务内 | 15 个并发错误请求只调用 mock 提供商 5 次；第 5 次可成功；延迟错误不会反转 consumed；提供商异常耗额度并允许余量内重试 |
@@ -32,6 +32,7 @@ PocketBase 修复依据：[官方安全公告 GHSA-84vh-m24q-wjjx](https://githu
 | `node deploy/verify-release-config.mjs` | 26/26 通过 |
 | `python3 -m unittest discover -s deploy -p 'test_*.py'` | 2/2 通过；仅脚本单元测试，不等于 OSS 实际恢复 |
 | frontend：`npm run lint && npm run test && npm run build` | lint、429/429 单测、TypeScript 和构建通过；现有大 bundle 提示仍存在 |
+| e2e：`PB_BINARY=/tmp/cc-pb-patched/pocketbase npm test` | Chromium 360×740 主链路 5/5 通过 |
 | 浏览器 `/login` | 登录方式选项可切到用户名，提示与表单可见 |
 | `git diff --check` | 通过 |
 

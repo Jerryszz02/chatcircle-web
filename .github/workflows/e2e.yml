@@ -19,7 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PB_VERSION: '0.28.4'
+  PB_VERSION: '0.39.7'
+  PB_SHA256: '0fe09a4e1a8f6e5b53d206c2e6b94a5812febcb43082d66d69bc8ba4d8e8429c'
 
 jobs:
   e2e:
@@ -39,6 +40,7 @@ jobs:
         run: |
           curl -fSL -o /tmp/pocketbase.zip \
             "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip"
+          echo "${PB_SHA256}  /tmp/pocketbase.zip" | sha256sum -c -
           unzip -o /tmp/pocketbase.zip -d /tmp/pocketbase
           /tmp/pocketbase/pocketbase --version
       - name: 安装前端与 E2E 依赖
