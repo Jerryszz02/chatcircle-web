@@ -200,7 +200,7 @@ docker compose --project-name chatcircle \
   up --no-deps -d backup
 ```
 
-只更新 backup 服务，不重建 app；等待容器安装 `util-linux` 并复制脚本后，确认 `/etc/periodic/daily/backup` 含 `# cc-backup-lock-v1` 且 `command -v flock` 成功，再重跑固定 SHA 的部署。在正式部署接管配置前保留该独立 checkout。此一次性操作不能在旧备份尚未结束时执行。
+只更新 backup 服务，不重建 app；等待容器安装 `flock` 并复制脚本后，确认 `/etc/periodic/daily/backup` 含 `# cc-backup-lock-v1` 且 `command -v flock` 成功，再重跑固定 SHA 的部署。在正式部署接管配置前保留该独立 checkout。此一次性操作不能在旧备份尚未结束时执行。
 
 恢复属于运维操作，执行前必须确认目标环境和备份文件，并事后补写恢复审计。最小流程：停止 app → 从最近一致备份恢复 `pb_data` → 启动 app → 校验账号、机构、活动、报名、签到、问卷与答卷。
 

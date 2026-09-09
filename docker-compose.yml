@@ -70,9 +70,9 @@ services:
       # 固定 Asia/Shanghai 让每日备份在业务低谷（北京 02:00）执行
       TZ: Asia/Shanghai
     # alpine 基础镜像未内置 tzdata，命名时区 Asia/Shanghai 需其数据文件，
-    # 启动时安装时区数据与 util-linux（提供备份互斥锁 flock）。
+    # 启动时安装时区数据与 flock（util-linux 的独立文件锁包）。
     command: >
-      sh -c "apk add --no-cache tzdata util-linux
+      sh -c "apk add --no-cache tzdata flock
       && mkdir -p /etc/periodic/daily
       && cp /deploy/backup.sh /etc/periodic/daily/backup
       && chmod +x /etc/periodic/daily/backup
