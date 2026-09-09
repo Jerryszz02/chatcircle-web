@@ -205,7 +205,16 @@ jobs:
           git merge-base --is-ancestor "$previous_sha" "$target_sha"
           docker image inspect "chatcircle-app:$target_sha" >/dev/null
           # Keep an application-consistent recovery point before automatic migrations.
-          docker compose exec -T backup sh /etc/periodic/daily/backup
+          # The running service may still contain the pre-lock script on first rollout.
+          # Fail before changing production if cron and this call cannot share the lock.
+          docker compose exec -T backup sh -eu -c '
+            command -v flock >/dev/null
+            if ! grep -qx "# cc-backup-lock-v1" /etc/periodic/daily/backup; then
+              echo "ERROR: backup service needs the serialized backup script; follow deploy/README.md before retrying" >&2
+              exit 1
+            fi
+            exec sh /etc/periodic/daily/backup
+          '
 
           git checkout main
           git merge --ff-only "$target_sha"

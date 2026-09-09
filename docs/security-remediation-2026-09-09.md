@@ -63,3 +63,9 @@ MCP 超管凭据权限边界仍在。改为专用受限身份需要新增服务�
 ### 远端 CI 新发现：Hono 间接依赖
 
 首次 PR 依赖扫描在 `mcp/package-lock.json` 的 Hono 4.13.3 上检出 GHSA-crvj-82cr-hjcx、GHSA-g6gw-c38x-mqfc、GHSA-gqvv-2mrq-wpjv 三项中危漏洞。[官方修复说明](https://github.com/honojs/hono/releases/tag/v4.13.5) 指明 4.13.5 起修复。锁文件已在 MCP SDK 现有兼容范围内更新到 4.13.7，仅变更该包；`npm ci` 和临时库 MCP 自检通过。远端扫描结果以 PR 当前提交的检查为准。
+
+### PR review：部署备份与 cron 互斥
+
+针对 review `discussion_r3968521250`，备份脚本在首次 HTTP 调用之前持有共享卷上的阻塞 `flock`，直到副本清理、标记及审计结束；失败退出释放锁。随机归档后缀避免同秒调用覆盖，异地上传验证兼容新旧命名。首次发布会拒绝调用旧容器内尚未带锁的脚本，backup 服务的一次性升级步骤见 [部署手册](../deploy/README.md#5-备份与恢复)。
+
+两个重叠调用用例在旧脚本上均复现失败；修改后 Python 备份测试 5/5、发布 Node 测试 18/18、发布配置 26/26、shell 语法及 diff 检查通过。HTTP 由本机假命令模拟；macOS 用内核 flock 兼容命令验证互斥，Linux CI 使用系统 flock。没有执行生产备份或容器升级。

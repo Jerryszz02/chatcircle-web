@@ -17,7 +17,9 @@ class OffsiteTests(unittest.TestCase):
         now = datetime.now(timezone.utc)
         marker = {'result': 'success', 'file': 'cc_daily_20260905_020000.zip', 'bytes': 100, 'finished_at': now.isoformat()}
         self.assertEqual(offsite.validate_marker(marker, now), marker['file'])
-        for change in [{'result': 'failure'}, {'file': '../data.db'}, {'bytes': 0}, {'finished_at': (now - timedelta(hours=27)).isoformat()}]:
+        unique = {**marker, 'file': 'cc_daily_20260905_020000_0123456789abcdef.zip'}
+        self.assertEqual(offsite.validate_marker(unique, now), unique['file'])
+        for change in [{'file': 'cc_daily_20260905_020000_../data.db.zip'}, {'result': 'failure'}, {'file': '../data.db'}, {'bytes': 0}, {'finished_at': (now - timedelta(hours=27)).isoformat()}]:
             with self.assertRaises(ValueError):
                 offsite.validate_marker({**marker, **change}, now)
 
