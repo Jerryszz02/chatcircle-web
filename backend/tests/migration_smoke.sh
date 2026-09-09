@@ -23,8 +23,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 MIGRATIONS_DIR="$BACKEND_DIR/pb_migrations"
 HOOKS_DIR="$BACKEND_DIR/pb_hooks"
-PB_VERSION="0.28.4"
-PB="$BACKEND_DIR/pocketbase"
+PB_VERSION="${PB_VERSION:-0.39.7}"
+PB="${CC_PB_BINARY:-${PB_BINARY:-$BACKEND_DIR/pocketbase}}"
 PORT="${CC_SMOKE_PORT:-8099}"
 BASE="http://127.0.0.1:$PORT"
 
@@ -56,19 +56,27 @@ if [ ! -x "$PB" ]; then
   esac
   DOWNLOAD_DIR="$(mktemp -d /tmp/cc_pb_download_XXXXXX)"
   curl -fsSL -o "$DOWNLOAD_DIR/pocketbase.zip" "https://github.com/pocketbase/pocketbase/releases/download/v$PB_VERSION/pocketbase_${PB_VERSION}_${PLAT}.zip"
-  unzip -o -q "$DOWNLOAD_DIR/pocketbase.zip" pocketbase -d "$BACKEND_DIR"
+  unzip -o -q "$DOWNLOAD_DIR/pocketbase.zip" pocketbase -d "$(dirname "$PB")"
+  if [ "$(basename "$PB")" != pocketbase ]; then mv "$(dirname "$PB")/pocketbase" "$PB"; fi
   rm -rf "$DOWNLOAD_DIR"
 fi
 
 # --- 1. 临时数据目录 + 退出清理 ------------------------------------------------
 WORK="$(mktemp -d /tmp/cc_mig_smoke_XXXXXX)"
 DATA_DIR="$WORK/pb_data"
+MIGRATIONS_SNAPSHOT="$WORK/pb_migrations"
+HOOKS_SNAPSHOT="$WORK/pb_hooks"
 SERVE_PID=""
 cleanup() {
   if [ -n "$SERVE_PID" ] && kill -0 "$SERVE_PID" 2>/dev/null; then kill "$SERVE_PID" 2>/dev/null || true; fi
   rm -rf "$WORK"
 }
 trap cleanup EXIT
+
+# Keep the migration and hook inputs immutable for this run; PocketBase watches
+# JSVM files and may restart when another worker edits the shared checkout.
+cp -R "$MIGRATIONS_DIR" "$MIGRATIONS_SNAPSHOT"
+cp -R "$HOOKS_DIR" "$HOOKS_SNAPSHOT"
 
 MIG_COUNT="$(find "$MIGRATIONS_DIR" -maxdepth 1 -name '*.js' | wc -l | tr -d ' ')"
 info "迁移文件数：${MIG_COUNT}（目录 ${MIGRATIONS_DIR}）"
@@ -80,7 +88,7 @@ run_migrate() {
   local desc="$1" log="$2"
   shift 2
   local code=0
-  "$PB" migrate "$@" --dir "$DATA_DIR" --migrationsDir "$MIGRATIONS_DIR" --hooksDir "$HOOKS_DIR" > "$log" 2>&1 || code=$?
+  "$PB" migrate "$@" --dir "$DATA_DIR" --migrationsDir "$MIGRATIONS_SNAPSHOT" --hooksDir "$HOOKS_SNAPSHOT" > "$log" 2>&1 || code=$?
   if [ "$code" -ne 0 ] || grep -q '^Error' "$log"; then
     bad "${desc}（失败，输出如下）"
     cat "$log"
@@ -162,7 +170,7 @@ run_migrate "再次 migrate up（down→up 往返）成功" "$WORK/up2.log" up
 # --- 4. serve + API 抽查 ---------------------------------------------------------
 info "步骤 4/5：创建超管并启动 serve"
 "$PB" superuser create smoke@example.com smoke-pass-123 --dir "$DATA_DIR" > /dev/null 2>&1
-"$PB" serve --dir "$DATA_DIR" --migrationsDir "$MIGRATIONS_DIR" --hooksDir "$HOOKS_DIR" --http "127.0.0.1:$PORT" > "$WORK/serve.log" 2>&1 &
+"$PB" serve --dir "$DATA_DIR" --migrationsDir "$MIGRATIONS_SNAPSHOT" --hooksDir "$HOOKS_SNAPSHOT" --http "127.0.0.1:$PORT" > "$WORK/serve.log" 2>&1 &
 SERVE_PID=$!
 
 for _ in $(seq 1 30); do

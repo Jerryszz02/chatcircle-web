@@ -71,7 +71,7 @@ onRecordAuthWithPasswordRequest((e) => {
       if (now - last < GC_INTERVAL_SEC) return;
       const cutoff = ccRateDt(now - GC_TTL_SEC);
       $app.runInTransaction((txApp) => {
-        const stale = txApp.findRecordsByFilter('cc_rate_counters', 'updated < {:t}', '', 500, 0, { t: cutoff });
+        const stale = txApp.findRecordsByFilter('cc_rate_counters', "updated < {:t} && key !~ 'cc_rl|export|active|'", '', 500, 0, { t: cutoff });
         for (const rec of stale) txApp.delete(rec);
       });
       $app.store().set('cc_rl_gc_last', String(now));

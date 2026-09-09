@@ -282,10 +282,25 @@ routerAdd('POST', '/api/cc/exports/preview', (e) => {
     });
     return { orgConstraint, activities, organizationIds };
   };
+  const exportV2FindAll = (collection, filter, sort, params) => {
+    const out = [];
+    const pageSize = 500;
+    let offset = 0;
+    for (;;) {
+      const page = $app.findRecordsByFilter(collection, filter, sort || 'id', pageSize, offset, params || {});
+      if (!page || page.length === 0) break;
+      out.push(...page);
+      if (page.length < pageSize) break;
+      offset += pageSize;
+    }
+    return out;
+  };
+  // 判敏（api-design §6.2）：账号敏感系统列 + is_sensitive 字段/题目；preview 与 create 同一函数
   const exportV2AnalyzeSelection = (selection, scopeOrgIds, scopeActivityIds) => {
     const reasons = [];
     const unknown = [];
     const fieldDefByCode = {};
+    const fieldDefSensitiveByCode = {};
     // 每个 field_code 的全部 scoped definition id（机构覆盖标准同码/超管跨机构时不止一个；取值反查遍实用）
     const fieldDefIdsByCode = {};
     const questionByKey = {};
@@ -300,18 +315,18 @@ routerAdd('POST', '/api/cc/exports/preview', (e) => {
     });
     selection.columns.registration_field_codes.forEach((code) => {
       let def = null;
-      const found = $app.findRecordsByFilter(
+      const found = exportV2FindAll(
         'registration_field_defs',
         "field_code = {:c} && (organization_id = '' || " + exportV2OrgInClause(scopeOrgIds) + ')',
         '',
-        10,
-        0,
         { c: code },
       );
       fieldDefIdsByCode[code] = [];
+      let anySensitive = false;
       found.forEach((d) => {
         fieldDefIdsByCode[code].push(d.id);
         if (d.get('organization_id') !== '') def = d;
+        if (d.get('is_sensitive')) anySensitive = true;
       });
       if (!def && found.length > 0) def = found[0];
       if (!def) {
@@ -319,7 +334,8 @@ routerAdd('POST', '/api/cc/exports/preview', (e) => {
         return;
       }
       fieldDefByCode[code] = def;
-      if (def.get('is_sensitive')) pushReason('registration_field', code);
+      fieldDefSensitiveByCode[code] = anySensitive;
+      if (anySensitive) pushReason('registration_field', code);
     });
     selection.columns.survey_questions.forEach((qs) => {
       let survey = null;
@@ -350,7 +366,7 @@ routerAdd('POST', '/api/cc/exports/preview', (e) => {
         if (q.get('is_sensitive')) pushReason('survey_question', qc);
       });
     });
-    return { requiresSensitive: reasons.length > 0, reasons, unknown, fieldDefByCode, fieldDefIdsByCode, questionByKey };
+    return { requiresSensitive: reasons.length > 0, reasons, unknown, fieldDefByCode, fieldDefSensitiveByCode, fieldDefIdsByCode, questionByKey };
   };
   const exportV2BuildUniverse = (selection, activities) => {
     const filters = selection.filters;

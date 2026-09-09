@@ -189,6 +189,19 @@ docker compose exec backup sh /etc/periodic/daily/backup
 docker compose exec backup cat /backups/last_backup.json
 ```
 
+备份脚本使用备份卷中的 `.backup.lock` 阻塞锁，cron 和部署调用会排队，锁覆盖创建、下载、清理、结果标记及审计全过程；失败退出同样释放锁。不要删除锁文件，否则等待进程可能锁住不同 inode。归档文件名带随机后缀，避免同秒完成的两次调用覆盖文件；异地上传兼容新旧文件名。
+
+**首次升级到带锁脚本**：旧容器在启动时复制脚本，更新 Git 不会改变其 cron 副本。部署发现旧副本或缺少 `flock` 时会在切换生产版本前停止。需要先更新 backup 服务：避开每日 02:00 窗口，用 `docker compose exec backup ps` 确认没有尚在运行的备份，等待其完成后，再用已审核版本的独立 checkout 更新这一服务。示例（项目名应与现有 Compose 项目一致）：
+
+```sh
+docker compose --project-name chatcircle \
+  --env-file /opt/chatcircle/.env \
+  -f /path/to/reviewed-checkout/docker-compose.yml \
+  up --no-deps -d backup
+```
+
+只更新 backup 服务，不重建 app；等待容器安装 `flock` 并复制脚本后，确认 `/etc/periodic/daily/backup` 含 `# cc-backup-lock-v1` 且 `command -v flock` 成功，再重跑固定 SHA 的部署。在正式部署接管配置前保留该独立 checkout。此一次性操作不能在旧备份尚未结束时执行。
+
 恢复属于运维操作，执行前必须确认目标环境和备份文件，并事后补写恢复审计。最小流程：停止 app → 从最近一致备份恢复 `pb_data` → 启动 app → 校验账号、机构、活动、报名、签到、问卷与答卷。
 
 异地 OSS 上传、加密、30 天生命周期、定时任务与恢复验收见 [异地备份手册](offsite-backup.md)。脚本需显式配置后启用，当前未验证真实异地副本。隐私政策、管理员 SMTP 与保留期限执行见 [隐私运营手册](../docs/privacy-operations.md)。

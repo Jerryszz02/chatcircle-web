@@ -1,8 +1,8 @@
 name: Deploy
 
-# main 分支有推送（含 PR 合并）时自动部署到阿里云 ECS。
+# main 推送的 CI 成功后，部署其固定提交到阿里云 ECS。
 # 部署分两阶段：先在临时 worktree 中用生产 .env 校验目标版本、拉取依赖镜像并构建，
-# 只有预检成功才更新 /opt/chatcircle 的 main 并重建运行中的服务。
+# 只有预检成功才更新 /opt/chatcircle 的 main 并启动同一提交的预构建镜像。
 # 这样缺失生产环境变量、镜像拉取或 Docker 构建失败时，不会先改动生产工作区。
 #
 # 所需 Secrets（Settings → Secrets and variables → Actions）：
@@ -15,9 +15,16 @@ name: Deploy
 # docker-compose.override.yml 会被拒绝，避免旧的 8443/明文临时配置继续覆盖仓库配置。
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-  workflow_dispatch: # 允许在 Actions 页面手动触发重新部署
+  workflow_dispatch:
+    inputs:
+      deploy_sha:
+        description: '要部署的完整提交 SHA（必须已有 CI 成功）'
+        required: true
+        type: string
 
 # 部署不取消中途运行，避免半截部署；新提交排队等上一次部署完成
 concurrency:
@@ -25,8 +32,56 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify-ci:
+    name: 验证固定提交的 CI 成功
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      target_sha: ${{ steps.verify.outputs.target_sha }}
+    steps:
+      - id: verify
+        name: 验证 CI 运行结果
+        uses: actions/github-script@v7
+        env:
+          REQUESTED_SHA: ${{ inputs.deploy_sha }}
+        with:
+          script: |
+            const sha = context.eventName === 'workflow_run'
+              ? context.payload.workflow_run.head_sha
+              : process.env.REQUESTED_SHA || '';
+            if (!/^[0-9a-f]{40}$/.test(sha)) {
+              core.setFailed(`部署 SHA 必须是 40 位十六进制值：${sha}`);
+              return;
+            }
+            if (context.eventName === 'workflow_run'
+                && (context.payload.workflow_run.conclusion !== 'success'
+                  || context.payload.workflow_run.event !== 'push'
+                  || context.payload.workflow_run.head_branch !== 'main')) {
+              core.setFailed(`CI 未成功（${context.payload.workflow_run.conclusion || '未完成'}），拒绝部署 ${sha}`);
+              return;
+            }
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'ci.yml',
+              head_sha: sha,
+              status: 'completed',
+              per_page: 20,
+            });
+            const success = data.workflow_runs.some((run) => run.conclusion === 'success'
+              && run.event === 'push' && run.head_branch === 'main' && run.head_sha === sha);
+            if (!success) {
+              core.setFailed(`未找到提交 ${sha} 的成功 CI 运行，拒绝部署`);
+              return;
+            }
+            core.setOutput('target_sha', sha);
+            core.info(`CI success verified for ${sha}`);
+
   deploy:
     name: 预检并部署到阿里云 ECS
+    needs: verify-ci
     runs-on: ubuntu-latest
     steps:
       - name: 配置 SSH
@@ -43,18 +98,21 @@ jobs:
         env:
           ECS_HOST: ${{ secrets.ECS_HOST }}
           ECS_USER: ${{ secrets.ECS_USER }}
+          DEPLOY_SHA: ${{ needs.verify-ci.outputs.target_sha }}
         run: |
-          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$ECS_USER@$ECS_HOST" 'bash -se' <<'REMOTE'
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$ECS_USER@$ECS_HOST" 'bash -se --' "$DEPLOY_SHA" <<'REMOTE'
           set -Eeuo pipefail
           cd /opt/chatcircle
+          target_sha="$1"
+          export CC_RELEASE_SHA="$target_sha"
 
           if [ -f docker-compose.override.yml ]; then
             echo "ERROR: 检测到 legacy /opt/chatcircle/docker-compose.override.yml。ICP备案完成后的正式部署禁止服务器侧 override；请先备份并移除该文件。" >&2
             exit 1
           fi
 
-          git fetch --prune origin main
-          target_sha="$(git rev-parse origin/main)"
+          git fetch --prune origin main "$target_sha"
+          git cat-file -e "$target_sha^{commit}"
           project_name="$(basename "$PWD")"
           preflight_project="${project_name}-preflight"
           candidate_dir="$(mktemp -d /tmp/chatcircle-deploy.XXXXXX)"
@@ -93,7 +151,7 @@ jobs:
           docker compose --project-name "$preflight_project" pull caddy backup
 
           # 用独立 project name 构建候选镜像，不触碰当前运行中的容器。
-          # 正式部署再次 build 时会复用 BuildKit 缓存。
+          # 正式部署直接使用这个按提交 SHA 标记的镜像，不再次构建。
           echo "Building candidate images..."
           docker compose --project-name "$preflight_project" build
 
@@ -131,20 +189,39 @@ jobs:
         env:
           ECS_HOST: ${{ secrets.ECS_HOST }}
           ECS_USER: ${{ secrets.ECS_USER }}
+          DEPLOY_SHA: ${{ needs.verify-ci.outputs.target_sha }}
         run: |
-          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$ECS_USER@$ECS_HOST" 'bash -se' <<'REMOTE'
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$ECS_USER@$ECS_HOST" 'bash -se --' "$DEPLOY_SHA" <<'REMOTE'
           set -Eeuo pipefail
           cd /opt/chatcircle
+          target_sha="$1"
+          export CC_RELEASE_SHA="$target_sha"
 
           previous_sha="$(git rev-parse HEAD)"
-          target_sha="$(git rev-parse origin/main)"
+          git cat-file -e "$target_sha^{commit}"
           echo "Deploying: $previous_sha -> $target_sha"
+
+          # A queued old run must not silently deploy a newer local main.
+          git merge-base --is-ancestor "$previous_sha" "$target_sha"
+          docker image inspect "chatcircle-app:$target_sha" >/dev/null
+          # Keep an application-consistent recovery point before automatic migrations.
+          # The running service may still contain the pre-lock script on first rollout.
+          # Fail before changing production if cron and this call cannot share the lock.
+          docker compose exec -T backup sh -eu -c '
+            command -v flock >/dev/null
+            if ! grep -qx "# cc-backup-lock-v1" /etc/periodic/daily/backup; then
+              echo "ERROR: backup service needs the serialized backup script; follow deploy/README.md before retrying" >&2
+              exit 1
+            fi
+            exec sh /etc/periodic/daily/backup
+          '
 
           git checkout main
           git merge --ff-only "$target_sha"
+          test "$(git rev-parse HEAD)" = "$target_sha"
 
-          # 预检已经验证配置、拉取依赖镜像并构建；这里正常会命中缓存。
-          docker compose up --build -d
+          # Run the exact image built during preflight, without a second build/pull.
+          docker compose up --no-build --pull never -d
 
           # 生产 app 不向 host 发布 8090；按容器 healthcheck 状态判定健康。
           # 最多等待约 90 秒（45 × 2s）。
@@ -172,5 +249,9 @@ jobs:
           fi
 
           docker compose ps
+          revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$app_id")"
+          test "$revision" = "$target_sha"
+          curl --fail --silent --show-error --retry 3 --connect-timeout 10 --max-time 20 \
+            https://chatcircle.empact.cn/api/cc/health >/dev/null
           echo "Deploy healthy: $target_sha"
           REMOTE

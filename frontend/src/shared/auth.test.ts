@@ -139,3 +139,21 @@ describe('三角色 auth store（technical-design §5.4）', () => {
     expect(currentRole()).toBe('admin');
   });
 });
+
+
+describe('参与者登录身份消歧', () => {
+  it.each([
+    ['username', '13800009001', { identity_type: 'username', username: '13800009001', password: 'secret123' }],
+    ['phone', '13800009001', { identity_type: 'phone', phone: '13800009001', password: 'secret123' }],
+    ['auto', '12345678', { identity_type: 'username', username: '12345678', password: 'secret123' }],
+  ] as const)('%s 登录保留明确的身份类型', async (type, identity, expected) => {
+    const mock = stubApi({
+      'POST /api/cc/auth/participant': { body: {
+        token: makeToken(), record: { id: 'p1', collectionName: 'participant_accounts' },
+      } },
+    });
+    await participantAuth.login(identity, 'secret123', type);
+    expect(mock.calls).toHaveLength(1);
+    expect(mock.bodyOf(0)).toEqual(expected);
+  });
+});

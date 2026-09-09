@@ -7,7 +7,7 @@ Chat Circles 后端为单个 PocketBase 实例：认证、业务 API、collectio
 | 路径 | 内容 |
 | --- | --- |
 | `pb_migrations/` | 全部 schema 变更（集合、字段、索引、API rules），版本化管理。**schema 只能经迁移变更**，禁止在生产环境用 admin UI 手工改结构。当前含 26 个业务/内部集合的 28 个 JS 迁移；T2 的 `1787880000` 增加现场字段与 `activity_pairs`，T1 的 `1787895000` 增加参与者手机号字段与内部 challenge 集合。 |
-| `pb_hooks/` | 全部服务端业务规则（JS），按领域分文件（`auth.pb.js`、`registrations.pb.js` 等）。**0.28.4 JSVM 各 hooks 文件作用域完全隔离**，共享函数以 `lib/` 为契约标准源、在 handler 内内联（勿手工改副本）。 |
+| `pb_hooks/` | 全部服务端业务规则（JS），按领域分文件（`auth.pb.js`、`registrations.pb.js` 等）。**0.39.7 JSVM 各 hooks 文件作用域完全隔离**，共享函数以 `lib/` 为契约标准源、在 handler 内内联（勿手工改副本）。 |
 | `tests/` | 服务端测试：`integration/` 集成测试套件（L3，CI 必过）+ `migration_smoke.sh` 迁移冒烟，见下文「测试」。 |
 | `scripts/` | 开发辅助脚本：`seed_demo.sh` 演示种子数据注入，见下文「演示种子数据」。 |
 | `pb_public/` | 前端 build 产物放置处（部署期由 Docker 构建填充，PocketBase 同源伺服），不入库。 |
@@ -19,7 +19,7 @@ Chat Circles 后端为单个 PocketBase 实例：认证、业务 API、collectio
    ```sh
    # macOS (Apple Silicon)；其他平台替换 darwin_arm64 为 linux_amd64 等
    curl -L -o /tmp/pb.zip \
-     "https://github.com/pocketbase/pocketbase/releases/download/v0.28.4/pocketbase_0.28.4_darwin_arm64.zip"
+     "https://github.com/pocketbase/pocketbase/releases/download/v0.39.7/pocketbase_0.39.7_darwin_arm64.zip"
    unzip /tmp/pb.zip -d backend/
    ```
 

@@ -402,6 +402,21 @@ onRealtimeSubscribeRequest((e) => {
 
 // 自定义 pairing 消息发送前再次按连接 auth 过滤，并把 payload 收窄到冻结的失效化字段。
 onRealtimeMessageSend((e) => {
+  // Realtime keeps an authentication snapshot. Refresh it for every outgoing
+  // record/custom message so deactivation also closes existing subscriptions.
+  const clientAuth = e.client ? e.client.get('auth') : null;
+  if (clientAuth && clientAuth.collection().name !== '_superusers') {
+    const collection = clientAuth.collection().name;
+    if (collection !== 'admin_accounts' && collection !== 'participant_accounts') return;
+    try {
+      const currentAuth = $app.findRecordById(collection, clientAuth.id);
+      if (currentAuth.get('status') !== 'active') return;
+      if (collection === 'admin_accounts') {
+        const org = $app.findRecordById('organizations', currentAuth.get('organization_id'));
+        if (org.get('status') !== 'active') return;
+      }
+    } catch (_) { return; }
+  }
   if (!e.message) {
     e.next();
     return;
@@ -416,10 +431,14 @@ onRealtimeMessageSend((e) => {
   // 发送时必须读取 client 当前保存的 auth record，才能正确覆盖多标签页/多设备连接。
   const auth = e.client ? e.client.get('auth') : null;
   const participantId = topic.slice(pairingPrefix.length);
+  let current = null;
+  if (auth && auth.collection().name === 'participant_accounts') {
+    try { current = $app.findRecordById('participant_accounts', auth.id); } catch (_) { current = null; }
+  }
   if (
-    !auth ||
+    !auth || !current ||
     auth.collection().name !== 'participant_accounts' ||
-    auth.get('status') !== 'active' ||
+    current.get('status') !== 'active' ||
     auth.id !== participantId
   ) {
     return;

@@ -363,6 +363,7 @@ function exportV2AnalyzeSelection(app, selection, scopeOrgIds, scopeActivityIds)
   const reasons = [];
   const unknown = [];
   const fieldDefByCode = {};
+  const fieldDefSensitiveByCode = {};
   // 每个 field_code 的全部 scoped definition id（机构覆盖标准同码/超管跨机构时不止一个；取值反查遍实用）
   const fieldDefIdsByCode = {};
   const questionByKey = {};
@@ -384,18 +385,19 @@ function exportV2AnalyzeSelection(app, selection, scopeOrgIds, scopeActivityIds)
   //    机构自定义与标准同码时以机构定义为准（与报名渲染的覆盖口径一致）
   selection.columns.registration_field_codes.forEach((code) => {
     let def = null;
-    const found = app.findRecordsByFilter(
+    const found = exportV2FindAll(
+      app,
       'registration_field_defs',
       "field_code = {:c} && (organization_id = '' || " + exportV2OrgInClause(scopeOrgIds) + ')',
       '',
-      10,
-      0,
       { c: code },
     );
     fieldDefIdsByCode[code] = [];
+    let anySensitive = false;
     found.forEach((d) => {
       fieldDefIdsByCode[code].push(d.id);
       if (d.get('organization_id') !== '') def = d; // 机构定义优先
+      if (d.get('is_sensitive')) anySensitive = true;
     });
     if (!def && found.length > 0) def = found[0];
     if (!def) {
@@ -403,7 +405,8 @@ function exportV2AnalyzeSelection(app, selection, scopeOrgIds, scopeActivityIds)
       return;
     }
     fieldDefByCode[code] = def;
-    if (def.get('is_sensitive')) pushReason('registration_field', code);
+    fieldDefSensitiveByCode[code] = anySensitive;
+    if (anySensitive) pushReason('registration_field', code);
   });
 
   // 3) 问卷题目：校验问卷在范围内，题目按 question_code 解析
@@ -442,9 +445,25 @@ function exportV2AnalyzeSelection(app, selection, scopeOrgIds, scopeActivityIds)
     reasons,
     unknown,
     fieldDefByCode,
+    fieldDefSensitiveByCode,
     fieldDefIdsByCode,
     questionByKey,
   };
+}
+
+/** 分页读取全部匹配记录，避免 PocketBase 的固定页大小静默截断历史定义。 */
+function exportV2FindAll(app, collection, filter, sort, params) {
+  const out = [];
+  const pageSize = 500;
+  let offset = 0;
+  for (;;) {
+    const page = app.findRecordsByFilter(collection, filter, sort || 'id', pageSize, offset, params || {});
+    if (!page || page.length === 0) break;
+    out.push(...page);
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
+  return out;
 }
 
 /** 机构 id 列表 → "organization_id = '...' || ..." 过滤片段（id 白名单校验；空列表恒假）。 */

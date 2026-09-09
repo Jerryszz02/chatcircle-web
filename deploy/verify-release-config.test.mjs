@@ -7,6 +7,9 @@ import {
   hasCandidateImagePreflightBuild,
   hasLoopbackOnlyPocketBasePort,
   hasPostDeployHealthCheck,
+  hasCiSuccessGate,
+  hasImmutableDeploySha,
+  hasManualShaCiValidation,
   hasPreflightComposeValidation,
   hasPreflightPhoneKeyValidation,
   hasPreflightSmsValidation,
@@ -151,6 +154,42 @@ test('accepts active deployment safeguards in their intended steps', () => {
   assert.equal(hasPreflightPhoneKeyValidation(source), true);
   assert.equal(hasPreflightSmsValidation(source), true);
   assert.equal(hasPostDeployHealthCheck(source), true);
+});
+
+test('requires CI success and immutable SHA binding for deployment', () => {
+  const source = `
+    on:
+      workflow_run:
+        workflows: [CI]
+      workflow_dispatch:
+        inputs:
+          deploy_sha:
+            required: true
+    jobs:
+      verify-ci:
+        steps:
+          needs: verify-ci
+          env:
+            REQUESTED_SHA: \${{ inputs.deploy_sha }}
+          const sha = context.eventName === 'workflow_run' ? context.payload.workflow_run.head_sha : process.env.REQUESTED_SHA;
+          if (!/^[0-9a-f]{40}$/.test(sha)) core.setFailed('SHA 必须是 40 位');
+          listWorkflowRuns({});
+          run.event === 'push'; run.head_branch === 'main';
+          run.conclusion === 'success';
+      deploy:
+        needs: verify-ci
+        env:
+          DEPLOY_SHA: \${{ needs.verify-ci.outputs.target_sha }}
+        run: |
+          target_sha="$1"
+          git cat-file -e "$target_sha^{commit}"
+          git worktree add --detach "$candidate_dir" "$target_sha"
+          target_sha="$1"
+          target_sha="$1"
+    `;
+  assert.equal(hasCiSuccessGate(source), true);
+  assert.equal(hasImmutableDeploySha(source), true);
+  assert.equal(hasManualShaCiValidation(source), true);
 });
 
 test('rejects host-level PocketBase health checks after host port removal', () => {

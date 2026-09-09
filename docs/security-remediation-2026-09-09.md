@@ -1,0 +1,71 @@
+# 2026-09-09 安全审查修复记录
+
+对应本地审查 `ChatCircle_代码与安全审查_2026-09-09.md`，基线为 `be0c73d`。原始审查保留不改。本次分支从刷新后的 `origin/main` 创建；以下是仓库修复与隔离测试结果，不代表已在生产部署。
+
+## 修复结果
+
+| 编号 | 变更 | 验证与边界 |
+| --- | --- | --- |
+| F01 | Docker、Compose、CI/E2E 默认 PocketBase 升至 0.39.7；Docker/CI 校验官方压缩包 SHA-256 | 真实 0.28.4 业务测试库升级、数据读取、新版备份下载和隔离恢复、旧版一致副本回滚均通过；生产镜像尚未切换 |
+| F02 | 追加迁移 `1788948000_cc_active_auth_rules.js`，在原有授权规则上要求账号和机构 active；实时消息发送前重新读取身份状态 | 旧 token 的原生集合读写、列表/展开、自定义 API、已有实时连接停用测试通过；重新启用恢复正常，超管和公开文章边界保留 |
+| F03 | 所有同码定义共同判敏；逐答案输出再次检查来源定义；预览、创建、字典使用同一敏感结论 | 标准敏感 FULL_NAME 被机构非敏感同码覆盖时仍要求机构开关与确认；授权后历史值与敏感审计正确 |
+| F04 | 短事务在调用短信提供商前原子预占一次验证额度；网络调用在事务外，消费仍在业务事务内 | 15 个并发错误请求只调用 mock 提供商 5 次；第 5 次可成功；延迟错误不会反转 consumed；提供商异常耗额度并允许余量内重试 |
+| F05 | Compose 透传 `CC_PHONE_CODE_IP_MAX`，默认 200 次/小时，合法范围 1–10000，非法值回落 200 | 同 IP 30 个合成参与者可请求；手机号、设备和重发短窗限制保留。真实活动峰值与短信费用预算仍需运营确定 |
+| F06 | 登录支持明确的 `identity_type`，页面可选自动识别/用户名/手机号；历史迁移强制用户名 | 数字用户名与另一个账号手机号冲突时按所选身份精确登录，不回退尝试另一个账号；浏览器切换确认可用 |
+| F07 | 部署改为等待 main push CI 成功，手动触发也验证完整 SHA 的成功 CI；预检、构建、Git 切换、OCI revision 校验使用同一 SHA | 执行实际 CI gate 脚本的测试覆盖失败 CI、PR CI、错 SHA 和输入注入；切换前执行现有备份服务，最终直接启动预构建镜像 |
+| F08 | 导出小时配额持久化并原子预占；每机构同时生成 2 个、每超管 4 个；请求结束只释放自己的槽位，新进程回收旧进程槽位 | 并发、每机构 10 次/小时、跨机构隔离、失败释放通过；重启后小时额度仍有效，旧进程槽位可回收。文件生命周期及磁盘预算见下文，尚无自动清理/磁盘硬配额 |
+| F09 | 同码定义按稳定 ID 分页完整读取，包括已停用历史定义；搭档姓名映射也去掉前 10 条限制 | 11 个跨机构定义的全部真实答案完整导出；1001 个定义跨 3 页仍保留末页敏感属性 |
+| T01 | 有有效签到或活动中配对时，取消报名或改角色返回 `409 ONSITE_STATE_CONFLICT` | 拒绝后数据一致；撤销现场状态后可操作；签到、配对历史保留 |
+
+PocketBase 修复依据：[官方安全公告 GHSA-84vh-m24q-wjjx](https://github.com/pocketbase/pocketbase/security/advisories/GHSA-84vh-m24q-wjjx)。发布包校验针对实际平台资产，不能跨平台复用 SHA-256。
+
+## 验证证据
+
+全部数据均来自临时数据库，短信使用 mock，未向真实号码批量发短信，未使用生产密钥。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| `CC_PB_BINARY=/tmp/cc-pb-patched/pocketbase bash backend/tests/run_integration.sh` | PocketBase 0.39.7，685/685 断言通过 |
+| `CC_PB_BINARY=/tmp/cc-pb-patched/pocketbase bash backend/tests/migration_smoke.sh` | up/down/up 与接口冒烟 62/62 通过 |
+| `CC_PB_BINARY=/tmp/cc-pb-patched/pocketbase CC_PB_OLD_BINARY="$PWD/backend/pocketbase" bash backend/tests/pocketbase_upgrade.sh` | 本次本地旧二进制为 0.28.4；升级读取、新版备份恢复、旧版副本回滚均通过 |
+| `node --test deploy/*.test.mjs backend/tests/*.test.mjs` | 发布测试 18 项、导出分析测试 4 项通过 |
+| `node deploy/verify-release-config.mjs` | 26/26 通过 |
+| `python3 -m unittest discover -s deploy -p 'test_*.py'` | 2/2 通过；仅脚本单元测试，不等于 OSS 实际恢复 |
+| frontend：`npm run lint && npm run test && npm run build` | lint、429/429 单测、TypeScript 和构建通过；现有大 bundle 提示仍存在 |
+| e2e：`PB_BINARY=/tmp/cc-pb-patched/pocketbase npm test` | Chromium 360×740 主链路 5/5 通过 |
+| 浏览器 `/login` | 登录方式选项可切到用户名，提示与表单可见 |
+| MCP：在临时 PocketBase 测试库执行 `npm run selftest --prefix mcp` | 登录、活动读取、reports 集合读取通过 |
+| `git diff --check` | 通过 |
+
+T01 在隔离的旧源码上先复现 3 个失败断言（639/642），加入保护及异常历史状态用例后为 643/643。不是每项都保存了修复前失败运行；其余结论依据本次源码检查和新增行为回归，不能描述成全部逐项完成了修复前后实验。
+
+## 升级与回滚边界
+
+1. 生产预检仍在临时 worktree 内执行，使用服务器现有 `.env`；配置或构建失败不会先改生产目录。若服务器 `.env` 显式设置了旧 `PB_VERSION`，发布前需将其更新为 `0.39.7`，否则新版校验和会使预检拒绝构建。`CC_PHONE_CODE_IP_MAX` 可按现场规模在服务器 `.env` 调整。
+2. 最终切换前调用已有 backup 服务生成一致备份；新镜像启动时自动执行追加迁移。部署失败不会自动降级已迁移数据库。
+3. 若需回滚，应停止应用写入，按备份手册将升级前一致副本恢复到独立目录，用旧版镜像验证后切换。不能仅回滚 Git 后直接打开新版迁移过的数据目录。
+4. 本地忽略的 `backend/pocketbase` 未被覆盖。开发验证应显式传入已校验的 0.39.7 二进制，具体用法见 [测试说明](../backend/tests/README.md)。
+
+## 仍需运维或范围确认的事项
+
+### F08：导出文件保留和磁盘容量
+
+本次关闭了非原子限流及并发生成缺口，但小时限流不等于磁盘或单任务内存预算。建议运行政策：导出文件保留 30 天，单份预算 100 MiB，导出目录预算 10 GiB，达到 80% 预警并安排归档；任务元数据和审计按既有审计留存要求保留。这些数值是待业务与运维确认的建议，当前未作为运行时硬限制，也未自动删除历史导出。实施自动清理前需确认保留期限及下载过期行为。
+
+### A01：异地备份
+
+仓库已有 `deploy/offsite-backup.py`、测试和 [异地备份手册](../deploy/offsite-backup.md)，包含上传后下载核对 SHA-256。实际 OSS 桶、权限、加密/保留设置、定时成功记录和生产隔离恢复记录尚未核验；本次不新建云资源。合成数据库的恢复测试不能替代生产恢复演练。
+
+### A02：MCP 服务身份
+
+MCP 超管凭据权限边界仍在。改为专用受限身份需要新增服务账号和后端权限接口，已向用户请求范围决定；本次未获得该项答复，未修改 MCP 身份接口或凭据（下述依赖补丁不改变权限）。不能因工具白名单存在就声称后端权限已收窄。
+
+### 远端 CI 新发现：Hono 间接依赖
+
+首次 PR 依赖扫描在 `mcp/package-lock.json` 的 Hono 4.13.3 上检出 GHSA-crvj-82cr-hjcx、GHSA-g6gw-c38x-mqfc、GHSA-gqvv-2mrq-wpjv 三项中危漏洞。[官方修复说明](https://github.com/honojs/hono/releases/tag/v4.13.5) 指明 4.13.5 起修复。锁文件已在 MCP SDK 现有兼容范围内更新到 4.13.7，仅变更该包；`npm ci` 和临时库 MCP 自检通过。远端扫描结果以 PR 当前提交的检查为准。
+
+### PR review：部署备份与 cron 互斥
+
+针对 review `discussion_r3968521250`，备份脚本在首次 HTTP 调用之前持有共享卷上的阻塞 `flock`，直到副本清理、标记及审计结束；失败退出释放锁。随机归档后缀避免同秒调用覆盖，异地上传验证兼容新旧命名。首次发布会拒绝调用旧容器内尚未带锁的脚本，backup 服务的一次性升级步骤见 [部署手册](../deploy/README.md#5-备份与恢复)。
+
+两个重叠调用用例在旧脚本上均复现失败；修改后 Python 备份测试 5/5、发布 Node 测试 18/18、发布配置 26/26、shell 语法及 diff 检查通过。HTTP 由本机假命令模拟；macOS 用内核 flock 兼容命令验证互斥，Linux CI 使用系统 flock。没有执行生产备份或容器升级。

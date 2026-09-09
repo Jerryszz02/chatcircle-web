@@ -36,8 +36,13 @@ RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
 : "${PB_SUPERUSER_PASSWORD:?须以环境变量注入超管密码}"
 
 mkdir -p "$DEST"
+# cc-backup-lock-v1
+# Keep this descriptor open through cleanup, marker and audit writes. Never unlink
+# the lock file: cron and deployment must keep locking the same inode.
+exec 9>"$DEST/.backup.lock"
+flock -x 9
 TS=$(date +%Y%m%d_%H%M%S)
-NAME="cc_daily_${TS}.zip"
+NAME="cc_daily_${TS}_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n').zip"
 MARKER="$DEST/last_backup.json"
 STARTED=$(date +%s)
 # 结果标记是否已写：fail() 写过后 trap 兜底不再覆盖

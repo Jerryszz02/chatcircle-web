@@ -16,7 +16,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PB_VERSION: '0.28.4'
+  PB_VERSION: '0.39.7'
+  PB_SHA256: '0fe09a4e1a8f6e5b53d206c2e6b94a5812febcb43082d66d69bc8ba4d8e8429c'
+  PB_OLD_SHA256: '44161d9e8838d3226fee7f2a857b8033f642ace1f3486a1125b99fd6b8b08532'
 
 jobs:
   frontend:
@@ -50,8 +52,11 @@ jobs:
         run: |
           curl -fSL -o /tmp/pocketbase.zip \
             "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip"
+          echo "${PB_SHA256}  /tmp/pocketbase.zip" | sha256sum -c -
           unzip -o /tmp/pocketbase.zip -d /tmp/pocketbase
           /tmp/pocketbase/pocketbase --version
+      - name: 旧 fixture 升级迁移验证
+        run: CC_PB_BINARY=/tmp/pocketbase/pocketbase bash backend/tests/pocketbase_upgrade.sh
       - name: 空目录跑通全部迁移
         run: |
           /tmp/pocketbase/pocketbase migrate up \
@@ -66,7 +71,7 @@ jobs:
       - name: T7 发布配置与隐私不变量
         run: |
           node deploy/verify-release-config.mjs
-          node --test deploy/verify-release-config.test.mjs
+          node --test deploy/*.test.mjs backend/tests/*.test.mjs
           python3 -m unittest discover -s deploy -p 'test_*.py'
 
   backend-integration:
@@ -81,10 +86,11 @@ jobs:
         run: |
           curl -fSL -o /tmp/pocketbase.zip \
             "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip"
-          unzip -o /tmp/pocketbase.zip -d backend/
-          backend/pocketbase --version
+          echo "${PB_SHA256}  /tmp/pocketbase.zip" | sha256sum -c -
+          unzip -o /tmp/pocketbase.zip -d /tmp/pocketbase
+          /tmp/pocketbase/pocketbase --version
       - name: 运行后端集成测试套件（runner 已有 python3，无其他系统依赖）
-        run: bash backend/tests/run_integration.sh
+        run: CC_PB_BINARY=/tmp/pocketbase/pocketbase bash backend/tests/run_integration.sh
 
   dependency-audit:
     # production dependency 安全门禁（test-plan §8 / production-readiness-batch-1-plan §7.4）。

@@ -139,3 +139,29 @@ export function hasPostDeployHealthCheck(workflow) {
   return /^\s*app_id="\$\(docker compose ps -q app\)"\s*$/m.test(step)
     && /docker inspect[^\n]*\.State\.Health\.Status/m.test(step);
 }
+
+export function hasCiSuccessGate(workflow) {
+  const active = stripConfigComments(workflow);
+  return /workflow_run:[\s\S]*workflows:\s*\[CI\]/m.test(active)
+    && /listWorkflowRuns\(/.test(active)
+    && /conclusion === ['"]success['"]/.test(active)
+    && /run\.event === ['"]push['"]/.test(active)
+    && /run\.head_branch === ['"]main['"]/.test(active)
+    && /^\s*needs:\s+verify-ci\s*$/m.test(active);
+}
+
+export function hasImmutableDeploySha(workflow) {
+  const active = stripConfigComments(workflow);
+  return /DEPLOY_SHA:\s*\$\{\{ needs\.verify-ci\.outputs\.target_sha \}\}/.test(active)
+    && (active.match(/target_sha="\$1"/g) || []).length >= 2
+    && /git cat-file -e "\$target_sha\^\{commit\}"/.test(active)
+    && /git worktree add --detach "\$candidate_dir" "\$target_sha"/.test(active);
+}
+
+export function hasManualShaCiValidation(workflow) {
+  const active = stripConfigComments(workflow);
+  return /workflow_dispatch:[\s\S]*deploy_sha:[\s\S]*required:\s*true/m.test(active)
+    && /context\.eventName === ['"]workflow_run['"]/.test(active)
+    && /REQUESTED_SHA:\s*\$\{\{ inputs\.deploy_sha \}\}/.test(active)
+    && /SHA 必须是 40 位/.test(active);
+}

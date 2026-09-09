@@ -19,7 +19,7 @@ def validate_marker(marker, now):
     if marker.get('result') != 'success':
         raise ValueError('本机备份未成功')
     name = marker.get('file', '')
-    if not isinstance(name, str) or not re.fullmatch(r'cc_daily_\d{8}_\d{6}\.zip', name):
+    if not isinstance(name, str) or not re.fullmatch(r'cc_daily_\d{8}_\d{6}(?:_[0-9a-f]{16})?\.zip', name):
         raise ValueError('备份文件名无效')
     finished = datetime.fromisoformat(str(marker.get('finished_at', '')).replace('Z', '+00:00'))
     age = (now - finished).total_seconds()
