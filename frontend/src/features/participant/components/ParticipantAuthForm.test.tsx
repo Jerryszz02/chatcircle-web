@@ -44,7 +44,7 @@ describe('ParticipantAuthForm 用户名密码单框', () => {
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
     expect(mock.calls).toHaveLength(1);
-    expect(mock.bodyOf(0)).toEqual({ username: 'test_user', password: 'password123' });
+    expect(mock.bodyOf(0)).toEqual({ identity_type: 'username', username: 'test_user', password: 'password123' });
   });
 
   it('错误密码：展示服务端文案（不建号语义由服务端保证，AC-06）', async () => {

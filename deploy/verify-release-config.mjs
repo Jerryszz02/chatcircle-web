@@ -17,6 +17,9 @@ import {
   hasCandidateImagePreflightBuild,
   hasLoopbackOnlyPocketBasePort,
   hasPostDeployHealthCheck,
+  hasCiSuccessGate,
+  hasImmutableDeploySha,
+  hasManualShaCiValidation,
   hasPreflightComposeValidation,
   hasPreflightPhoneKeyValidation,
   hasPreflightSmsValidation,
@@ -133,6 +136,24 @@ check(
   '部署 workflow Compose 配置预检',
   hasPreflightComposeValidation(files.deployWorkflow),
   '预检步骤缺少活动的 docker compose config -q',
+);
+
+check(
+  '部署 workflow 仅接受 CI 成功提交',
+  hasCiSuccessGate(files.deployWorkflow),
+  '部署必须等待固定提交的 CI 成功运行，并由 verify-ci job gate 保证',
+);
+
+check(
+  '预检、构建和部署使用不可变提交 SHA',
+  hasImmutableDeploySha(files.deployWorkflow),
+  '预检 worktree、构建输入和生产切换必须使用同一个固定 SHA',
+);
+
+check(
+  '手动部署验证同一 SHA 的 CI 成功',
+  hasManualShaCiValidation(files.deployWorkflow),
+  'workflow_dispatch 必须要求完整 SHA，并查询该 SHA 的成功 CI 运行',
 );
 
 check(

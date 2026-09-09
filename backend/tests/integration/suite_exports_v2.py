@@ -397,6 +397,51 @@ def run(ctx):
         rep.check('EXP2-41b 「多 def 同 code」两来源答案均归位该列（override 优先不丢值）',
                   'CC_IT_EXP2_A昵称1' in reg_xml and '同码多def昵称' in reg_xml, None)
 
+    # F03/F09 回归：同码定义超过旧 limit=10，混合敏感性并包含停用历史定义。
+    # 预览必须遍历全部定义并聚合敏感标记；创建后的 dictionary 也必须保留敏感标签。
+    hist_code = 'hist_same_code'
+    hist_orgs = [fx.create_org(base, st, '导出v2历史同码机构%d' % i, allow_sensitive=True) for i in range(11)]
+    hist_activities = []
+    for i, hist_org in enumerate(hist_orgs):
+        _, hist_admin = fx.create_admin_via_impersonate(base, st, hist_org, 'exp2_hist_admin_%d' % i)
+        hist_activities.append(fx.create_activity(base, hist_admin, hist_org, 'CC_IT_EXP2_HIST_%d' % i, '历史同码活动%d' % i))
+    for i, hist_org in enumerate(hist_orgs):
+        s_hist, definition = call(base, 'POST', '/api/collections/registration_field_defs/records', {
+            'organization_id': hist_org, 'field_code': hist_code,
+            'field_type': 'text', 'label': '历史同码%d' % i,
+            'source_type': 'custom', 'is_sensitive': i == 10,
+            'required_default': False, 'status': 'disabled' if i == 0 else 'active'}, st)
+        assert s_hist == 200, '创建历史同码定义失败：%s' % definition
+        participant_id, _, _ = fx.create_participant(base, 'exp2_hist_user_%d' % i)
+        status, registration = call(base, 'POST', '/api/collections/registrations/records', {
+            'activity_id': hist_activities[i], 'participant_id': participant_id,
+            'activity_role': 'speaker', 'status': 'approved',
+            'submitted_at': '2026-09-01 00:00:00.000Z'}, st)
+        assert status == 200, registration
+        status, answer = call(base, 'POST', '/api/collections/registration_answers/records', {
+            'registration_id': registration['id'], 'field_def_id': definition['id'],
+            'value_json': 'hist-answer-%02d' % i}, st)
+        assert status == 200, answer
+    hist_sel = _base_selection(hist_activities[-1], scope={'type': 'platform'},
+                               columns={'registration_field_codes': [hist_code]})
+    s, hist_preview = call(base, 'POST', '/api/cc/exports/preview', hist_sel, st)
+    rep.check('EXP2-43 11+条混合敏感/停用同码定义预览判敏',
+              s == 200 and hist_preview.get('requires_sensitive_export') is True, hist_preview)
+    s, hist_denied = call(base, 'POST', '/api/cc/exports', hist_sel, st)
+    rep.check('EXP2-44 同码敏感定义未确认拒绝', s == 400 and biz_code(hist_denied) == 'confirm_required', hist_denied)
+    hist_sel['confirm_sensitive'] = True
+    s, hist_created = call(base, 'POST', '/api/cc/exports', hist_sel, st)
+    rep.check('EXP2-45 同码敏感定义确认创建并写审计', s == 200 and bool(hist_created.get('export_job_id')), hist_created)
+    if s == 200:
+        s, hist_blob = call(base, 'GET', '/api/cc/exports/%s/download' % hist_created['export_job_id'], token=st, raw=True)
+        hist_files = _unzip(hist_blob)
+        hist_names = _xlsx_sheet_names(hist_files)
+        dictionary_xml = hist_files['xl/worksheets/sheet%d.xml' % (hist_names.index('data_dictionary') + 1)].decode('utf-8')
+        rep.check('EXP2-46 dictionary 对混合同码聚合敏感标记', s == 200 and hist_code in dictionary_xml and '>yes<' in dictionary_xml, None)
+        registration_xml = hist_files['xl/worksheets/sheet%d.xml' % (hist_names.index('registrations') + 1)].decode('utf-8')
+        rep.check('EXP2-47 十一份同码定义的历史答案全部输出',
+                  all('hist-answer-%02d' % i in registration_xml for i in range(11)), registration_xml[:100])
+
     # standard def 上的 channel 多选：value_json 标准 JSON 数组 → xlsx 单元格须为 JSON 字符串
     p3b, pt3b, _ = fx.create_participant(base, '%s_u4' % 'CC_IT_EXP2_A'.lower())
     reg_c = fx.register(base, pt3b, act_a, 'speaker', [

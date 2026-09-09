@@ -14,9 +14,11 @@ RUN npm run build
 
 # ---- stage 2: PocketBase 运行时 ----
 FROM alpine:3.20
-ARG PB_VERSION=0.28.4
+ARG CC_RELEASE_SHA=local
+LABEL org.opencontainers.image.revision=$CC_RELEASE_SHA
+ARG PB_VERSION=0.39.7
 # 官方 release 校验值（release 页面 checksums.txt），升级 PB_VERSION 时必须同步更新
-ARG PB_SHA256=44161d9e8838d3226fee7f2a857b8033f642ace1f3486a1125b99fd6b8b08532
+ARG PB_SHA256=0fe09a4e1a8f6e5b53d206c2e6b94a5812febcb43082d66d69bc8ba4d8e8429c
 RUN apk add --no-cache ca-certificates curl unzip
 WORKDIR /pb
 # 境内 ECS 直连 GitHub Releases 慢且偶发 EOF（2026-08-07 实测 ~16KB/s），

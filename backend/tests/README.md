@@ -83,3 +83,17 @@ impersonate，suite_trainings 即此模式），参与者一律走自定义端�
 `migration_smoke.sh` — 空库 migrate up → 全部 down → 再 up 往返 + serve 后 API 抽查
 （集合存在性、未认证拒绝、公开活动 viewRule、唯一索引、三角色隔离、无硬删除）。
 用法：`bash backend/tests/migration_smoke.sh`。
+
+### PocketBase 升级兼容性
+
+使用仓库外的已校验新版本二进制，对旧 fixture 数据库副本执行迁移，不覆盖 `backend/pocketbase` 或 `backend/pb_data`：
+
+```sh
+CC_PB_BINARY=/path/to/pocketbase-0.39.7 \
+CC_PB_OLD_BINARY=/path/to/pocketbase-0.28.4 \
+bash backend/tests/pocketbase_upgrade.sh
+```
+
+`CC_PB_BINARY` / `PB_BINARY` 也可用于两个现有 runner；并行运行时请为每个实例设置不同的 `CC_IT_PORT` 或 `CC_SMOKE_PORT`。
+
+升级脚本用旧版本和审查基线的历史迁移生成合成业务库，验证新版本迁移、旧数据读取、新版备份下载与隔离恢复，以及旧版一致副本回滚。没有本地旧二进制时，必须提供与当前平台官方资产匹配的 `PB_OLD_SHA256`，才能自动下载。日志保存在 `/tmp/chatcircle-upgrade-logs`（可用 `CC_UPGRADE_LOG_DIR` 指定）。测试不访问生产库或生产密钥。

@@ -37,7 +37,7 @@ export interface RoleAuth {
   /** 该角色对应的 PocketBase client（含独立 authStore）。 */
   readonly client: PocketBase;
   /** 登录成功后将 token + record 写入本角色的持久化 authStore。 */
-  login(identity: string, password: string): Promise<AuthModel>;
+  login(identity: string, password: string, identityType?: 'auto' | 'username' | 'phone'): Promise<AuthModel>;
   /** 主动退出：仅清除本地会话，服务端 token 自然过期（FR-AUTH-006、§12.4）。 */
   logout(): void;
   /** 当前是否持有有效（未过期）的本角色会话。 */
@@ -53,8 +53,8 @@ function makeRoleAuth(role: Role, login: RoleAuth['login']): RoleAuth {
   return {
     role,
     client,
-    async login(identity, password) {
-      const record = await login(identity, password);
+    async login(identity, password, identityType) {
+      const record = await login(identity, password, identityType);
       // 单会话互斥：本角色登录成功即清除其它角色会话，
       // 保证任一时刻全端只有一个有效会话（无论从哪个入口登录）。
       for (const other of Object.keys(pbClients) as Role[]) {
@@ -87,13 +87,16 @@ function clearOtherRoleSessions(role: Role): void {
  * 参与者：用户名或手机号 + 密码登录（T2）。identity 命中大陆手机号形态时按手机号
  * 提交（服务端 HMAC 查找），否则按用户名提交；账号不存在与密码错误同形响应。
  */
-export const participantAuth: RoleAuth = makeRoleAuth('participant', async (identity, password) => {
+export const participantAuth: RoleAuth = makeRoleAuth('participant', async (identity, password, identityType = 'auto') => {
   const compact = identity.trim().replace(/[\s-]/g, '');
   const isPhone = /^(\+86|0086)?1[3-9][0-9]{9}$/.test(compact);
+  const resolvedType = identityType === 'auto' ? (isPhone ? 'phone' : 'username') : identityType;
   const res = await apiPost<ParticipantAuthResponse>(
     pbClients.participant,
     '/api/cc/auth/participant',
-    isPhone ? { phone: compact, password } : { username: compact.toLowerCase(), password },
+    resolvedType === 'phone'
+      ? { identity_type: 'phone', phone: compact, password }
+      : { identity_type: 'username', username: compact.toLowerCase(), password },
   );
   pbClients.participant.authStore.save(res.token, res.record);
   return res.record;

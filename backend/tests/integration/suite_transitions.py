@@ -130,3 +130,69 @@ def run(ctx):
     s, r = fx.transition(base, AT, reg_fill, 'approved')
     rep.check('TRAN-19 已是目标状态 → 幂等返回 already=true',
               s == 200 and r.get('already') is True, r)
+
+    _onsite_transition_regression(ctx)
+
+
+def _onsite_transition_regression(ctx):
+    """T01: cancellation cannot leave a valid checkin/pair behind."""
+    base, st, rep, fields = ctx['base'], ctx['st'], ctx['rep'], ctx['fields']
+    org = fx.create_org(base, st, '现场状态一致性')
+    _, at = fx.create_admin_via_impersonate(base, st, org, 'onsite_transition')
+    act = fx.create_activity(base, at, org, 'CC_IT_TRAN_ONSITE', '现场迁移',
+                             fields=fx.nick_field_cfg(fields), caps=(8, 4, 4))
+    qr = fx.checkin_token(base, at, act)
+    call(base, 'POST', '/api/cc/activities/%s/checkin/open' % act, {}, at)
+    members = []
+    for role in ('speaker', 'listener'):
+        _, pt, _ = fx.create_participant(base, 'tran_onsite_' + role)
+        reg = fx.register(base, pt, act, role, fx.field_answers(fields, role))
+        assert fx.transition(base, at, reg, 'approved')[0] == 200
+        status, checked = fx.self_checkin(base, qr, pt)
+        assert status == 200, checked
+        members.append((reg, pt))
+    reg, pt = members[0]
+    status, result = fx.transition(base, at, reg, 'cancelled', reason='直接取消')
+    rep.check('TRAN-20 有效签到禁止直接取消',
+              status == 409 and biz_code(result) == 'ONSITE_STATE_CONFLICT', result)
+    # Restore the baseline fixture after demonstrating the vulnerable behavior.
+    if status == 200:
+        fx.transition(base, at, reg, 'approved', reason='复现后恢复')
+    call(base, 'POST', '/api/cc/activities/%s/pairings/start' % act, {}, at)
+    status, before = call(base, 'GET', '/api/cc/activities/%s/my-pairing' % act, token=pt)
+    assert status == 200, before
+    status, result = fx.transition(base, at, reg, 'cancelled', reason='已有搭档')
+    rep.check('TRAN-21 已配对禁止直接取消',
+              status == 409 and biz_code(result) == 'ONSITE_STATE_CONFLICT', result)
+    _, current = call(base, 'GET', '/api/collections/registrations/records/' + reg, token=st)
+    _, after = call(base, 'GET', '/api/cc/activities/%s/my-pairing' % act, token=pt)
+    # updated_at is the response generation time, not the pairing identity.
+    before.pop('updated_at', None)
+    after.pop('updated_at', None)
+    rep.check('TRAN-22 拒绝后报名仍通过且参与者配对未改变',
+              current.get('status') == 'approved' and after == before, [current, before, after])
+    if status == 200:
+        fx.transition(base, at, reg, 'approved', reason='复现后恢复')
+    # Model an inconsistent historical registration created by the old transition path.
+    seed_status, seed = call(base, 'PATCH', '/api/collections/registrations/records/' + reg,
+                             {'status': 'cancelled'}, st)
+    assert seed_status == 200, seed
+    status, result = fx.transition(base, at, reg, 'approved', reason='历史记录改角色', role='listener')
+    rep.check('TRAN-22b 历史取消记录仍有现场状态时禁止改角色',
+              status == 409 and biz_code(result) == 'ONSITE_STATE_CONFLICT', result)
+    call(base, 'PATCH', '/api/collections/registrations/records/' + reg,
+         {'status': 'approved', 'activity_role': 'speaker'}, st)
+    _, rows = call(base, 'GET',
+                   "/api/collections/checkins/records?filter=(registration_id='%s')" % reg, token=st)
+    checkin = rows['items'][0]
+    status, result = call(base, 'POST', '/api/cc/checkins/%s/revoke' % checkin['id'],
+                          {'reason': '先撤销现场参与'}, at)
+    assert status == 200, result
+    status, result = fx.transition(base, at, reg, 'cancelled', reason='撤销后取消')
+    rep.check('TRAN-23 受审计撤销签到后可以取消', status == 200, result)
+    status, result = fx.transition(base, at, reg, 'approved', reason='撤销后改角色', role='listener')
+    rep.check('TRAN-24 撤销后重新通过可改角色',
+              status == 200 and result.get('registration', {}).get('activity_role') == 'listener', result)
+    _, history = call(base, 'GET', '/api/collections/checkins/records/' + checkin['id'], token=st)
+    rep.check('TRAN-25 撤销的历史签到保留原现场角色',
+              history.get('status') == 'revoked' and history.get('onsite_role') == 'speaker', history)

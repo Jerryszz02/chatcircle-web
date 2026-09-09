@@ -77,7 +77,7 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
       if (now - last < GC_INTERVAL_SEC) return;
       const cutoff = ccRateDt(now - GC_TTL_SEC);
       $app.runInTransaction((txApp) => {
-        const stale = txApp.findRecordsByFilter('cc_rate_counters', 'updated < {:t}', '', 500, 0, { t: cutoff });
+        const stale = txApp.findRecordsByFilter('cc_rate_counters', "updated < {:t} && key !~ 'cc_rl|export|active|'", '', 500, 0, { t: cutoff });
         for (const rec of stale) txApp.delete(rec);
       });
       $app.store().set('cc_rl_gc_last', String(now));
@@ -147,11 +147,22 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
   const CC_SPRAY_MAX_FAILURES = 30;
   const CC_SPRAY_WINDOW_SEC = 600;
   const body = e.requestInfo().body || {};
-  // 身份二选一：username（小写归一化）或 phone（+86 大陆手机号，HMAC 精确查找）
+  // 身份二选一：username（小写归一化）或 phone（+86 大陆手机号，HMAC 精确查找）。
+  // identity_type 是显式消歧入口；auto 保留兼容现有客户端，但不会在显式类型下回退。
+  const identityType = String(body.identity_type == null ? 'auto' : body.identity_type);
+  if (['auto', 'username', 'phone'].indexOf(identityType) < 0) {
+    ccError(400, 'INVALID_IDENTITY_TYPE', '登录身份类型无效');
+  }
   const rawPhone = String(body.phone == null ? '' : body.phone).replace(/[\s-]/g, '');
   let username = '';
   let phoneLookupHash = '';
-  if (rawPhone !== '') {
+  const rawUsername = String(body.username == null ? '' : body.username).trim().toLowerCase();
+  if (identityType === 'username' || (identityType === 'auto' && rawPhone === '')) {
+    username = rawUsername;
+    if (!CC_USERNAME_RE.test(username)) {
+      ccError(400, 'INVALID_USERNAME', '用户名须为 4–20 位字母、数字或下划线');
+    }
+  } else if (rawPhone !== '') {
     let local = rawPhone;
     if (local.indexOf('+86') === 0) local = local.slice(3);
     else if (local.indexOf('0086') === 0) local = local.slice(4);
@@ -164,10 +175,7 @@ routerAdd('POST', '/api/cc/auth/participant', (e) => {
     }
     phoneLookupHash = $security.hs256('+86' + local, phoneHashKey);
   } else {
-    username = String(body.username == null ? '' : body.username).trim().toLowerCase();
-    if (!CC_USERNAME_RE.test(username)) {
-      ccError(400, 'INVALID_USERNAME', '用户名须为 4–20 位字母、数字或下划线');
-    }
+    ccError(400, 'INVALID_PHONE', '请输入有效的中国大陆手机号');
   }
   const password = body.password;
   if (typeof password !== 'string' || password === '') {

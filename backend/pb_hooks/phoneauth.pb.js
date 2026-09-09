@@ -29,7 +29,11 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
     const CODE_RETRY_SEC = 60;
     const PHONE_MAX = 3;
     const PHONE_WINDOW_SEC = 600;
-    const IP_MAX = Number($os.getenv('CC_PHONE_CODE_IP_MAX') || '20');
+    // Shared egress is common at events; invalid configuration falls back to the bounded default.
+    const configuredIpMax = Number($os.getenv('CC_PHONE_CODE_IP_MAX') || '200');
+    const IP_MAX = Number.isInteger(configuredIpMax) && configuredIpMax > 0 && configuredIpMax <= 10000
+      ? configuredIpMax
+      : 200;
     const IP_WINDOW_SEC = 3600;
     const DEVICE_MAX = 5;
     const DEVICE_WINDOW_SEC = 600;
@@ -152,7 +156,7 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
         if (now - last < GC_INTERVAL_SEC) return;
         const cutoff = ccRateDt(now - GC_TTL_SEC);
         $app.runInTransaction((txApp) => {
-          const stale = txApp.findRecordsByFilter('cc_rate_counters', 'updated < {:t}', '', 500, 0, { t: cutoff });
+          const stale = txApp.findRecordsByFilter('cc_rate_counters', "updated < {:t} && key !~ 'cc_rl|export|active|'", '', 500, 0, { t: cutoff });
           for (const rec of stale) txApp.delete(rec);
         });
         $app.store().set('cc_rl_gc_last', String(now));
@@ -374,7 +378,15 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
 
     const checkCode = (provider, phone, challengeId, code) => {
       if (!/^[0-9]{4,8}$/.test(String(code || ''))) return false;
-      if (provider === 'mock') return String(code) === $os.getenv('CC_SMS_MOCK_CODE');
+      if (provider === 'mock') {
+        if ($os.getenv('CC_ENVIRONMENT') === 'test') {
+          console.log('cc_sms_mock_verify', challengeId);
+          const delay = Number(e.request.header.get('X-CC-Mock-Verify-Delay') || 0);
+          if (Number.isInteger(delay) && delay > 0 && delay <= 1000) sleep(delay);
+          if (String(code) === '99999999') ccProviderError('MOCK_PROVIDER_UNAVAILABLE', 'mock-' + challengeId);
+        }
+        return String(code) === $os.getenv('CC_SMS_MOCK_CODE');
+      }
       const params = {
         CaseAuthPolicy: '2',
         CountryCode: '86',
@@ -401,7 +413,7 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
       phone_migration_status: record.get('phone_migration_status') || 'legacy_unbound',
     });
 
-    const challengeStateError = (challenge) => {
+    const challengeStateError = (challenge, reserved) => {
       if (!challenge) ccError(400, 'code_invalid', '验证码无效，请重新获取');
       const status = challenge.get('status');
       if (status === 'consumed') ccError(409, 'challenge_consumed', '验证码已使用，请重新获取');
@@ -409,14 +421,14 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
       if (new Date(String(challenge.get('expires_at'))).getTime() <= Date.now()) {
         ccError(400, 'code_expired', '验证码已过期，请重新获取');
       }
-      if (Number(challenge.get('attempt_count') || 0) >= VERIFY_MAX_ATTEMPTS) {
+      if (!reserved && Number(challenge.get('attempt_count') || 0) >= VERIFY_MAX_ATTEMPTS) {
         ccError(400, 'code_invalid', '验证码无效，请重新获取');
       }
     };
 
-    const loadChallenge = (app, input) => {
+    const loadChallenge = (app, input, reserved) => {
       const challenge = ccById(app, 'participant_phone_challenges', String(input.challengeId || ''));
-      challengeStateError(challenge);
+      challengeStateError(challenge, reserved);
       if (
         challenge.get('phone_lookup_hash') !== input.hash ||
         challenge.get('purpose') !== input.purpose ||
@@ -428,35 +440,60 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
       return challenge;
     };
 
-    const recordInvalidAttempt = (challenge) => {
-      challenge.set('attempt_count', Number(challenge.get('attempt_count') || 0) + 1);
-      if (Number(challenge.get('attempt_count')) >= VERIFY_MAX_ATTEMPTS) {
-        challenge.set('status', 'failed');
-      }
-      $app.save(challenge);
+    // Only this request can consume the challenge IDs it has verified. Budget
+    // checks happen before the provider call, not again after the fifth attempt.
+    const verifiedChallengeIds = {};
+    const loadVerifiedChallenge = (app, input) => {
+      if (!verifiedChallengeIds[input.challengeId]) ccError(400, 'code_invalid', '验证码无效');
+      return loadChallenge(app, input, true);
     };
-
+    const challengeTransaction = (fn) => {
+      for (let attempt = 0; ; attempt++) {
+        try { return $app.runInTransaction(fn); }
+        catch (err) {
+          if (!ccRateIsBusy(err)) throw err;
+          if (attempt >= 2) ccError(429, 'too_many_attempts', '验证请求繁忙，请稍后再试');
+        }
+      }
+    };
     const verifyChallengeProvider = (challenge, phone, code) => {
-      let passed = false;
-      try {
-        passed = checkCode(challenge.get('provider'), phone, challenge.id, code);
-      } catch (err) {
+      challengeTransaction((txApp) => {
+        const current = loadChallenge(txApp, {
+          challengeId: challenge.id,
+          hash: challenge.get('phone_lookup_hash'),
+          purpose: challenge.get('purpose'),
+          participantId: String(challenge.get('participant_id') || ''),
+          changeRole: String(challenge.get('change_role') || ''),
+        });
+        current.set('attempt_count', Number(current.get('attempt_count') || 0) + 1);
+        txApp.save(current);
+      });
+      // No network operation holds the database transaction open. A failed
+      // request changes only a freshly read sent record, never a consumed one.
+      const finishFailure = () => challengeTransaction((txApp) => {
+        const current = ccById(txApp, 'participant_phone_challenges', challenge.id);
+        if (current && current.get('status') === 'sent' &&
+            Number(current.get('attempt_count') || 0) >= VERIFY_MAX_ATTEMPTS) {
+          current.set('status', 'failed');
+          txApp.save(current);
+        }
+      });
+      let passed;
+      try { passed = checkCode(challenge.get('provider'), phone, challenge.id, code); }
+      catch (err) {
+        finishFailure();
         if (err && err.__ccProviderError) {
-          $app.logger().error(
-            'Phone verification provider unavailable',
-            'provider_code',
-            err.code,
-            'request_id',
-            err.requestId,
-          );
+          $app.logger().error('Phone verification provider unavailable',
+            'provider_code', err.code, 'request_id', err.requestId);
           ccError(503, 'provider_unavailable', '验证码服务暂不可用，请稍后再试');
         }
         throw err;
       }
       if (!passed) {
-        recordInvalidAttempt(challenge);
+        finishFailure();
         ccError(400, 'code_invalid', '验证码不正确，请重试');
       }
+      verifiedChallengeIds[challenge.id] = true;
     };
 
     const consumeChallenge = (app, challenge) => {
@@ -560,7 +597,7 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
       let registered = true;
       let disabled = false;
       $app.runInTransaction((txApp) => {
-        const txChallenge = loadChallenge(txApp, {
+        const txChallenge = loadVerifiedChallenge(txApp, {
           challengeId: body.challenge_id,
           hash: hash,
           purpose: 'login_or_register',
@@ -617,7 +654,7 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
       let participant = null;
       let conflictCode = '';
       $app.runInTransaction((txApp) => {
-        const txChallenge = loadChallenge(txApp, {
+        const txChallenge = loadVerifiedChallenge(txApp, {
           challengeId: body.challenge_id,
           hash: hash,
           purpose: 'register',
@@ -699,7 +736,7 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
       let registered = true;
       let disabled = false;
       $app.runInTransaction((txApp) => {
-        const txChallenge = loadChallenge(txApp, {
+        const txChallenge = loadVerifiedChallenge(txApp, {
           challengeId: body.challenge_id,
           hash: hash,
           purpose: 'reset_password',
@@ -757,7 +794,7 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
       let conflict = false;
       $app.runInTransaction((txApp) => {
         participant = ccById(txApp, 'participant_accounts', auth.id);
-        const txChallenge = loadChallenge(txApp, {
+        const txChallenge = loadVerifiedChallenge(txApp, {
           challengeId: body.challenge_id,
           hash: hash,
           purpose: 'bind_phone',
@@ -850,14 +887,14 @@ routerAdd('POST', '/api/cc/auth/participant/{phoneAction}', (e) => {
       let conflict = false;
       $app.runInTransaction((txApp) => {
         participant = ccById(txApp, 'participant_accounts', auth.id);
-        const txNew = loadChallenge(txApp, {
+        const txNew = loadVerifiedChallenge(txApp, {
           challengeId: body.challenge_id,
           hash: newHash,
           purpose: 'change_phone',
           participantId: auth.id,
           changeRole: 'new',
         });
-        const txOld = loadChallenge(txApp, {
+        const txOld = loadVerifiedChallenge(txApp, {
           challengeId: body.old_phone_challenge_id,
           hash: oldHash,
           purpose: 'change_phone',

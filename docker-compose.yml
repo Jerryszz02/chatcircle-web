@@ -1,9 +1,11 @@
 services:
   app:
+    image: chatcircle-app:${CC_RELEASE_SHA:-local}
     build:
       context: .
       args:
-        PB_VERSION: ${PB_VERSION:-0.28.4}
+        PB_VERSION: ${PB_VERSION:-0.39.7}
+        CC_RELEASE_SHA: ${CC_RELEASE_SHA:-local}
         VITE_PB_URL: ${VITE_PB_URL:-}
     # 生产默认不向 host 发布 PocketBase 端口（安全审查 finding 8、CWE-345）：
     # 后端只在 Docker 私网内供 Caddy/backup 访问（app:8090），避免本地不可信进程
@@ -17,6 +19,7 @@ services:
       CC_ENVIRONMENT: ${CC_ENVIRONMENT:-production}
       CC_SMS_PROVIDER: ${CC_SMS_PROVIDER:-aliyun}
       CC_PHONE_HASH_KEY: ${CC_PHONE_HASH_KEY:?app 需要至少 32 字符的手机号 HMAC 密钥}
+      CC_PHONE_CODE_IP_MAX: ${CC_PHONE_CODE_IP_MAX:-200}
       ALIBABA_CLOUD_ACCESS_KEY_ID: ${ALIBABA_CLOUD_ACCESS_KEY_ID:-}
       ALIBABA_CLOUD_ACCESS_KEY_SECRET: ${ALIBABA_CLOUD_ACCESS_KEY_SECRET:-}
       ALIBABA_CLOUD_SECURITY_TOKEN: ${ALIBABA_CLOUD_SECURITY_TOKEN:-}

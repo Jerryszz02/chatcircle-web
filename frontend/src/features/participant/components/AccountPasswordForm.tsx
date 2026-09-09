@@ -12,6 +12,7 @@ import { validatePassword } from '../lib/username';
  */
 export function AccountPasswordForm({ onSuccess }: { onSuccess: () => void }) {
   const [identity, setIdentity] = useState('');
+  const [identityType, setIdentityType] = useState<'auto' | 'username' | 'phone'>('auto');
   const [password, setPassword] = useState('');
   const [identityError, setIdentityError] = useState<string | undefined>();
   const [passwordError, setPasswordError] = useState<string | undefined>();
@@ -29,7 +30,7 @@ export function AccountPasswordForm({ onSuccess }: { onSuccess: () => void }) {
 
     setSubmitting(true);
     try {
-      await participantAuth.login(identity.trim(), password);
+      await participantAuth.login(identity.trim(), password, identityType);
       onSuccess();
     } catch (err) {
       setFormError(normalizeApiError(err).message);
@@ -50,6 +51,16 @@ export function AccountPasswordForm({ onSuccess }: { onSuccess: () => void }) {
         autoCapitalize="none"
         autoCorrect="off"
       />
+      <label className="cc-field">
+        <span className="cc-label">登录方式</span>
+        <select className="cc-input" value={identityType}
+          onChange={(e) => setIdentityType(e.target.value as typeof identityType)}>
+          <option value="auto">自动识别</option>
+          <option value="username">用户名</option>
+          <option value="phone">手机号</option>
+        </select>
+        <span className="cc-hint">用户名恰好是手机号时，请选择“用户名”。</span>
+      </label>
       <Input
         label="密码"
         type="password"

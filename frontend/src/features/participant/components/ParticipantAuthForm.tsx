@@ -50,7 +50,7 @@ export function ParticipantAuthForm({
 
     setSubmitting(true);
     try {
-      await participantAuth.login(normalizeUsername(username), password);
+      await participantAuth.login(normalizeUsername(username), password, 'username');
       onSuccess();
     } catch (err) {
       setFormError(normalizeApiError(err).message);

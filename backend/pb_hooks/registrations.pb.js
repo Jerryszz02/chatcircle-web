@@ -417,6 +417,21 @@ routerAdd('POST', '/api/cc/registrations/{id}/transition', (e) => {
         if (fresh.get('status') !== from) {
           ccError(409, 'CONCURRENT_MODIFICATION', '报名状态已被其他操作变更，请刷新后重试');
         }
+        // 现场状态与报名在同一事务中核对；取消/角色变更不得留下仍有效的签到或搭档。
+        if (to === 'cancelled' || (to === 'approved' && targetRole !== fresh.get('activity_role'))) {
+          const validCheckins = txApp.findRecordsByFilter(
+            'checkins', "registration_id = {:r} && status = 'valid'", '', 1, 0,
+            { r: registrationId },
+          );
+          const activePairs = txApp.findRecordsByFilter(
+            'activity_pairs',
+            "status = 'active' && (speaker_registration_id = {:r} || listener_registration_id = {:r})",
+            '', 1, 0, { r: registrationId },
+          );
+          if (validCheckins.length || activePairs.length) {
+            ccError(409, 'ONSITE_STATE_CONFLICT', '已有有效签到或配对，请先撤销签到和配对再取消报名或修改角色');
+          }
+        }
         // 名额事务硬校验：通过/回退/改角色共用（FR-REG-005、AC-08）
         if (to === 'approved') {
           const freshActivity = txApp.findRecordById('activities', activity.id);
@@ -476,4 +491,3 @@ routerAdd('POST', '/api/cc/registrations/{id}/transition', (e) => {
     throw err;
   }
 });
-

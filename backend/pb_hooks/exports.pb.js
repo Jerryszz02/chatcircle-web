@@ -3,7 +3,7 @@
 // - POST /api/cc/exports：范围服务端校验（管理员=本机构全部或指定单活动；超管=全平台/机构/单活动，
 //   忽略客户端越权参数，FR-EXP-004）+ 敏感导出开关（机构 allow_sensitive_export，FR-ORG-005）+
 //   二次确认（confirm:true，FR-EXP-003）+ 创建限流（per 机构 10 次/小时、per 超管 20 次/小时，
-//   滑窗存 $app.store()）+ 审计（普通 export.normal / 敏感 export.sensitive，
+//   滑窗持久化于 cc_rate_counters 并在事务中预占）+ 审计（普通 export.normal / 敏感 export.sensitive，
 //   security-privacy §8.1 数据类）；同步生成 ZIP 并留痕 export_jobs（导出人/范围/时间/
 //   是否含个人信息/文件校验信息，PRD §10.3）；job 与审计同事务提交。
 // - ZIP 内容（PRD §10.1 全部 CSV 清单）：organizations / activities / participants /
@@ -24,6 +24,12 @@
 //   UTF-8 编码手工实现（JSVM 无 TextEncoder），均已实测字节级往返一致。
 // - PocketBase 0.28 JSVM 实测：handler 在请求期以全新作用域执行，文件级函数/常量对 handler
 //   不可见，故两个 handler 各自自包含，共享 lib 在 handler 内 require。
+
+// A new process invalidates abandoned active reservations without resetting hourly quotas.
+onBootstrap((e) => {
+  e.next();
+  $app.store().set('cc_export_process', $security.randomString(32));
+});
 
 // ---------------------------------------------------------------------------
 // 端点 1：POST /api/cc/exports — 创建导出任务并同步生成 ZIP
@@ -204,13 +210,70 @@ routerAdd('POST', '/api/cc/exports', (e) => {
     const pageSize = 500;
     let offset = 0;
     for (;;) {
-      const page = $app.findRecordsByFilter(collection, filter, sort || '', pageSize, offset, params || {});
+      const page = $app.findRecordsByFilter(collection, filter, sort || 'id', pageSize, offset, params || {});
       if (!page || page.length === 0) break;
       out.push(...page);
       if (page.length < pageSize) break;
       offset += pageSize;
     }
     return out;
+  };
+
+  // Hourly quotas survive restarts. Active reservations belong to this process
+  // and never expire underneath a running job; a new process reclaims crash leftovers.
+  const exportProcess = String($app.store().get('cc_export_process') || '');
+  const capacityTransaction = (fn) => {
+    for (let attempt = 0; ; attempt++) {
+      try { $app.runInTransaction(fn); return true; }
+      catch (err) {
+        if (!/busy|locked|snapshot/i.test(String(err))) throw err;
+        if (attempt >= 2) return false;
+      }
+    }
+  };
+  const capacityRecord = (app, key) => {
+    try { return app.findFirstRecordByFilter('cc_rate_counters', 'key = {:k}', { k: key }); }
+    catch (err) { if (String(err).indexOf('no rows') >= 0) return null; throw err; }
+  };
+  const capacitySlots = (rec) => {
+    if (!rec) return [];
+    const slots = decodeJson(rec.get('slots'));
+    if (!Array.isArray(slots)) throw new Error('Invalid export quota state');
+    return slots;
+  };
+  const reserveExportCapacity = (key, maxHourly, maxActive) => {
+    if (!exportProcess) return null;
+    const now = Math.floor(Date.now() / 1000);
+    const token = $security.randomString(24);
+    let reserved = false;
+    const committed = capacityTransaction((app) => {
+      const quotaKey = 'cc_rl|export|quota|' + key;
+      const activeKey = 'cc_rl|export|active|' + key;
+      const quotaRec = capacityRecord(app, quotaKey);
+      const activeRec = capacityRecord(app, activeKey);
+      const quota = capacitySlots(quotaRec).filter((ts) => typeof ts === 'number' && ts > now - 3600);
+      const active = capacitySlots(activeRec).filter((entry) => entry && entry.process === exportProcess);
+      if (quota.length >= maxHourly || active.length >= maxActive) return;
+      const save = (rec, k, slots) => {
+        const target = rec || new Record(app.findCollectionByNameOrId('cc_rate_counters'));
+        target.set('key', k); target.set('slots', slots); app.save(target);
+      };
+      save(quotaRec, quotaKey, quota.concat([now]));
+      save(activeRec, activeKey, active.concat([{ token, process: exportProcess }]));
+      reserved = true;
+    });
+    return committed && reserved ? token : null;
+  };
+  const releaseExportCapacity = (key, token) => {
+    // Keep an unreleased reservation on any failure: denying capacity is safer
+    // than releasing someone else's live job. A process restart can reclaim it.
+    capacityTransaction((app) => {
+      const rec = capacityRecord(app, 'cc_rl|export|active|' + key);
+      if (!rec) return;
+      rec.set('slots', capacitySlots(rec).filter((entry) => entry &&
+        entry.process === exportProcess && entry.token !== token));
+      app.save(rec);
+    });
   };
   // id 列表构造 'field = {:k0} || ...' 过滤
   const inFilter = (field, ids) => {
@@ -237,18 +300,17 @@ routerAdd('POST', '/api/cc/exports', (e) => {
     }
   }
 
-  // 创建限流（防大批量导出滥用）：per 机构 10 次/小时、per 超管 20 次/小时，
-  // 滑窗状态存 $app.store()（JSVM 请求间无共享内存，与 lib/ratelimit.pb.js 同存储约定）
-  const rlKey = 'cc_rl|export|' + (role === 'admin' ? auth.get('organization_id') : auth.id);
-  const rlMax = role === 'admin' ? 10 : 20;
-  const nowSec = Math.floor(Date.now() / 1000);
-  const rlKept = ($app.store().get(rlKey) || []).filter((ts) => ts > nowSec - 3600);
-  if (rlKept.length >= rlMax) {
+  const exportCapacityKey = role === 'admin' ? 'org|' + auth.get('organization_id') : 'super|' + auth.id;
+  const exportReservationToken = reserveExportCapacity(exportCapacityKey, role === 'admin' ? 10 : 20, role === 'admin' ? 2 : 4);
+  if (!exportReservationToken) {
     return jsonError(e, 429, 'TOO_MANY_ATTEMPTS', '导出请求过于频繁，请稍后再试');
   }
-  rlKept.push(nowSec);
-  $app.store().set(rlKey, rlKept);
 
+  try {
+  if ($os.getenv('CC_ENVIRONMENT') === 'test') {
+    const delay = Number(e.request.header.get('X-CC-Mock-Export-Delay') || 0);
+    if (Number.isInteger(delay) && delay > 0 && delay <= 1000) sleep(delay);
+  }
   const body = e.requestInfo().body || {};
   const scope = body.scope || {};
   const includePii = body.include_pii === true;
@@ -272,11 +334,25 @@ routerAdd('POST', '/api/cc/exports', (e) => {
     });
     return parts.length ? '(' + parts.join(' || ') + ')' : "activity_id = '__no_such_activity__'";
   };
+  const exportV2FindAll = (collection, filter, sort, params) => {
+    const out = [];
+    const pageSize = 500;
+    let offset = 0;
+    for (;;) {
+      const page = $app.findRecordsByFilter(collection, filter, sort || 'id', pageSize, offset, params || {});
+      if (!page || page.length === 0) break;
+      out.push(...page);
+      if (page.length < pageSize) break;
+      offset += pageSize;
+    }
+    return out;
+  };
   // 判敏（api-design §6.2）：账号敏感系统列 + is_sensitive 字段/题目；preview 与 create 同一函数
   const exportV2AnalyzeSelection = (selection, scopeOrgIds, scopeActivityIds) => {
     const reasons = [];
     const unknown = [];
     const fieldDefByCode = {};
+    const fieldDefSensitiveByCode = {};
     // 每个 field_code 的全部 scoped definition id（机构覆盖标准同码/超管跨机构时不止一个；取值反查遍实用）
     const fieldDefIdsByCode = {};
     const questionByKey = {};
@@ -291,18 +367,18 @@ routerAdd('POST', '/api/cc/exports', (e) => {
     });
     selection.columns.registration_field_codes.forEach((code) => {
       let def = null;
-      const found = $app.findRecordsByFilter(
+      const found = exportV2FindAll(
         'registration_field_defs',
         "field_code = {:c} && (organization_id = '' || " + exportV2OrgInClause(scopeOrgIds) + ')',
         '',
-        10,
-        0,
         { c: code },
       );
       fieldDefIdsByCode[code] = [];
+      let anySensitive = false;
       found.forEach((d) => {
         fieldDefIdsByCode[code].push(d.id);
         if (d.get('organization_id') !== '') def = d;
+        if (d.get('is_sensitive')) anySensitive = true;
       });
       if (!def && found.length > 0) def = found[0];
       if (!def) {
@@ -310,7 +386,8 @@ routerAdd('POST', '/api/cc/exports', (e) => {
         return;
       }
       fieldDefByCode[code] = def;
-      if (def.get('is_sensitive')) pushReason('registration_field', code);
+      fieldDefSensitiveByCode[code] = anySensitive;
+      if (anySensitive) pushReason('registration_field', code);
     });
     selection.columns.survey_questions.forEach((qs) => {
       let survey = null;
@@ -341,7 +418,7 @@ routerAdd('POST', '/api/cc/exports', (e) => {
         if (q.get('is_sensitive')) pushReason('survey_question', qc);
       });
     });
-    return { requiresSensitive: reasons.length > 0, reasons, unknown, fieldDefByCode, fieldDefIdsByCode, questionByKey };
+    return { requiresSensitive: reasons.length > 0, reasons, unknown, fieldDefByCode, fieldDefSensitiveByCode, fieldDefIdsByCode, questionByKey };
   };
   // v1→v2 归一化（api-design §6.3）：全数据域 + 范围内全部旧列 + csv_zip；
   // include_pii=false 只枚举非敏感字段/题目（与旧导出实际内容一致）
@@ -887,6 +964,7 @@ routerAdd('POST', '/api/cc/exports', (e) => {
           }
         }
       }
+      const sensitiveOutputAllowed = analysis.requiresSensitive && body.confirm_sensitive === true;
 
       const universe = exportV2BuildUniverseV2(selection, v2activities);
       const tzOffset = v2TimezoneOffset(selection.timezone);
@@ -900,31 +978,19 @@ routerAdd('POST', '/api/cc/exports', (e) => {
         regById[r.id] = r;
       });
       // 搭档姓名只取自该场报名的 FULL_NAME（不从账号层复用，与配对快照同口径）
-      let fullNameDefId = '';
+      const fullNameDefIds = [];
       if (sysCols.indexOf('partner_name') >= 0) {
-        const fnd = $app.findRecordsByFilter(
-          'registration_field_defs',
+        exportV2FindAll('registration_field_defs',
           "field_code = 'FULL_NAME' && (organization_id = '' || " + exportV2OrgInClause(v2OrgIds) + ')',
-          '',
-          10,
-          0,
-          {},
-        );
-        fnd.forEach((d) => {
-          if (d.get('organization_id') !== '') fullNameDefId = d.id;
-        });
-        if (!fullNameDefId && fnd.length > 0) fullNameDefId = fnd[0].id;
+          'id', {}).forEach((d) => fullNameDefIds.push(d.id));
       }
       const fullNameByReg = {};
-      if (fullNameDefId && allScopeRegs.length > 0) {
+      if (fullNameDefIds.length && allScopeRegs.length > 0) {
         const fna = inFilter('registration_id', allScopeRegs.map((r) => r.id));
-        queryAll(
-          'registration_answers',
-          '(' + fna.filter + ') && field_def_id = {:fd}',
-          Object.assign({}, fna.params, { fd: fullNameDefId }),
-          'created',
-        ).forEach((a) => {
-          fullNameByReg[a.get('registration_id')] = decodeJson(a.get('value_json'));
+        queryAll('registration_answers', fna.filter, fna.params, 'created,id').forEach((a) => {
+          if (fullNameDefIds.indexOf(a.get('field_def_id')) >= 0) {
+            fullNameByReg[a.get('registration_id')] = decodeJson(a.get('value_json'));
+          }
         });
       }
       // 手机号列仅在选择时加载账号（account 层 phone_e164；masked/full 两档）
@@ -957,6 +1023,11 @@ routerAdd('POST', '/api/cc/exports', (e) => {
         queryAll('registration_answers', f.filter, f.params, 'created').forEach((a) => {
           const code = defIdToCode[a.get('field_def_id')];
           if (!code) return;
+          // 防御性 sink guard：即使后续判敏逻辑被改动，敏感定义答案也不能落入普通导出。
+          const sourceDef = $app.findRecordById('registration_field_defs', a.get('field_def_id'));
+          if ((sourceDef.get('is_sensitive') || analysis.fieldDefSensitiveByCode[code]) && !sensitiveOutputAllowed) {
+            ccError(403, 'sensitive_export_disabled', '字段敏感属性已改变，请重新预览并确认导出');
+          }
           (regAnswerMap[a.get('registration_id')] = regAnswerMap[a.get('registration_id')] || {})[code] =
             decodeJson(a.get('value_json'));
         });
@@ -989,7 +1060,7 @@ routerAdd('POST', '/api/cc/exports', (e) => {
           dict.push({
             column: code,
             description: '报名字段「' + (def ? def.get('label') : code) + '」',
-            sensitive: def && def.get('is_sensitive') ? 'yes' : 'no',
+            sensitive: analysis.fieldDefSensitiveByCode[code] ? 'yes' : 'no',
           });
         });
         const rows = universe.registrations.map((r) => {
@@ -1839,6 +1910,9 @@ routerAdd('POST', '/api/cc/exports', (e) => {
       created: iso(job.get('created')),
     },
   });
+  } finally {
+    releaseExportCapacity(exportCapacityKey, exportReservationToken);
+  }
 });
 
 // ---------------------------------------------------------------------------
