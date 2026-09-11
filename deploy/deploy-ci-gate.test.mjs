@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import test from 'node:test';
 
 const workflow = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
@@ -8,6 +11,35 @@ const script = workflow.match(/          script: \|\n([\s\S]*?)\n  deploy:/)[1]
 const execute = new (Object.getPrototypeOf(async function () {}).constructor)('context', 'github', 'core', 'process', script);
 const sha = 'a'.repeat(40);
 const passing = { conclusion: 'success', event: 'push', head_branch: 'main', head_sha: sha };
+
+test('public health check tolerates a listener that starts after connection refusal', { timeout: 10000 }, async (t) => {
+  const server = createServer((_request, response) => response.end('{"ok":true}'));
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const port = server.address().port;
+  await new Promise((resolve) => server.close(resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const command = workflow.match(/curl --fail[^\n]*\\\n\s+https:\/\/chatcircle\.empact\.cn\/api\/cc\/health/)[0];
+  const args = command.replace(/\\\n\s*/g, ' ').trim().split(/\s+/).slice(1);
+  args[args.length - 1] = `http://127.0.0.1:${port}/api/cc/health`;
+  const curl = spawn('curl', args, {
+    env: { ...process.env, NO_PROXY: '127.0.0.1', no_proxy: '127.0.0.1' },
+  });
+  t.after(() => curl.kill());
+  let refused = false;
+  let errors = '';
+  curl.stderr.on('data', (data) => {
+    errors += data.toString();
+    if (!refused && errors.includes('curl: (7)')) {
+      refused = true;
+      server.listen(port, '127.0.0.1');
+    }
+  });
+  const [code] = await once(curl, 'close');
+  assert.ok(refused, 'must exercise a real refused connection before the server starts');
+  assert.equal(code, 0, errors);
+});
 async function check({ event = 'workflow_run', run = passing, runs = [passing], requested = sha } = {}) {
   const result = { failures: [], output: null, calls: [] };
   await execute({ eventName: event, payload: { workflow_run: run }, repo: { owner: 'example', repo: 'app' } },

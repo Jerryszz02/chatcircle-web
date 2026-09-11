@@ -251,7 +251,7 @@ jobs:
           docker compose ps
           revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$app_id")"
           test "$revision" = "$target_sha"
-          curl --fail --silent --show-error --retry 3 --connect-timeout 10 --max-time 20 \
+          curl --fail --silent --show-error --retry 3 --retry-connrefused --connect-timeout 10 --max-time 20 \
             https://chatcircle.empact.cn/api/cc/health >/dev/null
           echo "Deploy healthy: $target_sha"
           REMOTE
