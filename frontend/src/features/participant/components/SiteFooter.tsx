@@ -14,7 +14,10 @@ export function SiteFooter() {
           联系我们：
           <a href="mailto:maggie.yang@empact.sg">maggie.yang@empact.sg</a>
         </p>
-        <p><Link to="/privacy">隐私政策</Link> · 上海井畅企业咨询有限公司</p>
+        <p className="ccp-site-footer-line">
+          <a href="https://empact.cn/">返回 Empact 官网</a>
+          {' · '}<Link to="/privacy">隐私政策</Link> · 上海井畅企业咨询有限公司
+        </p>
         <p><a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">沪ICP备2026002363号-2</a></p>
         <p className="ccp-site-footer-copy">© 2026 Empact · Chat Circles</p>
       </div>
