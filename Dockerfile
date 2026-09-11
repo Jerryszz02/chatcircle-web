@@ -14,8 +14,6 @@ RUN npm run build
 
 # ---- stage 2: PocketBase 运行时 ----
 FROM alpine:3.20
-ARG CC_RELEASE_SHA=local
-LABEL org.opencontainers.image.revision=$CC_RELEASE_SHA
 ARG PB_VERSION=0.39.7
 # 官方 release 校验值（release 页面 checksums.txt），升级 PB_VERSION 时必须同步更新
 ARG PB_SHA256=0fe09a4e1a8f6e5b53d206c2e6b94a5812febcb43082d66d69bc8ba4d8e8429c
@@ -41,3 +39,7 @@ VOLUME ["/pb/pb_data"]
 EXPOSE 8090
 # 启动时自动应用 pb_migrations 后伺服
 CMD ["./pocketbase", "serve", "--http=0.0.0.0:8090", "--dir", "/pb/pb_data"]
+
+# 提交标记最后注入，避免每次发布使依赖安装和下载层缓存失效。
+ARG CC_RELEASE_SHA=local
+LABEL org.opencontainers.image.revision=$CC_RELEASE_SHA
