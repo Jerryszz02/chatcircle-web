@@ -259,41 +259,7 @@ body:has(.ccp-root) {
   white-space: nowrap;
 }
 
-/* ---------- 首页 Hero 区：品牌卡 + 大图占位（桌面并排，移动堆叠） ---------- */
-
-.ccp-hero-wrap {
-  display: grid;
-  gap: 16px;
-  margin-bottom: 8px;
-}
-
-.ccp-hero-wrap .ccp-hero {
-  margin-bottom: 0;
-}
-
-@media (min-width: 900px) {
-  .ccp-hero-wrap {
-    grid-template-columns: 3fr 2fr;
-  }
-}
-
-/* ---------- Hero 真实照片 + 图片占位块（待真实素材替换：文章配图 / 活动封面） ---------- */
-
-/* Hero 首场活动现场照片：桌面端填满 grid 右列（object-fit 裁切），移动端按 4:3 比例展示 */
-.ccp-hero-photo {
-  display: block;
-  width: 100%;
-  height: 100%;
-  min-height: 220px;
-  object-fit: cover;
-  border-radius: var(--cc-radius-card-p);
-}
-
-@media (max-width: 899px) {
-  .ccp-hero-photo {
-    aspect-ratio: 4 / 3;
-  }
-}
+/* ---------- 图片占位与活动封面 ---------- */
 
 .ccp-photo {
   display: flex;
@@ -535,99 +501,6 @@ body:has(.ccp-root) {
   margin: 0 0 6px;
   font-size: var(--cc-fs-card-title);
   font-weight: 600;
-}
-
-/* ---------- 首页 Hero（Brand 900 深色区 + 圆形母题，全站仅首页 1 处 Display） ---------- */
-
-.ccp-hero {
-  position: relative;
-  overflow: hidden;
-  margin-bottom: 24px;
-  padding: 32px 24px;
-  border-radius: 20px;
-  background: var(--cc-brand-900);
-  color: var(--cc-neutral-0);
-}
-
-/* Brand 500 径向微光（参考稿手法，克制使用） */
-.ccp-hero::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse at 78% 30%, rgba(120, 198, 176, 0.22) 0%, transparent 58%);
-  pointer-events: none;
-}
-
-/* 双圆环交叠：Circle / 对话 / 关系网络的品牌母题 */
-.ccp-hero-rings {
-  position: absolute;
-  right: 24px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 120px;
-  height: 84px;
-  pointer-events: none;
-}
-
-.ccp-hero-rings span {
-  position: absolute;
-  top: 0;
-  width: 84px;
-  height: 84px;
-  border: 2px solid rgba(120, 198, 176, 0.55);
-  border-radius: 50%;
-}
-
-.ccp-hero-rings span:last-child {
-  left: 36px;
-  border-color: rgba(244, 185, 66, 0.45);
-}
-
-.ccp-hero-eyebrow {
-  position: relative;
-  margin: 0 0 10px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  color: var(--cc-brand-300);
-}
-
-.ccp-hero-title {
-  position: relative;
-  margin: 0 0 12px;
-  max-width: 16em;
-  font-size: var(--cc-fs-display);
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
-}
-
-.ccp-hero-title em {
-  font-style: normal;
-  color: var(--cc-accent-500);
-}
-
-.ccp-hero-sub {
-  position: relative;
-  margin: 0;
-  max-width: 560px;
-  font-size: var(--cc-fs-body);
-  line-height: 1.7;
-  color: rgba(255, 255, 255, 0.78);
-}
-
-.ccp-hero-cta {
-  position: relative;
-  display: inline-block;
-  margin-top: 20px;
-  width: auto;
-}
-
-@media (max-width: 640px) {
-  .ccp-hero-rings {
-    right: -12px;
-    opacity: 0.6;
-  }
 }
 
 /* ---------- 区块标题（Section Title 20px/650） ---------- */
