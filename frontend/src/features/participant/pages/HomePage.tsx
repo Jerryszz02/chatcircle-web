@@ -9,6 +9,7 @@ import { PublicPageLayout } from '../components/PublicPageLayout';
 import { PublicPostCard } from '../components/PublicPostCard';
 import { isCurrentActivity } from '../lib/activitySplit';
 import heroEventPhoto from '../../../assets/brand/hero-event-photo.jpg';
+import './home.css';
 
 /**
  * 首页（/，未登录可看）：Chat Circles C 端品牌官网落地页（2026-08 UI 重构）。
@@ -90,7 +91,7 @@ export function HomePage() {
   }, [hash, key, homeDataSettled]);
 
   return (
-    <PublicPageLayout>
+    <PublicPageLayout className="ccp-home">
       <HeroSection />
       <UpcomingActivitiesSection
         activities={activities}
@@ -111,31 +112,34 @@ export function HomePage() {
 
 function HeroSection() {
   return (
-    <section className="ccp-hero-wrap" aria-label="品牌介绍">
-      <div className="ccp-hero">
-        <div className="ccp-hero-rings" aria-hidden="true">
-          <span />
-          <span />
+    <section className="ccp-home-introduction" aria-label="品牌介绍">
+      <div className="ccp-home-hero">
+        <div className="ccp-home-container">
+          <p className="ccp-home-eyebrow">青年心理健康公益项目</p>
+          <h1 className="ccp-home-title">
+            <span>一个安全、温暖的</span>
+            <span>倾诉空间，</span>
+            <br />
+            <span>让每位青年</span>
+            <span>被真正听见</span>
+          </h1>
+          <Link to="/activities" className="ccp-home-browse">
+            浏览活动 <span aria-hidden="true">↗</span>
+          </Link>
         </div>
-        <p className="ccp-hero-eyebrow">青年心理健康公益项目</p>
-        <h1 className="ccp-hero-title">
-          一个安全、温暖的倾诉空间，让每位青年被<em>真正听见</em>
-        </h1>
-        <p className="ccp-hero-sub">
+      </div>
+      <div className="ccp-home-intro ccp-home-container">
+        <img
+          src={heroEventPhoto}
+          alt="Chat Circles 首场活动现场：青年与倾听者围桌对话"
+          className="ccp-home-photo"
+        />
+        <p>
           Chat Circles 把经过 3
           小时专业培训的志愿者「倾听者」，与正处于升学、初入职场等过渡期的青年一对一配对——在轻松的空间里进行一场
           60 分钟的结构化对话：没有评判，没有说教，只有真正的倾听。
         </p>
-        <Link to="/activities" className="cc-btn cc-btn-primary ccp-hero-cta">
-          浏览活动
-        </Link>
       </div>
-      {/* Hero 大图：首场活动现场真实照片（2026-06-12，1920px 宽压缩版，原图 3520px） */}
-      <img
-        src={heroEventPhoto}
-        alt="Chat Circles 首场活动现场：青年与倾听者围桌对话"
-        className="ccp-hero-photo"
-      />
     </section>
   );
 }
@@ -157,7 +161,7 @@ function UpcomingActivitiesSection({
     .slice(0, HOME_ACTIVITY_LIMIT);
 
   return (
-    <section aria-labelledby="home-activities">
+    <section className="ccp-home-section ccp-home-container" aria-labelledby="home-activities">
       <div className="ccp-section-head">
         <h2 className="ccp-section-title" id="home-activities">
           现有活动
@@ -205,7 +209,11 @@ function PastPostsSection({
   onRetry: () => void;
 }) {
   return (
-    <section className="ccp-anchor" id="past" aria-labelledby="home-past">
+    <section
+      className="ccp-home-section ccp-home-container ccp-anchor"
+      id="past"
+      aria-labelledby="home-past"
+    >
       <div className="ccp-section-head">
         <h2 className="ccp-section-title" id="home-past">
           往期活动
@@ -239,7 +247,7 @@ function PastPostsSection({
 
 function ImpactSection() {
   return (
-    <section aria-labelledby="home-impact">
+    <section className="ccp-home-section ccp-home-container" aria-labelledby="home-impact">
       <div className="ccp-section-head">
         <h2 className="ccp-section-title" id="home-impact">
           我们的影响
