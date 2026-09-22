@@ -15,6 +15,12 @@ import {
   hasActiveAdminConsoleBlock,
   hasActiveConfigText,
   hasCandidateImagePreflightBuild,
+  hasCandidateBackupRuntimeSmoke,
+  hasBackupPostDeployHealthCheck,
+  hasBackupPreDeployReadiness,
+  hasBackupRevisionBinding,
+  hasBuiltBackupRuntime,
+  hasSerializedBackupGateBeforeSwitch,
   hasLoopbackOnlyPocketBasePort,
   hasPostDeployHealthCheck,
   hasCiSuccessGate,
@@ -38,6 +44,7 @@ const files = {
   envExample: read('.env.example'),
   caddy: read('deploy/Caddyfile'),
   deployWorkflow: read('.github/workflows/deploy.yml'),
+  backupDockerfile: read('deploy/backup.Dockerfile'),
   phoneHook: read('backend/pb_hooks/phoneauth.pb.js'),
   phoneUi: read('frontend/src/features/participant/lib/phone.ts'),
   gitignore: read('.gitignore'),
@@ -85,6 +92,16 @@ check(
   '应用端口只绑定回环地址',
   hasLoopbackOnlyPocketBasePort(files.compose),
   'PocketBase 8090 不得直接暴露到公网',
+);
+
+check(
+  'backup 使用提交绑定的构建镜像',
+  hasBuiltBackupRuntime(files.compose)
+    && /ARG CC_RELEASE_SHA/.test(files.backupDockerfile)
+    && /LABEL org\.opencontainers\.image\.revision/.test(files.backupDockerfile)
+    && /timeout -s KILL 120 apk add --no-cache tzdata flock/.test(files.backupDockerfile)
+    && /CMD \["crond", "-f", "-d", "8"\]/.test(files.backupDockerfile),
+  'backup 必须在构建期安装依赖、复制脚本并以前台 crond 启动，禁止运行时 apk 安装',
 );
 
 check(
@@ -159,13 +176,19 @@ check(
 check(
   '部署 workflow 运行时镜像预拉取',
   hasRuntimeImagePreflightPull(files.deployWorkflow),
-  '预检步骤缺少活动的 caddy/backup runtime image pull',
+  '预检步骤必须只预拉取 image-only 的 caddy；backup 由候选提交构建',
 );
 
 check(
   '部署 workflow 候选镜像构建',
   hasCandidateImagePreflightBuild(files.deployWorkflow),
   '预检步骤缺少活动的 docker compose --project-name "$preflight_project" build',
+);
+
+check(
+  '部署预检候选 backup 无网络启动 smoke',
+  hasCandidateBackupRuntimeSmoke(files.deployWorkflow),
+  '候选 backup 镜像构建后必须运行 deploy/smoke-backup-runtime.sh，避免仅凭 build 放行',
 );
 
 check(
@@ -202,6 +225,25 @@ check(
   '部署 workflow 部署后容器健康检查',
   hasPostDeployHealthCheck(files.deployWorkflow),
   '生产更新步骤缺少活动的容器健康检查（docker compose ps -q app + docker inspect State.Health.Status）',
+);
+
+check(
+  '切换前 backup 锁门禁与就绪等待',
+  hasBackupPreDeployReadiness(files.deployWorkflow)
+    && hasSerializedBackupGateBeforeSwitch(files.deployWorkflow),
+  '切换生产提交前必须有有限时的 backup runtime 就绪检查，并执行成功备份',
+);
+
+check(
+  '部署后 backup 容器健康检查',
+  hasBackupPostDeployHealthCheck(files.deployWorkflow),
+  '生产更新后必须等待 backup healthcheck healthy，并在失败时输出诊断',
+);
+
+check(
+  '部署后 backup 镜像绑定目标 SHA',
+  hasBackupRevisionBinding(files.deployWorkflow),
+  '生产更新后必须确认 backup OCI revision 与目标提交一致',
 );
 
 check(

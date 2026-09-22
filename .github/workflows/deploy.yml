@@ -145,15 +145,19 @@ jobs:
           echo "Validating Docker Compose configuration..."
           docker compose config -q
 
-          # 先拉取 image-only 服务（尤其正式切换后的官方 Caddy 镜像），避免生产 main
-          # 更新后才发现镜像不可获取。不会启动或替换生产容器。
+          # 只预拉取 image-only 的 Caddy；backup 是本提交构建的候选镜像，下面统一 build。
+          # 不会启动或替换生产容器。
           echo "Pulling candidate runtime images..."
-          docker compose --project-name "$preflight_project" pull caddy backup
+          docker compose --project-name "$preflight_project" pull caddy
 
           # 用独立 project name 构建候选镜像，不触碰当前运行中的容器。
           # 正式部署直接使用这个按提交 SHA 标记的镜像，不再次构建。
           echo "Building candidate images..."
           docker compose --project-name "$preflight_project" build
+
+          # Exercise the exact candidate backup image with no network, volumes,
+          # or production credentials before any production checkout changes.
+          ./deploy/smoke-backup-runtime.sh "chatcircle-backup:$target_sha"
 
           # Compose 的 :? 只能验证非空；手机号 HMAC key 还有 >=32 字符的运行时约束，
           # 生产短信凭据/场景模板在 production+aliyun 时必须全部非空。这里在隔离 project 的
@@ -205,8 +209,32 @@ jobs:
           git merge-base --is-ancestor "$previous_sha" "$target_sha"
           docker image inspect "chatcircle-app:$target_sha" >/dev/null
           # Keep an application-consistent recovery point before automatic migrations.
-          # The running service may still contain the pre-lock script on first rollout.
-          # Fail before changing production if cron and this call cannot share the lock.
+          # The running service must be the reviewed cron image before this call can
+          # share its lock with the scheduled job.  Bound the readiness wait so a
+          # stuck legacy apk startup fails with an actionable migration diagnostic.
+          backup_id="$(docker compose ps -q backup)"
+          backup_ready=0
+          for attempt in $(seq 1 45); do
+            if [ -n "$backup_id" ] \
+              && [ "$(docker inspect --format '{{.State.Running}}' "$backup_id" 2>/dev/null || echo false)" = true ] \
+              && docker compose exec -T --interactive=false backup sh -eu -c '
+                test "$(cat /proc/1/comm)" = crond
+                type flock >/dev/null
+                test -x /etc/periodic/daily/backup
+                grep -qx "# cc-backup-lock-v1" /etc/periodic/daily/backup
+              ' </dev/null; then
+              backup_ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$backup_ready" -ne 1 ]; then
+            echo "ERROR: backup runtime 未在 90 秒内就绪；请按 deploy/README.md 的一次性迁移说明替换 backup-only 服务后重试" >&2
+            docker compose ps || true
+            docker compose logs --tail=120 backup || true
+            exit 1
+          fi
+
           docker compose exec -T --interactive=false backup sh -eu -c '
             command -v flock >/dev/null
             if ! grep -qx "# cc-backup-lock-v1" /etc/periodic/daily/backup; then
@@ -247,6 +275,25 @@ jobs:
             docker compose logs --tail=120 app || true
             exit 1
           fi
+
+          backup_id="$(docker compose ps -q backup)"
+          backup_healthy=0
+          for attempt in $(seq 1 45); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' "$backup_id" 2>/dev/null || echo '')"
+            if [ "$status" = "healthy" ]; then
+              backup_healthy=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$backup_healthy" -ne 1 ]; then
+            echo "ERROR: 部署后 backup 容器健康检查失败（90 秒内未达 healthy）" >&2
+            docker compose ps || true
+            docker compose logs --tail=120 backup || true
+            exit 1
+          fi
+          backup_revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$backup_id")"
+          test "$backup_revision" = "$target_sha"
 
           docker compose ps
           revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$app_id")"

@@ -52,7 +52,12 @@ services:
   # AC-23）。
   # TODO(待确认)：异地同步目标存储与凭据下发方式（§5.8，secrets 只在部署时注入）。
   backup:
-    image: alpine:3.20
+    image: chatcircle-backup:${CC_RELEASE_SHA:-local}
+    build:
+      context: ./deploy
+      dockerfile: backup.Dockerfile
+      args:
+        CC_RELEASE_SHA: ${CC_RELEASE_SHA:-local}
     depends_on:
       app:
         condition: service_healthy
@@ -69,24 +74,14 @@ services:
       # crond 每日任务按容器本地时区凌晨触发：默认 UTC 会落在北京时间上午，
       # 固定 Asia/Shanghai 让每日备份在业务低谷（北京 02:00）执行
       TZ: Asia/Shanghai
-    # alpine 基础镜像未内置 tzdata，命名时区 Asia/Shanghai 需其数据文件，
-    # 启动时安装时区数据与 flock（util-linux 的独立文件锁包）。
-    command: >
-      sh -c "apk add --no-cache tzdata flock
-      && mkdir -p /etc/periodic/daily
-      && cp /deploy/backup.sh /etc/periodic/daily/backup
-      && chmod +x /etc/periodic/daily/backup
-      && crond -f -d 8"
-    configs:
-      - source: backup_script
-        target: /deploy/backup.sh
     restart: unless-stopped
     logging:
       driver: json-file
       options:
         max-size: 10m
         max-file: '3'
-
+    # Dockerfile installs tzdata/flock and copies the reviewed script before
+    # startup; healthcheck also proves PID 1 is crond and the lock marker exists.
   # HTTPS 反代：ICP备案完成后使用标准 80/443。
   # Caddy Automatic HTTPS 负责证书申请/续期和 HTTP→HTTPS 跳转，不再使用
   # 未备案时期的 :8443 + 阿里云 DNS-01，也不再需要 ALIYUN_ACCESS_KEY_*。
@@ -109,10 +104,6 @@ services:
       options:
         max-size: 10m
         max-file: '3'
-
-configs:
-  backup_script:
-    file: ./deploy/backup.sh
 
 # 恢复说明（AC-19，详细演练步骤见 deploy/README.md「恢复演练」）：
 #   1) docker compose stop app（停机，二次确认为运维流程要求，V1 不做产品化一键恢复）；

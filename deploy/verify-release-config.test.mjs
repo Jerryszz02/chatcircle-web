@@ -4,6 +4,11 @@ import test from 'node:test';
 import {
   hasActiveAdminConsoleBlock,
   hasActiveConfigText,
+  hasBackupPostDeployHealthCheck,
+  hasBackupPreDeployReadiness,
+  hasBackupRevisionBinding,
+  hasCandidateBackupRuntimeSmoke,
+  hasBuiltBackupRuntime,
   hasCandidateImagePreflightBuild,
   hasLoopbackOnlyPocketBasePort,
   hasPostDeployHealthCheck,
@@ -14,6 +19,7 @@ import {
   hasPreflightPhoneKeyValidation,
   hasPreflightSmsValidation,
   hasRuntimeImagePreflightPull,
+  hasSerializedBackupGateBeforeSwitch,
   hasStandardCaddyPublicPorts,
   rejectsLegacyServerOverride,
   usesStandardAutomaticHttps,
@@ -85,6 +91,21 @@ test('accepts only an active loopback PocketBase short port mapping, or no mappi
   `), false);
 });
 
+test('requires a built backup runtime image and rejects runtime apk installation', () => {
+  assert.equal(hasBuiltBackupRuntime(`
+    backup:
+      image: chatcircle-backup:\${CC_RELEASE_SHA:-local}
+      build:
+        context: ./deploy
+        dockerfile: backup.Dockerfile
+  `), true);
+  assert.equal(hasBuiltBackupRuntime(`
+    backup:
+      image: alpine:3.20
+      command: apk add --no-cache tzdata flock
+  `), false);
+});
+
 test('requires formal Caddy 80/443 ports and rejects legacy 8443', () => {
   assert.equal(hasStandardCaddyPublicPorts(`
     caddy:
@@ -136,24 +157,57 @@ test('accepts active deployment safeguards in their intended steps', () => {
             exit 1
           fi
           docker compose config -q
-          docker compose --project-name "$preflight_project" pull caddy backup
+          docker compose --project-name "$preflight_project" pull caddy
           docker compose --project-name "$preflight_project" build
+          ./deploy/smoke-backup-runtime.sh "chatcircle-backup:$target_sha"
           if [ "\${#CC_PHONE_HASH_KEY}" -lt 32 ]; then
           if [ "\${CC_ENVIRONMENT:-}" = "production" ] && [ "\${CC_SMS_PROVIDER:-}" = "aliyun" ]; then
           for name in ALIBABA_CLOUD_ACCESS_KEY_ID ALIBABA_CLOUD_ACCESS_KEY_SECRET CC_SMS_SIGN_NAME CC_SMS_TEMPLATE_LOGIN_REGISTER_CODE CC_SMS_TEMPLATE_BIND_NEW_CODE CC_SMS_TEMPLATE_VERIFY_BOUND_CODE; do`,
     deploy: `
           docker compose up --build -d
+          backup_id="$(docker compose ps -q backup)"
+          backup_ready=0
+          for attempt in $(seq 1 45); do
+            echo "一次性迁移说明"
+            docker compose exec -T --interactive=false backup sh -eu -c '
+              test "$(cat /proc/1/comm)" = crond
+              command -v flock >/dev/null
+              grep -qx "# cc-backup-lock-v1" /etc/periodic/daily/backup
+            '
+            backup_ready=1
+            break
+          done
+          exec sh /etc/periodic/daily/backup
           app_id="$(docker compose ps -q app)"
-          status="$(docker inspect --format '{{.State.Health.Status}}' "$app_id" 2>/dev/null || echo '')"`,
+          status="$(docker inspect --format '{{.State.Health.Status}}' "$app_id" 2>/dev/null || echo '')"
+          backup_healthy=0
+          docker inspect --format '{{.State.Health.Status}}' "$backup_id"
+          backup_revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$backup_id")"
+          test "$backup_revision" = "$target_sha"
+          git merge --ff-only "$target_sha"
+          docker compose logs --tail=120 backup`,
   });
 
   assert.equal(rejectsLegacyServerOverride(source), true);
   assert.equal(hasPreflightComposeValidation(source), true);
   assert.equal(hasRuntimeImagePreflightPull(source), true);
   assert.equal(hasCandidateImagePreflightBuild(source), true);
+  assert.equal(hasCandidateBackupRuntimeSmoke(source), true);
   assert.equal(hasPreflightPhoneKeyValidation(source), true);
   assert.equal(hasPreflightSmsValidation(source), true);
   assert.equal(hasPostDeployHealthCheck(source), true);
+  assert.equal(hasBackupPreDeployReadiness(source), true);
+  assert.equal(hasBackupPostDeployHealthCheck(source), true);
+  assert.equal(hasBackupRevisionBinding(source), true);
+  assert.equal(hasSerializedBackupGateBeforeSwitch(source), true);
+});
+
+test('backup gate ordering rejects missing gate or switch instead of comparing -1', () => {
+  assert.equal(hasSerializedBackupGateBeforeSwitch(workflow({ deploy: 'git merge --ff-only "$target_sha"' })), false);
+  assert.equal(hasSerializedBackupGateBeforeSwitch(workflow({ deploy: 'docker compose exec -T --interactive=false backup true' })), false);
+  assert.equal(hasSerializedBackupGateBeforeSwitch(workflow({
+    deploy: "docker compose exec -T --interactive=false backup sh -c 'test true'\ngit merge --ff-only \"$target_sha\"",
+  })), false);
 });
 
 test('requires CI success and immutable SHA binding for deployment', () => {
@@ -211,7 +265,7 @@ test('rejects commented safeguards and commands in the wrong step', () => {
           # if [ "\${#CC_PHONE_HASH_KEY}" -lt 32 ]; then`,
     deploy: `
           docker compose config -q
-          docker compose --project-name "$preflight_project" pull caddy backup
+          docker compose --project-name "$preflight_project" pull caddy
           docker compose --project-name "$preflight_project" build
           docker compose up --build -d
           if [ "\${#CC_PHONE_HASH_KEY}" -lt 32 ]; then`,

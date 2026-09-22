@@ -118,3 +118,13 @@ jobs:
             --lockfile=frontend/package-lock.json
             --lockfile=mcp/package-lock.json
             --verbosity=info
+
+  backup-runtime-smoke:
+    name: backup runtime Docker smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 构建 backup 候选镜像
+        run: docker build --file deploy/backup.Dockerfile --build-arg CC_RELEASE_SHA=ci --tag chatcircle-backup:ci deploy
+      - name: 验证无网络启动与健康门禁
+        run: ./deploy/smoke-backup-runtime.sh chatcircle-backup:ci
