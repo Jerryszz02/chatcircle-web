@@ -10,9 +10,9 @@
 //   上传文件必须位于 CC_REPORT_DIR（默认 = CC_DATA_DIR）内，防止被诱导上传任意本地文件；
 //   创建审计（report.upload）由后端 reports.pb.js 钩子在保存事务内写入，本进程不单独发审计
 //
-// 权限边界：本进程持有超管服务账号凭据（env 注入），是唯一的权限闸门——
+// 权限边界：首次使用由用户登录现有超管账号，本机只保存会话 token——
 // 不暴露 include_pii 参数、不提供任何写业务数据的 tool、上传强制 draft。
-// stdio 本地运行，不监听任何端口，公网零新增暴露。
+// MCP 使用 stdio；需要登录时临时监听本机回环地址，公网零新增暴露。
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,11 +21,11 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import unzipper from 'unzipper';
+import { createAuth, LoginRequiredError } from './auth.mjs';
+import { DEFAULT_PB_URL } from './local-config.mjs';
 
 // ---------- 配置（env 注入，凭据不入库）----------
-const PB_URL = (process.env.CC_PB_URL || 'http://127.0.0.1:8090').replace(/\/+$/, '');
-const AGENT_EMAIL = process.env.CC_AGENT_EMAIL || '';
-const AGENT_PASSWORD = process.env.CC_AGENT_PASSWORD || '';
+const PB_URL = (process.env.CC_PB_URL || DEFAULT_PB_URL).replace(/\/+$/, '');
 const DATA_DIR =
   process.env.CC_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
 // 上传路径白名单根目录：upload_report 只接受该目录内的文件（默认 = DATA_DIR）
@@ -34,30 +34,14 @@ const REPORT_DIR = path.resolve(process.env.CC_REPORT_DIR || DATA_DIR);
 // 避免把任意大文件整块读入内存后才被后端限额拒绝（CWE-400 资源消耗）
 const REPORT_MAX_BYTES = 20 * 1024 * 1024;
 
-if (!AGENT_EMAIL || !AGENT_PASSWORD) {
-  console.error('[cc-mcp] 缺少 CC_AGENT_EMAIL / CC_AGENT_PASSWORD 环境变量');
-  process.exit(1);
-}
+// 登录在首次工具调用时发起；安装与 MCP 握手不需要账号密码。
+const auth = createAuth({
+  pbUrl: PB_URL,
+  sessionFile: process.env.CC_SESSION_FILE || path.join(path.dirname(fileURLToPath(import.meta.url)), 'session.json'),
+});
 
-// ---------- PocketBase 客户端（超管服务账号；401 自动重登一次）----------
-let authToken = null;
-
-async function login() {
-  const res = await fetch(`${PB_URL}/api/collections/_superusers/auth-with-password`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ identity: AGENT_EMAIL, password: AGENT_PASSWORD }),
-  });
-  if (!res.ok) {
-    throw new Error(`服务账号登录失败（HTTP ${res.status}）：${await res.text()}`);
-  }
-  const data = await res.json();
-  authToken = data.token;
-}
-
-async function api(method, apiPath, { body, form, raw = false, _retried = false } = {}) {
-  const headers = {};
-  if (authToken) headers.Authorization = authToken; // PB 接受裸 token（与集成测试口径一致）
+async function api(method, apiPath, { body, form, raw = false } = {}) {
+  const headers = { Authorization: await auth.ensure() }; // PB 接受裸 token（与集成测试口径一致）
   let payload;
   if (form) {
     payload = form; // FormData：fetch 自动带 multipart boundary
@@ -65,10 +49,10 @@ async function api(method, apiPath, { body, form, raw = false, _retried = false 
     headers['Content-Type'] = 'application/json';
     payload = JSON.stringify(body);
   }
-  const res = await fetch(`${PB_URL}${apiPath}`, { method, headers, body: payload });
-  if (res.status === 401 && !_retried) {
-    await login();
-    return api(method, apiPath, { body, form, raw, _retried: true });
+  const res = await fetch(`${PB_URL}${apiPath}`, { method, headers, body: payload, redirect: 'error' });
+  if (res.status === 401) {
+    auth.invalidate();
+    return auth.requireLogin();
   }
   if (!res.ok) {
     throw new Error(`${method} ${apiPath} 失败（HTTP ${res.status}）：${await res.text()}`);
@@ -288,8 +272,8 @@ server.registerTool(
 
 // ---------- 入口 ----------
 async function selftest() {
-  await login();
-  console.log('[selftest] 服务账号登录成功：' + AGENT_EMAIL);
+  await auth.ensure();
+  console.log('[selftest] 登录会话有效');
   const data = await api('GET', '/api/collections/activities/records?perPage=3&sort=-start_time');
   console.log('[selftest] 活动示例（至多 3 条）：');
   for (const a of data.items || []) {
@@ -305,12 +289,15 @@ async function main() {
     await selftest();
     return;
   }
-  await login(); // 启动即验证凭据，失败直接退出
   await server.connect(new StdioServerTransport());
   console.error('[cc-mcp] 已连接（stdio），PB=' + PB_URL); // 日志走 stderr，stdout 留给 JSON-RPC
 }
 
 main().catch((err) => {
-  console.error('[cc-mcp] 启动失败：' + (err && err.message ? err.message : err));
+  auth.close();
+  const message = err instanceof LoginRequiredError && process.argv.includes('--selftest')
+    ? '请先在 MCP 客户端调用工具并完成浏览器登录，再运行 selftest。'
+    : (err && err.message ? err.message : err);
+  console.error('[cc-mcp] 启动失败：' + message);
   process.exit(1);
 });
