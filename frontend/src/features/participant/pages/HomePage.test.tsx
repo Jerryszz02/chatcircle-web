@@ -111,7 +111,9 @@ describe('HomePage 首页', () => {
       'href',
       '/activities/past',
     );
-    expect(screen.getByRole('link', { name: '关于我们' })).toHaveAttribute('href', '/about');
+    expect(
+      within(screen.getByRole('navigation', { name: '站点导航' })).getByRole('link', { name: '关于我们' }),
+    ).toHaveAttribute('href', '/about');
   });
 
   it('现有活动区块渲染公开活动卡片（报名状态 + 报名入口 + 查看全部）', async () => {

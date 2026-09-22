@@ -198,38 +198,160 @@ body:has(.ccp-root) {
 }
 
 .ccp-site-footer {
+  --ccp-footer-blue: #125284;
   margin-top: 40px;
-  border-top: 1px solid var(--cc-neutral-300);
-  background: var(--cc-neutral-0);
+  background: var(--ccp-footer-blue);
+  color: #fff;
 }
 
 .ccp-site-footer-inner {
-  max-width: var(--cc-content-max-p);
-  margin: 0 auto;
-  padding: 24px 16px 32px;
-  text-align: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 0.8fr) minmax(0, 1fr) auto;
+  grid-template-areas:
+    "brand china singapore socials"
+    "bottom bottom bottom bottom";
+  align-items: start;
+  gap: 28px 26px;
+  min-height: 216px;
+  padding: 24px clamp(16px, 3.4vw, 64px);
+  font-size: 14px;
+  line-height: 1.45;
 }
 
-.ccp-site-footer-brand {
-  margin: 0 0 8px;
+.ccp-site-footer a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.ccp-site-footer a:hover {
+  text-decoration-thickness: 2px;
+}
+
+.ccp-site-footer a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 4px;
+}
+
+.ccp-footer-brand {
+  grid-area: brand;
+}
+
+.ccp-footer-brand img {
+  display: block;
+  width: 176px;
+  height: auto;
+}
+
+.ccp-footer-office {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ccp-footer-china {
+  grid-area: china;
+}
+
+.ccp-footer-singapore {
+  grid-area: singapore;
+}
+
+.ccp-footer-office-label {
   font-weight: 700;
-  color: var(--cc-brand-600);
+  letter-spacing: 0.02em;
 }
 
-.ccp-site-footer-line {
-  margin: 0 0 4px;
-  font-size: var(--cc-fs-small);
-  color: var(--cc-neutral-600);
+.ccp-footer-address-unit {
+  white-space: nowrap;
 }
 
-.ccp-site-footer-line a {
-  color: var(--cc-brand-600);
+.ccp-footer-socials {
+  grid-area: socials;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
 }
 
-.ccp-site-footer-copy {
-  margin: 12px 0 0;
-  font-size: 12px;
-  color: var(--cc-neutral-600);
+.ccp-footer-socials a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  text-decoration: none;
+}
+
+.ccp-footer-socials img,
+.ccp-footer-socials svg {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+}
+
+.ccp-footer-bottom {
+  grid-area: bottom;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 24px;
+  border-top: 1px solid rgb(255 255 255 / 35%);
+  padding-top: 8px;
+  font-size: 11px;
+}
+
+.ccp-footer-links,
+.ccp-footer-legal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+
+.ccp-footer-links a,
+.ccp-footer-legal a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+}
+
+.ccp-footer-copy {
+  margin: 0;
+}
+
+@media (max-width: 896px) {
+  .ccp-site-footer-inner {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "brand socials"
+      "china singapore"
+      "bottom bottom";
+    gap: 16px 14px;
+    padding-block: 20px;
+    font-size: 12px;
+  }
+
+  .ccp-footer-brand img {
+    width: clamp(80px, 27vw, 136px);
+  }
+
+  .ccp-footer-socials {
+    align-items: flex-end;
+    gap: 4px;
+  }
+
+  .ccp-footer-bottom {
+    align-items: flex-start;
+    gap: 8px 14px;
+  }
+
+  .ccp-footer-links {
+    column-gap: 10px;
+  }
 }
 
 /* ---------- 区块头：标题 + 更多链接/备注（首页/About 共用） ---------- */
