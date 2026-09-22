@@ -105,12 +105,14 @@ PR 合并到 `main` 后 GitHub Actions 自动：
 1. SSH 到 ECS，只执行 `git fetch`；
 2. 在临时 detached worktree 复制生产 `.env`；
 3. `docker compose config -q`；
-4. 预拉取 Caddy/backup 运行时镜像；
+4. 只预拉取 Caddy；backup 使用本提交的构建上下文；
 5. 构建候选镜像；
-6. 检查 `CC_PHONE_HASH_KEY >= 32` 和 production+aliyun 短信必填变量；
-7. 全部通过后才 fast-forward `/opt/chatcircle/main`；
-8. `docker compose up --build -d`；
-9. 轮询 app 容器 healthcheck，90 秒内必须进入 `healthy`。
+6. 构建后用无网络、无卷、无凭据的 smoke 启动候选 backup 镜像，并验证故意损坏脚本会变为 unhealthy；
+7. 检查 `CC_PHONE_HASH_KEY >= 32` 和 production+aliyun 短信必填变量；
+8. 等待当前 backup runtime 就绪并执行一次成功备份；
+9. 上述门禁全部通过后才 fast-forward `/opt/chatcircle/main`；
+10. `docker compose up --no-build --pull never -d`，只使用预检构建的候选镜像；
+11. 轮询 app 与 backup 容器 healthcheck，90 秒内必须进入 `healthy`，并核对镜像 revision。
 
 缺 Secret、Compose 配置错误、镜像拉取失败或 build 失败都会发生在生产工作区更新之前。
 
@@ -174,8 +176,9 @@ chatcircle.empact.cn
 
 ## 5. 备份与恢复
 
-每日备份由 Compose `backup` 服务中的 cron 执行 `deploy/backup.sh`：
+每日备份由 Compose `backup` 服务中的前台 `crond` 执行镜像内的 `/etc/periodic/daily/backup`：
 
+- `deploy/backup.Dockerfile` 在构建期安装 `tzdata` 与 `flock`，并以 `CC_RELEASE_SHA` 标记镜像；启动时不访问 apk 镜像源；
 - 使用 PocketBase 备份 API 创建 SQLite + 上传文件一致性 ZIP；
 - 下载到 `backups` 持久化卷；
 - 默认滚动保留 `BACKUP_RETENTION_DAYS=30` 天；
@@ -191,16 +194,25 @@ docker compose exec backup cat /backups/last_backup.json
 
 备份脚本使用备份卷中的 `.backup.lock` 阻塞锁，cron 和部署调用会排队，锁覆盖创建、下载、清理、结果标记及审计全过程；失败退出同样释放锁。不要删除锁文件，否则等待进程可能锁住不同 inode。归档文件名带随机后缀，避免同秒完成的两次调用覆盖文件；异地上传兼容新旧文件名。
 
-**首次升级到带锁脚本**：旧容器在启动时复制脚本，更新 Git 不会改变其 cron 副本。部署发现旧副本或缺少 `flock` 时会在切换生产版本前停止。需要先更新 backup 服务：避开每日 02:00 窗口，用 `docker compose exec backup ps` 确认没有尚在运行的备份，等待其完成后，再用已审核版本的独立 checkout 更新这一服务。示例（项目名应与现有 Compose 项目一致）：
+**首次升级到构建期 runtime**：旧容器可能仍在启动时执行 `apk add`，更新 Git 不会改变它。部署会在切换生产提交前有限等待 backup runtime 就绪（PID 1 为 `crond`、脚本锁标记和 `flock` 存在），并在就绪后执行一次成功备份；任一条件失败都会停止。需要先更新 backup 服务：避开每日 02:00 窗口，用 `docker compose exec backup ps` 确认没有尚在运行的备份，等待其完成后，再用已审核版本的独立 checkout 仅替换 backup 服务。示例（项目名应与现有 Compose 项目一致）：
 
 ```sh
+export CC_RELEASE_SHA="$(git -C /path/to/reviewed-checkout rev-parse HEAD)"
 docker compose --project-name chatcircle \
   --env-file /opt/chatcircle/.env \
   -f /path/to/reviewed-checkout/docker-compose.yml \
-  up --no-deps -d backup
+  --project-directory /path/to/reviewed-checkout \
+  build backup
+docker compose --project-name chatcircle \
+  --env-file /opt/chatcircle/.env \
+  -f /path/to/reviewed-checkout/docker-compose.yml \
+  --project-directory /path/to/reviewed-checkout \
+  up --no-deps --no-build --pull never -d backup
 ```
 
-只更新 backup 服务，不重建 app；等待容器安装 `flock` 并复制脚本后，确认 `/etc/periodic/daily/backup` 含 `# cc-backup-lock-v1` 且 `command -v flock` 成功，再重跑固定 SHA 的部署。在正式部署接管配置前保留该独立 checkout。此一次性操作不能在旧备份尚未结束时执行。
+只更新 backup 服务，不重建 app；确认 `docker compose ps` 显示 healthy，且 `/etc/periodic/daily/backup` 含 `# cc-backup-lock-v1`、`command -v flock` 成功，再重跑固定 SHA 的部署。在正式部署接管配置前保留该独立 checkout。此一次性操作不能在旧备份尚未结束时执行。
+
+容器 `healthy` 只证明 runtime、脚本和 cron 进程可用，不证明最近一次备份成功；成功备份仍以 `/backups/last_backup.json` 的 `result=success`、归档 ZIP 校验和必要时的 `data.db`/`auxiliary.db` SQLite `quick_check` 为准。部署保留“成功备份后再切换 Git 提交”的门禁，部署后的 healthcheck 也只负责发现 runtime 退化。
 
 恢复属于运维操作，执行前必须确认目标环境和备份文件，并事后补写恢复审计。最小流程：停止 app → 从最近一致备份恢复 `pb_data` → 启动 app → 校验账号、机构、活动、报名、签到、问卷与答卷。
 

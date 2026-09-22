@@ -49,6 +49,14 @@ export function hasLoopbackOnlyPocketBasePort(compose) {
     || mappings.every((mapping) => /^127\.0\.0\.1:\d+:8090(?:\/tcp)?$/.test(mapping));
 }
 
+export function hasBuiltBackupRuntime(compose) {
+  const active = stripConfigComments(compose);
+  return /image:\s+chatcircle-backup:\$\{CC_RELEASE_SHA:-local\}/.test(active)
+    && /context:\s+\.\/deploy/.test(active)
+    && /dockerfile:\s+backup\.Dockerfile/.test(active)
+    && !/apk add[^\n]*tzdata[^\n]*flock/.test(active);
+}
+
 export function hasStandardCaddyPublicPorts(compose) {
   const mappings = shortPortMappings(compose);
   const has80 = mappings.some((mapping) => /^(?:0\.0\.0\.0:)?80:80(?:\/tcp)?$/.test(mapping));
@@ -104,8 +112,15 @@ export function hasCandidateImagePreflightBuild(workflow) {
   return /^\s*docker compose --project-name "\$preflight_project" build\s*$/m.test(preflightStep(workflow));
 }
 
+export function hasCandidateBackupRuntimeSmoke(workflow) {
+  const step = preflightStep(workflow);
+  const build = step.indexOf('docker compose --project-name "$preflight_project" build');
+  const smoke = step.indexOf('./deploy/smoke-backup-runtime.sh "chatcircle-backup:$target_sha"');
+  return build >= 0 && smoke >= 0 && build < smoke;
+}
+
 export function hasRuntimeImagePreflightPull(workflow) {
-  return /^\s*docker compose --project-name "\$preflight_project" pull caddy backup\s*$/m.test(preflightStep(workflow));
+  return /^\s*docker compose --project-name "\$preflight_project" pull caddy\s*$/m.test(preflightStep(workflow));
 }
 
 export function rejectsLegacyServerOverride(workflow) {
@@ -138,6 +153,37 @@ export function hasPostDeployHealthCheck(workflow) {
   const step = deployStep(workflow);
   return /^\s*app_id="\$\(docker compose ps -q app\)"\s*$/m.test(step)
     && /docker inspect[^\n]*\.State\.Health\.Status/m.test(step);
+}
+
+export function hasBackupPreDeployReadiness(workflow) {
+  const step = deployStep(workflow);
+  return /backup_ready=0/.test(step)
+    && /docker compose exec -T --interactive=false backup sh -eu -c/.test(step)
+    && /test "\$\(cat \/proc\/1\/comm\)" = crond/.test(step)
+    && /grep -qx ["']?# cc-backup-lock-v1/.test(step)
+    && /seq 1 45/.test(step)
+    && /一次性迁移说明/.test(step);
+}
+
+export function hasBackupPostDeployHealthCheck(workflow) {
+  const step = deployStep(workflow);
+  return /backup_id="\$\(docker compose ps -q backup\)"/.test(step)
+    && /backup_healthy=0/.test(step)
+    && /docker inspect[^\n]*\.State\.Health\.Status/.test(step)
+    && /docker compose logs --tail=120 backup/.test(step);
+}
+
+export function hasBackupRevisionBinding(workflow) {
+  const step = deployStep(workflow);
+  return /backup_revision="\$\(docker inspect --format/.test(step)
+    && /test "\$backup_revision" = "\$target_sha"/.test(step);
+}
+
+export function hasSerializedBackupGateBeforeSwitch(workflow) {
+  const step = deployStep(workflow);
+  const gate = step.indexOf('exec sh /etc/periodic/daily/backup');
+  const switchIndex = step.indexOf('git merge --ff-only "$target_sha"');
+  return gate >= 0 && switchIndex >= 0 && gate < switchIndex;
 }
 
 export function hasCiSuccessGate(workflow) {

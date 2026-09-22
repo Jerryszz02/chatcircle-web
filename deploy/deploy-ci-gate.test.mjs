@@ -90,5 +90,7 @@ test('preflight and deploy use positional SHA and the same prebuilt image', () =
   assert.match(workflow, /git merge-base --is-ancestor "\$previous_sha" "\$target_sha"/);
   assert.match(workflow, /test "\$\(git rev-parse HEAD\)" = "\$target_sha"/);
   assert.match(workflow, /docker compose up --no-build --pull never -d/);
-  assert.ok(workflow.indexOf('docker compose exec -T backup') < workflow.indexOf('git merge --ff-only'));
+  const backupGate = workflow.indexOf('exec sh /etc/periodic/daily/backup');
+  const gitSwitch = workflow.indexOf('git merge --ff-only "$target_sha"');
+  assert.ok(backupGate >= 0 && gitSwitch >= 0 && backupGate < gitSwitch);
 });
