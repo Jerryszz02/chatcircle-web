@@ -34,6 +34,18 @@ function execute(t, command, args, env) {
   });
 }
 
+test('aborting an installer test terminates its subprocess and reports output', { timeout: 15000 }, async (t) => {
+  const controller = new AbortController();
+  const diagnostics = [];
+  const timer = setTimeout(() => controller.abort(), 500);
+  t.after(() => clearTimeout(timer));
+  const result = await execute({ signal: controller.signal, diagnostic: (message) => diagnostics.push(message) },
+    process.execPath, ['-e', 'setInterval(() => {}, 1000)'], process.env);
+  assert.notEqual(result.code, 0);
+  assert.equal(diagnostics.length, 1);
+  assert.match(diagnostics[0], /Installer timed out\. Output:/);
+});
+
 test('backend URL accepts HTTPS and loopback only, without embedded credentials', () => {
   for (const value of ['https://example.com/', 'http://127.0.0.1:8090', 'http://localhost:8090', 'http://[::1]:8090']) {
     assert.ok(validateUrl(value));
