@@ -74,80 +74,62 @@ test('client paths use the editable WorkBuddy file and supported Claude location
   assert.equal(clientConfigPath('claude', '/home/test', 'darwin'), path.join('/home/test', 'Library/Application Support/Claude/claude_desktop_config.json'));
 });
 
-test('installer and installed launcher complete real MCP handshake against a fixture backend', { timeout: 120000 }, async (t) => {
+test('installation needs no account or backend and migrates old password configuration', { timeout: 120000 }, async (t) => {
   const home = scratch(t);
-  const secret = 'fixture-only-secret-DO-NOT-PRINT';
-  let rejectLogin = false;
-  let reads = 0;
-  const backend = http.createServer(async (req, res) => {
-    res.setHeader('Content-Type', 'application/json');
-    if (req.url === '/api/collections/_superusers/auth-with-password') {
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      const auth = JSON.parse(body);
-      if (rejectLogin || auth.identity !== 'agent@test.local' || auth.password !== secret) {
-        res.writeHead(400).end(JSON.stringify({ message: secret }));
-      } else res.end(JSON.stringify({ token: 'fixture-token' }));
-    } else if (req.url.startsWith('/api/collections/activities/records') && req.headers.authorization === 'fixture-token') {
-      reads++;
-      res.end(JSON.stringify({ items: [] }));
-    } else res.writeHead(403).end('{}');
-  });
+  let requests = 0;
+  const backend = http.createServer((_req, res) => { requests++; res.writeHead(503).end(); });
   await new Promise((resolve) => backend.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => backend.close(resolve)));
-  const env = { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, '.codex'),
-    CC_PB_URL: `http://127.0.0.1:${backend.address().port}`, CC_AGENT_EMAIL: 'agent@test.local', CC_AGENT_PASSWORD: secret };
+  const env = { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, '.codex') };
+  for (const key of ['CC_AGENT_EMAIL', 'CC_AGENT_PASSWORD', 'CC_PB_URL', 'CC_SESSION_FILE']) delete env[key];
   const installDir = path.join(home, 'stable runtime');
   const installer = fileURLToPath(new URL('./install.mjs', import.meta.url));
   const args = [installer, '--client', 'workbuddy', '--install-dir', installDir];
   const configFile = path.join(home, '.workbuddy/mcp.json');
   privateWrite(configFile, '{"mcpServers":{"unrelated":{"command":"keep"}}}');
-  rejectLogin = true;
   let result = await execute(process.execPath, args, env);
-  assert.notEqual(result.code, 0);
-  assert.ok(!result.output.includes(secret));
-  assert.equal(JSON.parse(fs.readFileSync(configFile)).mcpServers.chatcircle, undefined);
-  assert.ok(!fs.existsSync(path.join(installDir, 'credentials.json')));
-  rejectLogin = false;
-  result = await execute(process.execPath, args, env);
   assert.equal(result.code, 0, result.output);
-  assert.ok(!result.output.includes(secret));
-  assert.ok(reads > 0);
+  assert.equal(requests, 0);
+  const settingsFile = path.join(installDir, 'settings.json');
+  assert.equal(JSON.parse(fs.readFileSync(settingsFile)).CC_PB_URL, 'https://chatcircle.empact.cn');
+  assert.ok(!fs.existsSync(path.join(installDir, 'session.json')));
   const config = JSON.parse(fs.readFileSync(configFile));
   assert.equal(config.mcpServers.unrelated.command, 'keep');
   assert.equal(config.mcpServers.chatcircle.command, process.execPath);
-  assert.ok(!fs.readFileSync(configFile, 'utf8').includes(secret));
-  const credentialsFile = path.join(installDir, 'credentials.json');
-  if (process.platform !== 'win32') assert.equal(fs.statSync(credentialsFile).mode & 0o777, 0o600);
 
-  const cleanEnv = { ...env };
-  for (const key of ['CC_AGENT_EMAIL', 'CC_AGENT_PASSWORD', 'CC_PB_URL']) delete cleanEnv[key];
   const client = new Client({ name: 'installer-test', version: '1.0.0' });
-  const transport = new StdioClientTransport({ ...config.mcpServers.chatcircle, env: cleanEnv, stderr: 'pipe' });
+  const transport = new StdioClientTransport({ ...config.mcpServers.chatcircle, env, stderr: 'pipe' });
   transport.stderr.resume();
   try {
     await client.connect(transport);
     assert.equal((await client.listTools()).tools.length, 3);
-    assert.ok(!(await client.callTool({ name: 'list_activities', arguments: { limit: 1 } })).isError);
+    const firstCall = await client.callTool({ name: 'list_activities', arguments: { limit: 1 } });
+    assert.equal(firstCall.isError, true);
+    const required = JSON.parse(firstCall.content[0].text);
+    assert.equal(required.code, 'LOGIN_REQUIRED');
+    assert.match(required.login_url, /^http:\/\/127\.0\.0\.1:/);
   } finally { await client.close(); }
 
-  // Switching backends must not silently send a previously saved password.
-  result = await execute(process.execPath, [...args, '--url', 'http://localhost:8090'], cleanEnv);
-  assert.notEqual(result.code, 0);
-  assert.match(result.output, /非交互安装缺少参数/);
-
+  // Simulate an old installation containing a password: upgrade retains URL/data only.
+  const secret = 'old-password-must-not-survive';
+  const localUrl = `http://127.0.0.1:${backend.address().port}`;
+  fs.unlinkSync(settingsFile);
+  privateWrite(path.join(installDir, 'credentials.json'), JSON.stringify({ CC_PB_URL: localUrl, CC_AGENT_EMAIL: 'old@example.com', CC_AGENT_PASSWORD: secret }));
   const savedData = path.join(installDir, 'data', 'existing-report.md');
   fs.writeFileSync(savedData, 'preserve report');
-  // Reinstallation reuses saved credentials without prompting or duplicate registration.
-  result = await execute(process.execPath, args, cleanEnv);
+  result = await execute(process.execPath, args, env);
   assert.equal(result.code, 0, result.output);
+  assert.equal(requests, 0);
+  assert.equal(JSON.parse(fs.readFileSync(settingsFile)).CC_PB_URL, localUrl);
+  assert.ok(!fs.existsSync(path.join(installDir, 'credentials.json')));
+  assert.ok(!fs.readFileSync(settingsFile, 'utf8').includes(secret));
+  assert.ok(!result.output.includes(secret));
   assert.deepEqual(JSON.parse(fs.readFileSync(configFile)), config);
   assert.equal(fs.readFileSync(savedData, 'utf8'), 'preserve report');
 
-  // Real Codex registration in an isolated profile, when CLI is available locally.
   if (spawnSync('codex', ['mcp', 'add', '--help'], { stdio: 'ignore' }).status === 0) {
     privateWrite(path.join(env.CODEX_HOME, 'config.toml'), 'model = "retained-model"\n[mcp_servers.other]\ncommand = "keep"\n');
-    result = await execute(process.execPath, [installer, '--client', 'codex', '--install-dir', installDir], cleanEnv);
+    result = await execute(process.execPath, [installer, '--client', 'codex', '--install-dir', installDir], env);
     assert.equal(result.code, 0, result.output);
     const toml = fs.readFileSync(path.join(env.CODEX_HOME, 'config.toml'), 'utf8');
     assert.match(toml, /retained-model/);
@@ -155,12 +137,4 @@ test('installer and installed launcher complete real MCP handshake against a fix
     assert.match(toml, /mcp_servers\.chatcircle/);
     assert.ok(!toml.includes(secret));
   } else t.diagnostic('Codex CLI unavailable; live Codex config integration skipped.');
-
-  rejectLogin = true;
-  const previousCredentials = fs.readFileSync(credentialsFile, 'utf8');
-  result = await execute(process.execPath, args, env);
-  assert.notEqual(result.code, 0);
-  assert.ok(!result.output.includes(secret));
-  assert.deepEqual(JSON.parse(fs.readFileSync(configFile)), config);
-  assert.equal(fs.readFileSync(credentialsFile, 'utf8'), previousCredentials);
 });
