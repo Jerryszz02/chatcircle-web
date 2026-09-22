@@ -5,6 +5,67 @@
 （`POST /api/cc/exports`，脱敏口径），**报告回传**入 `reports` 集合（一律 draft，人工审核后发布）。
 数据分析与报告撰写不在本目录职责内（由公司内部分析 skill 完成）。
 
+## 一条命令安装（推荐）
+
+需要已安装 Node.js 18+ 和 npm；仓库下载到本机后，在仓库根目录运行以下**一条**命令，按使用的客户端选择：
+
+```sh
+node mcp/install.mjs --client codex
+# 或
+node mcp/install.mjs --client workbuddy
+# 或（macOS / Windows）
+node mcp/install.mjs --client claude
+```
+
+安装程序会询问后端地址、专用服务账号邮箱和密码（密码输入不显示）。也支持
+`--url https://你的后端域名 --email 服务账号邮箱`；密码只通过隐藏输入或
+`CC_AGENT_PASSWORD` 环境变量提供，不接受命令行密码参数，避免进入命令历史。
+有本机执行权限的 agent 可以完成安装；只需管理员提供访问凭据，用户按客户端要求完成重启/信任。
+
+程序自动完成：
+
+1. 将运行文件复制到 `~/.local/share/chatcircle-mcp`，安装依赖并识别 Node 绝对路径；
+2. 实际登录后端、完成 MCP 握手、确认三个工具存在，并调用 `list_activities`；
+3. 验证成功后保存凭据，并备份、更新客户端中的 `chatcircle` 配置，保留其他设置和 MCP；
+4. 提示重启客户端。重启后可说「使用 chatcircle 列出最近活动」。
+
+Codex 自动注册使用本机 `codex mcp add`，必须先确认 CLI 可执行；不自行重写 TOML。
+WorkBuddy 使用 `~/.workbuddy/mcp.json`；Claude Desktop 使用系统对应的配置文件。
+安装文件独立于仓库，之后移动仓库不会破坏连接。Node 本身的位置变化时重新运行安装命令。
+这仍是本地 STDIO MCP；不支持只接收远程 MCP URL 的云端客户端。
+
+### 安装后还要登录吗？
+
+**首次需要一个有效的 PocketBase 超管服务账号；配置好后 MCP 自动登录，不必每次手动登录后台。**
+使用专门的服务账号，不要复用人的后台超管账号。管理员在每个后端环境初始化账号一次
+（命令见下方「服务账号准备」）；安装器不会创建、提权或重置生产账号。普通参与者账号不能替代。
+
+账号密码保存在安装目录的 `credentials.json`，由 `launch.mjs` 读取并注入 MCP 子进程；
+客户端配置只保存 Node 和启动脚本路径，不包含密码。macOS / Linux 目录权限为 700、凭据文件为 600；
+Windows 使用私人用户目录并依赖该目录的访问控制。**这是本机明文凭据存储，不是加密保险库**；
+同一系统用户权限下的程序仍可读取，不应把安装目录分享给同事或上传到仓库。
+账号被撤销、密码变更或后端不可达时，MCP 会连接失败。
+
+重复运行同一命令可更新安装、修复客户端配置，并在后端和邮箱未变时复用已保存的凭据。
+修改密码时通过 `CC_AGENT_PASSWORD` 安全注入新值。切换后端/邮箱会要求重新提供密码。
+备份位于原客户端配置旁的 `.chatcircle-*.bak`；备份可能含原有配置中的敏感字段，应同样保护。
+登录/工具验证失败时不会注册客户端或覆盖已保存的凭据；若已有安装，运行文件和依赖可能已更新。
+默认导出和报告目录均为安装目录的 `data/`，不覆盖已有数据。
+
+可用 `--install-dir /固定私有目录` 更改安装位置；卸载时先在客户端移除 `chatcircle`，
+再自行备份 `data/` 后删除安装目录。安装器不负责删除数据或撤销后端账号。
+
+### 开发验证
+
+```sh
+npm ci --prefix mcp
+npm test --prefix mcp
+```
+
+测试在临时用户目录和本机 fixture 后端执行真实 MCP 握手，覆盖重复安装、失败保护、
+配置保留和安装后的启动器；不会修改真实客户端配置，也不连接生产数据。
+测试机有 Codex CLI 时额外验证真实 CLI 配置合并。
+
 ## 运行形态与兼容性
 
 本目录实现的是由 MCP 客户端在 **agent 所在机器**上启动的 STDIO server，不是部署在生产服务器上的
@@ -30,7 +91,7 @@ WorkBuddy / Kimi / Claude / Codex / 其他本地 agent
 ## 权限边界
 
 - 本进程持有**超管服务账号**凭据（`CC_AGENT_EMAIL` / `CC_AGENT_PASSWORD`，env 注入、不入库），
-  是唯一的权限闸门；agent 与最终用户均不接触凭据。
+  在工具层限制操作；凭据不作为工具参数或结果返回，但同一系统用户权限的程序仍可读取本机凭据。
 - `export_activity_data` 的 `include_pii` **恒为 false**（不暴露该参数），敏感字段由服务端
   `is_sensitive` 口径过滤，作废答卷不计入。
 - `upload_report` 的 `status` **恒为 draft**；本 server 不提供任何写业务数据的 tool。
@@ -39,7 +100,7 @@ WorkBuddy / Kimi / Claude / Codex / 其他本地 agent
 - stdio 本地运行，不监听端口，公网零新增暴露；拉取审计由 exports hook 自动写入，
   上传审计（`report.upload`）由后端 reports.pb.js 钩子与报告保存在同一事务写入。
 
-## 准备
+## 服务账号准备 / 手动安装
 
 ```sh
 cd mcp
@@ -106,9 +167,10 @@ npm run selftest   # 登录 → 列 3 个活动 → 确认 reports 集合存在
 Claude Desktop 的 `claude_desktop_config.json` 以及采用标准 `mcpServers` JSON 结构的客户端可直接复用
 上面的 WorkBuddy server 块。客户端若不接受 `type` 字段，删除 `"type": "stdio"` 即可。
 
-### Kimi Code / Codex 等 TOML 客户端
+### Codex 手动配置
 
-Kimi Code（`~/.kimi-code/config.toml` 或项目级配置）：
+Codex 用户级配置文件为 `~/.codex/config.toml`。建议使用上方安装程序，让 Codex CLI 自动合并配置。
+手动运行仓库中的 server 时，结构如下：
 
 ```toml
 [mcp_servers.chatcircle]
@@ -117,7 +179,20 @@ args = ["/绝对路径/chatcircleWeb/mcp/server.js"]
 env = { CC_PB_URL = "http://127.0.0.1:8090", CC_AGENT_EMAIL = "agent@cc.local", CC_AGENT_PASSWORD = "换成该环境的服务账号密码", CC_DATA_DIR = "/绝对路径/chatcircleWeb/mcp/data", CC_REPORT_DIR = "/绝对路径/chatcircleWeb/mcp/data" }
 ```
 
-Codex 使用相同的 `[mcp_servers.chatcircle]` 结构，用户级配置文件为 `~/.codex/config.toml`。
+### Kimi Code
+
+Kimi 使用 JSON MCP 配置，**不要照抄 Codex 的 TOML 配置**。当前安装程序自动注册支持
+Codex、WorkBuddy、Claude Desktop；Kimi 按其 CLI 注册或使用上面的标准 JSON `mcpServers` 块。
+
+不同 Kimi 版本可能使用 `~/.kimi/mcp.json` 或 `~/.kimi-code/mcp.json`，先用
+`kimi mcp list` 确认本机配置位置。若此前已用安装器配置过其他客户端，可复用本机安装：
+
+```sh
+kimi mcp add chatcircle --transport stdio -- /绝对路径/node /用户目录/.local/share/chatcircle-mcp/launch.mjs
+kimi mcp test chatcircle
+```
+
+参考 [Kimi 官方 MCP CLI 文档](https://moonshotai.github.io/kimi-cli/en/reference/kimi-mcp.html)。
 
 ### 后端地址选择
 
