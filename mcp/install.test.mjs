@@ -15,16 +15,36 @@ function scratch(t) {
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
-function execute(command, args, env) {
+function execute(t, command, args, env) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
+    const abort = () => {
+      t.diagnostic(`Installer timed out. Output:\n${output}`);
+      if (process.platform === 'win32') {
+        spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', timeout: 10000 });
+      } else child.kill('SIGKILL');
+    };
+    t.signal.addEventListener('abort', abort, { once: true });
+    child.once('close', () => t.signal.removeEventListener('abort', abort));
     child.stdout.on('data', (data) => { output += data; });
     child.stderr.on('data', (data) => { output += data; });
     child.on('error', reject);
     child.on('close', (code) => resolve({ code, output }));
   });
 }
+
+test('aborting an installer test terminates its subprocess and reports output', { timeout: 15000 }, async (t) => {
+  const controller = new AbortController();
+  const diagnostics = [];
+  const timer = setTimeout(() => controller.abort(), 500);
+  t.after(() => clearTimeout(timer));
+  const result = await execute({ signal: controller.signal, diagnostic: (message) => diagnostics.push(message) },
+    process.execPath, ['-e', 'setInterval(() => {}, 1000)'], process.env);
+  assert.notEqual(result.code, 0);
+  assert.equal(diagnostics.length, 1);
+  assert.match(diagnostics[0], /Installer timed out\. Output:/);
+});
 
 test('backend URL accepts HTTPS and loopback only, without embedded credentials', () => {
   for (const value of ['https://example.com/', 'http://127.0.0.1:8090', 'http://localhost:8090', 'http://[::1]:8090']) {
@@ -87,7 +107,7 @@ test('installation needs no account or backend and migrates old password configu
   const args = [installer, '--client', 'workbuddy', '--install-dir', installDir];
   const configFile = path.join(home, '.workbuddy/mcp.json');
   privateWrite(configFile, '{"mcpServers":{"unrelated":{"command":"keep"}}}');
-  let result = await execute(process.execPath, args, env);
+  let result = await execute(t, process.execPath, args, env);
   assert.equal(result.code, 0, result.output);
   assert.equal(requests, 0);
   const settingsFile = path.join(installDir, 'settings.json');
@@ -117,7 +137,7 @@ test('installation needs no account or backend and migrates old password configu
   privateWrite(path.join(installDir, 'credentials.json'), JSON.stringify({ CC_PB_URL: localUrl, CC_AGENT_EMAIL: 'old@example.com', CC_AGENT_PASSWORD: secret }));
   const savedData = path.join(installDir, 'data', 'existing-report.md');
   fs.writeFileSync(savedData, 'preserve report');
-  result = await execute(process.execPath, args, env);
+  result = await execute(t, process.execPath, args, env);
   assert.equal(result.code, 0, result.output);
   assert.equal(requests, 0);
   assert.equal(JSON.parse(fs.readFileSync(settingsFile)).CC_PB_URL, localUrl);
@@ -129,7 +149,7 @@ test('installation needs no account or backend and migrates old password configu
 
   if (spawnSync('codex', ['mcp', 'add', '--help'], { stdio: 'ignore' }).status === 0) {
     privateWrite(path.join(env.CODEX_HOME, 'config.toml'), 'model = "retained-model"\n[mcp_servers.other]\ncommand = "keep"\n');
-    result = await execute(process.execPath, [installer, '--client', 'codex', '--install-dir', installDir], env);
+    result = await execute(t, process.execPath, [installer, '--client', 'codex', '--install-dir', installDir], env);
     assert.equal(result.code, 0, result.output);
     const toml = fs.readFileSync(path.join(env.CODEX_HOME, 'config.toml'), 'utf8');
     assert.match(toml, /retained-model/);

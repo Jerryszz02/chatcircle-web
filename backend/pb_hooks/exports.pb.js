@@ -1321,7 +1321,8 @@ routerAdd('POST', '/api/cc/exports', (e) => {
       let genError2 = null;
       try {
         fileName2 = 'cc_export_' + $security.randomString(24) + '.' + outExt;
-        checksum2 = $security.sha256(outBytes);
+        // Uint8Array + JSVM toString preserves raw bytes instead of stringifying number[].
+        checksum2 = $security.sha256(toString(new Uint8Array(outBytes)));
         $os.mkdirAll(EXPORT_DIR, 0o700);
         $os.writeFile(EXPORT_DIR + '/' + fileName2, outBytes, 0o600);
       } catch (err) {
@@ -1845,7 +1846,8 @@ routerAdd('POST', '/api/cc/exports', (e) => {
   try {
     zipBytes = buildZip(files);
     fileName = 'cc_export_' + $security.randomString(24) + '.zip';
-    checksum = $security.sha256(zipBytes);
+    // Uint8Array + JSVM toString preserves raw bytes instead of stringifying number[].
+    checksum = $security.sha256(toString(new Uint8Array(zipBytes)));
     $os.mkdirAll(EXPORT_DIR, 0o700);
     $os.writeFile(EXPORT_DIR + '/' + fileName, zipBytes, 0o600);
   } catch (err) {
