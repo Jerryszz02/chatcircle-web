@@ -3,21 +3,28 @@ onRecordCreate((e) => {
   const record = e.record;
   if (record.get('is_template') && ['draft', 'archived'].indexOf(record.get('status')) < 0)
     throw new BadRequestError('机构模板只能保存为草稿或归档，请从模板创建新活动后发布');
-  const field = e.app.findFirstRecordByFilter(
+  // serve 启动迁移窗口内定义可能尚未创建（1787880000 回填存量活动早于 1788600000
+  // 播种定义）：缺失则本次跳过注入；升级完成后每次活动保存都会重新幂等注入，不变量不弱化。
+  const nameDefs = e.app.findRecordsByFilter(
     'registration_field_defs',
     "organization_id = '' && source_type = 'standard' && field_code = 'FULL_NAME'",
+    '',
+    1,
   );
-  let config = {};
-  try {
-    config = JSON.parse(String(record.get('form_config_json') || '{}')) || {};
-  } catch (_) {
-    config = {};
+  const field = nameDefs.length ? nameDefs[0] : null;
+  if (field) {
+    let config = {};
+    try {
+      config = JSON.parse(String(record.get('form_config_json') || '{}')) || {};
+    } catch (_) {
+      config = {};
+    }
+    if (typeof config !== 'object' || Array.isArray(config)) config = {};
+    const fields = Array.isArray(config.fields) ? config.fields : [];
+    config.fields = fields.filter((f) => f && f.field_def_id !== field.id);
+    config.fields.push({ field_def_id: field.id, enabled: true, required: true });
+    record.set('form_config_json', config);
   }
-  if (typeof config !== 'object' || Array.isArray(config)) config = {};
-  const fields = Array.isArray(config.fields) ? config.fields : [];
-  config.fields = fields.filter((f) => f && f.field_def_id !== field.id);
-  config.fields.push({ field_def_id: field.id, enabled: true, required: true });
-  record.set('form_config_json', config);
   if (
     String(record.original().get('pairing_started_at') || '') &&
     record.get('pairing_enabled') !== record.original().get('pairing_enabled')
@@ -33,21 +40,28 @@ onRecordUpdate((e) => {
   const record = e.record;
   if (record.get('is_template') && ['draft', 'archived'].indexOf(record.get('status')) < 0)
     throw new BadRequestError('机构模板只能保存为草稿或归档，请从模板创建新活动后发布');
-  const field = e.app.findFirstRecordByFilter(
+  // serve 启动迁移窗口内定义可能尚未创建（1787880000 回填存量活动早于 1788600000
+  // 播种定义）：缺失则本次跳过注入；升级完成后每次活动保存都会重新幂等注入，不变量不弱化。
+  const nameDefs = e.app.findRecordsByFilter(
     'registration_field_defs',
     "organization_id = '' && source_type = 'standard' && field_code = 'FULL_NAME'",
+    '',
+    1,
   );
-  let config = {};
-  try {
-    config = JSON.parse(String(record.get('form_config_json') || '{}')) || {};
-  } catch (_) {
-    config = {};
+  const field = nameDefs.length ? nameDefs[0] : null;
+  if (field) {
+    let config = {};
+    try {
+      config = JSON.parse(String(record.get('form_config_json') || '{}')) || {};
+    } catch (_) {
+      config = {};
+    }
+    if (typeof config !== 'object' || Array.isArray(config)) config = {};
+    const fields = Array.isArray(config.fields) ? config.fields : [];
+    config.fields = fields.filter((f) => f && f.field_def_id !== field.id);
+    config.fields.push({ field_def_id: field.id, enabled: true, required: true });
+    record.set('form_config_json', config);
   }
-  if (typeof config !== 'object' || Array.isArray(config)) config = {};
-  const fields = Array.isArray(config.fields) ? config.fields : [];
-  config.fields = fields.filter((f) => f && f.field_def_id !== field.id);
-  config.fields.push({ field_def_id: field.id, enabled: true, required: true });
-  record.set('form_config_json', config);
   if (
     String(record.original().get('pairing_started_at') || '') &&
     record.get('pairing_enabled') !== record.original().get('pairing_enabled')

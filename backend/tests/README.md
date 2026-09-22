@@ -81,8 +81,9 @@ impersonate，suite_trainings 即此模式），参与者一律走自定义端�
 ## 迁移冒烟（M0）
 
 `migration_smoke.sh` — 空库 migrate up → 全部 down → 再 up 往返 + serve 后 API 抽查
-（集合存在性、未认证拒绝、公开活动 viewRule、唯一索引、三角色隔离、无硬删除）。
-用法：`bash backend/tests/migration_smoke.sh`。
+（集合存在性、未认证拒绝、公开活动 viewRule、唯一索引、三角色隔离、无硬删除）；
+另含旧数据目录 serve 升级回归（含存量活动的旧迁移基线库直接以当前代码 serve，
+验证启动迁移不被 hooks 阻断）。用法：`bash backend/tests/migration_smoke.sh`。
 
 ### PocketBase 升级兼容性
 
