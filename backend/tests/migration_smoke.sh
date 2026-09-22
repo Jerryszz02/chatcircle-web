@@ -303,7 +303,8 @@ OLD_BASELINE_TS="1785889320"
 OLD_DATA="$WORK/old_data"
 OLD_MIGRATIONS="$WORK/old_migrations"
 OLD_HOOKS_OFF="$WORK/no_hooks"
-OLD_PORT="${CC_SMOKE_OLD_PORT:-8100}"
+# 从主端口派生，并行实例（README：每个实例不同 CC_SMOKE_PORT）天然错开
+OLD_PORT="${CC_SMOKE_OLD_PORT:-$((PORT + 1))}"
 OLD_BASE="http://127.0.0.1:$OLD_PORT"
 mkdir -p "$OLD_MIGRATIONS" "$OLD_HOOKS_OFF"
 for f in "$MIGRATIONS_DIR"/*.js; do
