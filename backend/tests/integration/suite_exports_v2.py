@@ -13,6 +13,7 @@
 - v1 兼容：旧形状请求 scope_json 归一化 source_schema_version=1，13-CSV 产物不变
   （清单不变由 suite_exports 覆盖，这里只校验归一化存储与派生）。
 """
+import hashlib
 import io
 import json
 import zipfile
@@ -271,6 +272,9 @@ def run(ctx):
 
     s, blob = call(base, 'GET', '/api/cc/exports/%s/download' % job_xlsx, token=AT_A, raw=True)
     rep.check('EXP2-18 xlsx 下载 200 且 PK 头', s == 200 and isinstance(blob, bytes) and blob[:2] == b'PK')
+    xlsx_job, _ = _job_scope(base, st, job_xlsx)
+    rep.check('EXP2-18a XLSX SHA-256 与持久化任务一致',
+              xlsx_job.get('file_checksum') == hashlib.sha256(blob).hexdigest())
     files = _unzip(blob)
     rep.check('EXP2-19 xlsx OOXML 结构齐全',
               '[Content_Types].xml' in files and 'xl/workbook.xml' in files
@@ -307,6 +311,9 @@ def run(ctx):
               and jr.get('include_pii') is True and sj.get('format') == 'csv_zip', sj)
 
     s, blob = call(base, 'GET', '/api/cc/exports/%s/download' % job_sens, token=AT_A, raw=True)
+    rep.check('EXP2-26a CSV ZIP SHA-256 与持久化任务一致',
+              s == 200 and isinstance(blob, bytes)
+              and jr.get('file_checksum') == hashlib.sha256(blob).hexdigest())
     zf = zipfile.ZipFile(io.BytesIO(blob))
     names = set(zf.namelist())
     rep.check('EXP2-27 csv_zip 文件集 = 数据域 csv + manifest + data_dictionary',

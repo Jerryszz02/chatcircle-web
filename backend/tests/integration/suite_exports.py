@@ -11,6 +11,7 @@
   超级管理员不受机构开关限制。
 """
 import csv
+import hashlib
 import io
 import zipfile
 
@@ -91,6 +92,12 @@ def run(ctx):
     rep.check('EXP-02 ZIP 下载 200 且 PK 头', s == 200 and isinstance(blob, bytes) and blob[:2] == b'PK')
     if not (s == 200 and isinstance(blob, bytes)):
         return
+    checksum = hashlib.sha256(blob).hexdigest()
+    rep.check('EXP-02a ZIP SHA-256 与创建响应一致',
+              exp['export_job'].get('file_checksum') == checksum)
+    s, stored_job = call(base, 'GET', '/api/collections/export_jobs/records/%s' % job, token=st)
+    rep.check('EXP-02b ZIP SHA-256 与持久化任务一致',
+              s == 200 and stored_job.get('file_checksum') == checksum)
     files = _unzip(blob)
 
     rep.check('EXP-03 ZIP 文件清单 = PRD §10.1 规定的 13 个 CSV',
