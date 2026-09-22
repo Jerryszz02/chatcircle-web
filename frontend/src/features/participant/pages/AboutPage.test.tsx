@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clearAllSessions, unstubApi } from '../../../test/mockApi';
@@ -56,15 +56,23 @@ describe('AboutPage 关于我们', () => {
       '/activities',
     );
     // 联系方式只放邮箱，不放私人微信
-    expect(
-      screen.getAllByRole('link', { name: 'maggie.yang@empact.sg' })[0],
-    ).toHaveAttribute('href', 'mailto:maggie.yang@empact.sg');
+    expect(screen.getAllByRole('link', { name: 'maggie.yang@empact.sg' })[0]).toHaveAttribute(
+      'href',
+      'mailto:maggie.yang@empact.sg',
+    );
   });
 
   it('页脚体现运营方 Empact', () => {
     renderAbout();
+    const footer = within(screen.getByRole('contentinfo'));
     expect(
-      screen.getByText('青年心理健康公益项目 · 由社会企业 Empact 发起与运营'),
+      footer.getByRole('img', { name: 'Empact · Empowering Greater Impact' }),
     ).toBeInTheDocument();
+    expect(footer.getByText('上海井畅企业管理咨询有限公司')).toBeInTheDocument();
+    expect(footer.getByRole('link', { name: '联系 Chat Circles' })).toHaveAttribute(
+      'href',
+      'mailto:maggie.yang@empact.sg',
+    );
+    expect(footer.getByRole('link', { name: '隐私政策' })).toHaveAttribute('href', '/privacy');
   });
 });
