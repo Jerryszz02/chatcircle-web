@@ -260,10 +260,6 @@
   margin-top: 0;
 }
 
-.ccp-home .ccp-site-footer a {
-  color: var(--cc-brand-600);
-}
-
 @media (max-width: 1000px) {
   .ccp-home .ccp-site-header-inner {
     gap: 12px;
