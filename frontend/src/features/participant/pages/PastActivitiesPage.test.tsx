@@ -77,6 +77,41 @@ describe('PastActivitiesPage 往期活动页', () => {
     expect(await screen.findByText('暂无往期活动。')).toBeInTheDocument();
   });
 
+  it.each(['# 正文', ''])('有外链时只展示在新标签页打开外链的阅读全文入口（正文：%s）', async (body_md) => {
+    stubApi({
+      'GET /api/collections/posts/records': { body: listBody([postItem({ body_md })]) },
+    });
+    renderPage();
+    const readLink = await screen.findByRole('link', { name: '阅读全文' });
+    expect(readLink).toHaveAttribute('href', 'https://example.com/post1');
+    expect(readLink).toHaveAttribute('target', '_blank');
+    expect(readLink).toHaveAttribute('rel', 'noreferrer');
+    expect(screen.queryByRole('link', { name: '阅读原文' })).not.toBeInTheDocument();
+  });
+
+  it.each(['', ' \t\n '])('外链为空或仅含空白时阅读全文仍指向站内详情（外链：%j）', async (external_url) => {
+    stubApi({
+      'GET /api/collections/posts/records': { body: listBody([postItem({ external_url })]) },
+    });
+    renderPage();
+    const readLink = await screen.findByRole('link', { name: '阅读全文' });
+    expect(readLink).toHaveAttribute('href', '/posts/post1');
+    expect(readLink).not.toHaveAttribute('target');
+  });
+
+  it('去掉外链首尾空白后仍在新标签页打开', async () => {
+    stubApi({
+      'GET /api/collections/posts/records': {
+        body: listBody([postItem({ external_url: ' \thttps://example.com/post1\n ' })]),
+      },
+    });
+    renderPage();
+    const readLink = await screen.findByRole('link', { name: '阅读全文' });
+    expect(readLink).toHaveAttribute('href', 'https://example.com/post1');
+    expect(readLink).toHaveAttribute('target', '_blank');
+    expect(readLink).toHaveAttribute('rel', 'noreferrer');
+  });
+
   it('加载失败展示错误提示与重试入口', async () => {
     stubApi({
       'GET /api/collections/posts/records': {

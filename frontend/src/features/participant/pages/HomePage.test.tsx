@@ -211,7 +211,7 @@ describe('HomePage 首页', () => {
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
   });
 
-  it('往期活动区块展示后台公开推文的封面、摘要与原文链接', async () => {
+  it('往期活动区块展示封面、摘要，并通过唯一的阅读全文入口在新标签页打开外链', async () => {
     stubActivities([], [postItem({ cover: 'cover.png' })]);
     renderHome();
     expect(screen.getByRole('heading', { name: '往期活动' })).toBeInTheDocument();
@@ -221,10 +221,14 @@ describe('HomePage 首页', () => {
       'src',
       expect.stringContaining('/api/files/posts/post1/cover.png'),
     );
-    expect(screen.getByRole('link', { name: '阅读原文' })).toHaveAttribute(
+    const readLink = screen.getByRole('link', { name: '阅读全文' });
+    expect(readLink).toHaveAttribute(
       'href',
       'https://example.com/post1',
     );
+    expect(readLink).toHaveAttribute('target', '_blank');
+    expect(readLink).toHaveAttribute('rel', 'noreferrer');
+    expect(screen.queryByRole('link', { name: '阅读原文' })).not.toBeInTheDocument();
   });
 
   it('Our Impact 展示首场试点真实数据与参与者引言，并标注样本口径', () => {
