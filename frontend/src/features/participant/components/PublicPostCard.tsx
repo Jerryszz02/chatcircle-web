@@ -26,6 +26,7 @@ function postSummary(post: Pick<PostRecord, 'summary' | 'body_md'>): string {
 export function PublicPostCard({ post }: { post: PostRecord }) {
   const coverUrl = postCoverUrl(post);
   const summary = postSummary(post);
+  const externalUrl = post.external_url?.trim();
 
   return (
     <li className="ccp-card">
@@ -38,9 +39,9 @@ export function PublicPostCard({ post }: { post: PostRecord }) {
         {post.published_at ? (
           <p className="cc-item-meta">发布于 {formatDateTime(post.published_at)}</p>
         ) : null}
-        {post.external_url ? (
+        {externalUrl ? (
           <a
-            href={post.external_url}
+            href={externalUrl}
             target="_blank"
             rel="noreferrer"
             className="cc-btn cc-btn-secondary cc-btn-block"
