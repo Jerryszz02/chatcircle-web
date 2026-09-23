@@ -38,7 +38,6 @@ export function PublicPostCard({ post }: { post: PostRecord }) {
         {post.published_at ? (
           <p className="cc-item-meta">发布于 {formatDateTime(post.published_at)}</p>
         ) : null}
-        {post.body_md?.trim() ? <Link to={`/posts/${post.id}`} className="cc-btn cc-btn-secondary cc-btn-block">阅读全文</Link> : null}
         {post.external_url ? (
           <a
             href={post.external_url}
@@ -46,8 +45,12 @@ export function PublicPostCard({ post }: { post: PostRecord }) {
             rel="noreferrer"
             className="cc-btn cc-btn-secondary cc-btn-block"
           >
-            阅读原文
+            阅读全文
           </a>
+        ) : post.body_md?.trim() ? (
+          <Link to={`/posts/${post.id}`} className="cc-btn cc-btn-secondary cc-btn-block">
+            阅读全文
+          </Link>
         ) : null}
       </div>
     </li>
