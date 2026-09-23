@@ -65,7 +65,6 @@ export function SiteFooter() {
             <Link to="/about">关于我们</Link>
             <a href="mailto:maggie.yang@empact.sg">联系 Chat Circles</a>
             <Link to="/privacy">隐私政策</Link>
-            <a href="https://empact.cn/">返回 Empact 官网</a>
             <Link to="/admin/login" rel="nofollow">
               后台管理
             </Link>
