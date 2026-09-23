@@ -111,9 +111,17 @@ describe('HomePage 首页', () => {
       'href',
       '/activities/past',
     );
+    const nav = within(screen.getByRole('navigation', { name: '站点导航' }));
+    const aboutLink = nav.getByRole('link', { name: '关于我们' });
+    const officialLink = nav.getByRole('link', { name: '返回官网' });
+    expect(aboutLink).toHaveAttribute('href', '/about');
+    expect(officialLink).toHaveAttribute('href', 'https://empact.cn/');
+    expect(aboutLink.nextElementSibling).toBe(officialLink);
     expect(
-      within(screen.getByRole('navigation', { name: '站点导航' })).getByRole('link', { name: '关于我们' }),
-    ).toHaveAttribute('href', '/about');
+      within(screen.getByRole('navigation', { name: '页脚导航' })).queryByRole('link', {
+        name: /返回.*官网/,
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it('现有活动区块渲染公开活动卡片（报名状态 + 报名入口 + 查看全部）', async () => {
