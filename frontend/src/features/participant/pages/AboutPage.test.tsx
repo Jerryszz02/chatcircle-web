@@ -69,6 +69,10 @@ describe('AboutPage 关于我们', () => {
       footer.getByRole('img', { name: 'Empact · Empowering Greater Impact' }),
     ).toBeInTheDocument();
     expect(footer.getByText('上海井畅企业管理咨询有限公司')).toBeInTheDocument();
+    expect(footer.getByRole('link', { name: '沪公网安备31010402337130号' })).toHaveAttribute(
+      'href',
+      'https://beian.mps.gov.cn/#/query/webSearch?code=31010402337130',
+    );
     expect(footer.getByRole('link', { name: '联系 Chat Circles' })).toHaveAttribute(
       'href',
       'mailto:maggie.yang@empact.sg',

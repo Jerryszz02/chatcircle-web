@@ -75,6 +75,13 @@ export function SiteFooter() {
             <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">
               沪ICP备2026002363号-2
             </a>
+            <a
+              href="https://beian.mps.gov.cn/#/query/webSearch?code=31010402337130"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              沪公网安备31010402337130号
+            </a>
           </div>
         </div>
       </div>
