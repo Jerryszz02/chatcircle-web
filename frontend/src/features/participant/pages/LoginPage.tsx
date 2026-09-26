@@ -1,6 +1,7 @@
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { hasAnySession, participantAuth } from '../../../shared/auth';
-import { Card, PageLayout } from '../../../shared/ui';
+import { Card } from '../../../shared/ui';
+import { ParticipantPageLayout } from '../components/ParticipantPageLayout';
 import { ParticipantAccessPanel } from '../components/ParticipantAccessPanel';
 import { sanitizeRedirect } from '../lib/redirect';
 
@@ -27,7 +28,7 @@ export function LoginPage() {
   }
 
   return (
-    <PageLayout section="参与者端" title="平台通用登录" className="ccp-root" backTo="/">
+    <ParticipantPageLayout section="参与者端" title="平台通用登录" backTo="/">
       <div className="cc-auth-mark" aria-hidden="true">
         <span />
         <span />
@@ -36,6 +37,6 @@ export function LoginPage() {
         <ParticipantAccessPanel onSuccess={() => navigate(target, { replace: true })} />
       </Card>
       <p className="cc-hint">支持账号密码与手机验证码登录；没有账号可在面板内注册。</p>
-    </PageLayout>
+    </ParticipantPageLayout>
   );
 }

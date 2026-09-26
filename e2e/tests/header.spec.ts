@@ -6,7 +6,7 @@ const { webUrl } = readState();
 for (const width of [320, 390, 768, 860, 900, 1440]) {
   test(`顶部官网入口在 ${width}px 下位于关于右侧且无溢出`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
-    for (const path of ['/', '/about']) {
+    for (const path of ['/', '/about', '/login', '/activities', '/privacy']) {
       await page.goto(`${webUrl}${path}`);
       const nav = page.getByRole('navigation', { name: '站点导航', exact: true });
       const about = nav.getByRole('link', { name: '关于我们' });

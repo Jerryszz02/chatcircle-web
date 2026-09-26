@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { normalizeApiError } from '../../../shared/api/http';
 import { participantAuth } from '../../../shared/auth';
-import { Button, Card, Loading, PageLayout } from '../../../shared/ui';
+import { Button, Card, Loading } from '../../../shared/ui';
+import { ParticipantPageLayout } from '../components/ParticipantPageLayout';
 import { isUnauthorized, selfTrainingCheckin } from '../api';
 import { formatDateTime, trainingCheckinFailureCopy } from '../lib/status';
 
@@ -57,7 +58,7 @@ export function TrainingCheckinPage() {
   }, [attempt]);
 
   return (
-    <PageLayout section="参与者端" title="培训签到" className="ccp-root">
+    <ParticipantPageLayout section="参与者端" title="培训签到">
       {phase.kind === 'loading' ? <Loading fullscreen label="正在签到…" /> : null}
 
       {phase.kind === 'success' ? (
@@ -87,6 +88,6 @@ export function TrainingCheckinPage() {
           </div>
         </Card>
       ) : null}
-    </PageLayout>
+    </ParticipantPageLayout>
   );
 }

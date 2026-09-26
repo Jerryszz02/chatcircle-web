@@ -1,0 +1,277 @@
+/* Shared Empact palette and navigation, extracted from the approved homepage. */
+.ccp-site {
+  --cc-brand-50: #e4eff3;
+  --cc-brand-600: #125284;
+  --cc-brand-700: #125284;
+  --cc-neutral-50: #f3f0e7;
+  --cc-neutral-300: rgb(8 90 136 / 28%);
+  --cc-neutral-600: #4e6979;
+  --cc-neutral-900: #125284;
+  --cc-accent-500: #fb394d;
+  color: var(--cc-brand-600);
+  background: var(--cc-neutral-50);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  padding-top: 16px;
+  background-image: linear-gradient(var(--cc-brand-600), var(--cc-brand-600));
+  background-size: 100% 140px;
+  background-repeat: no-repeat;
+}
+
+.ccp-site .ccp-site-header {
+  position: relative;
+  width: calc(100% - 40px);
+  max-width: 1336px;
+  margin: 0 auto;
+  border: 0;
+  background: white;
+  backdrop-filter: none;
+}
+
+.ccp-site .ccp-site-header-inner {
+  max-width: none;
+  min-height: 84px;
+  padding: 12px 32px;
+  gap: 24px;
+}
+
+.ccp-site .ccp-site-logo {
+  font-size: 24px;
+}
+
+.ccp-site .ccp-site-logo-img {
+  width: 44px;
+  height: 44px;
+}
+
+.ccp-site .ccp-site-nav a,
+.ccp-site .ccp-site-actions .cc-btn {
+  border-radius: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--cc-brand-600);
+  font-size: 16px;
+}
+
+.ccp-site .ccp-site-nav a.active,
+.ccp-site .ccp-site-actions .cc-btn {
+  border-bottom-color: var(--cc-accent-500);
+}
+@media (max-width: 1000px) {
+  .ccp-site .ccp-site-header-inner {
+    gap: 12px;
+    padding-inline: 20px;
+  }
+
+  .ccp-site .ccp-site-nav a {
+    padding-inline: 8px;
+    font-size: 14px;
+  }
+
+  .ccp-site .ccp-site-logo {
+    font-size: 20px;
+  }
+}
+
+@media (max-width: 760px) {
+  .ccp-site {
+    padding-top: 12px;
+  }
+
+  .ccp-site .ccp-site-header {
+    width: calc(100% - 24px);
+  }
+
+  .ccp-site .ccp-site-header-inner {
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    padding: 10px 12px 4px;
+  }
+
+  .ccp-site .ccp-site-logo {
+    font-size: 18px;
+  }
+
+  .ccp-site .ccp-site-logo-img {
+    width: 32px;
+    height: 32px;
+  }
+
+  .ccp-site .ccp-site-actions {
+    margin-left: auto;
+  }
+
+  .ccp-site .ccp-site-actions .cc-btn {
+    padding-inline: 8px;
+    font-size: 13px;
+  }
+
+  .ccp-site .ccp-site-nav {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    justify-content: space-between;
+  }
+
+  .ccp-site .ccp-site-nav a {
+    min-height: 44px;
+    padding-inline: 3px;
+    font-size: 13px;
+  }
+}
+
+/* Interior content uses the same editorial spacing and rules as the homepage.
+ * Scope all overrides to participant interiors; admin and homepage content stay unchanged. */
+.ccp-interior {
+  --cc-brand-100: #d4e5ed;
+  --cc-brand-500: #125284;
+  --cc-accent-100: #fcecef;
+  --ccp-mint: #9ebaca;
+  --ccp-mint-bg: #e4eff3;
+  --cc-radius-card-p: 0px;
+  --cc-radius-control: 0px;
+  --cc-radius-card-a: 0px;
+  --cc-shadow-1: none;
+  font-size: 16px;
+  --cc-fs-body: 16px;
+  --cc-fs-card-title: 21px;
+  --cc-fs-page-title: clamp(28px, 3.2vw, 44px);
+  background-size: 100% 140px;
+}
+
+.ccp-interior .ccp-site-main {
+  max-width: 1280px;
+  padding: clamp(32px, 4vw, 56px) clamp(20px, 3.6vw, 52px) 64px;
+  margin-top: 40px;
+  line-height: 1.75;
+}
+
+.ccp-workflow .ccp-site-main {
+  max-width: 840px;
+}
+
+.ccp-interior .page-header {
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--cc-neutral-300);
+}
+
+.ccp-interior .ccp-section-title {
+  margin: 32px 0 24px;
+  font-size: clamp(25px, 2.7vw, 34px);
+  line-height: 1.4;
+}
+
+.ccp-interior .ccp-site-main > section:first-child > .ccp-section-title {
+  margin-top: 0;
+}
+
+.ccp-interior .ccp-about-title {
+  font-size: clamp(32px, 4vw, 52px);
+  line-height: 1.3;
+}
+
+.ccp-interior .ccp-about-lead {
+  max-width: 760px;
+  margin-top: 20px;
+  font-size: clamp(18px, 2vw, 22px);
+}
+
+.ccp-interior .ccp-about-section {
+  margin-top: 40px;
+  padding-top: 8px;
+  border-top: 1px solid var(--cc-neutral-300);
+}
+
+.ccp-interior .ccp-card-grid {
+  gap: 28px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ccp-interior .ccp-card,
+.ccp-interior .cc-metric,
+.ccp-interior .ccp-step {
+  border: 0;
+  border-top: 1px solid var(--cc-neutral-300);
+  background: transparent;
+  box-shadow: none;
+}
+
+.ccp-interior .ccp-card-body,
+.ccp-interior .cc-metric,
+.ccp-interior .ccp-step {
+  padding: 20px 0;
+}
+
+.ccp-interior .ccp-metric-grid {
+  gap: 24px;
+}
+
+.ccp-interior .cc-metric-value {
+  font-size: 38px;
+}
+
+.ccp-interior .cc-metric-note {
+  font-size: 14px;
+}
+
+.ccp-interior .cc-item-head {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.ccp-interior .cc-card-header,
+.ccp-interior .cc-card-body {
+  padding: 20px 24px;
+}
+
+.ccp-interior .ccp-reading a {
+  color: var(--cc-brand-600);
+  text-underline-offset: 4px;
+}
+
+.ccp-interior .ccp-reading h1 {
+  font-size: var(--cc-fs-page-title);
+  line-height: 1.4;
+}
+
+.ccp-interior .ccp-reading h2 {
+  padding-top: 24px;
+  border-top: 1px solid var(--cc-neutral-300);
+}
+
+.ccp-interior .cc-auth-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.ccp-interior .cc-auth-switch .cc-link-button {
+  margin: 0;
+  text-align: left;
+}
+
+.ccp-interior .ccp-site-footer {
+  margin-top: 0;
+}
+
+@media (max-width: 760px) {
+  .ccp-interior .ccp-site-main {
+    margin-top: 32px;
+    padding-top: 28px;
+    padding-bottom: 40px;
+  }
+
+  .ccp-interior .ccp-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+
+  .ccp-interior .cc-card-header,
+  .ccp-interior .cc-card-body {
+    padding: 16px;
+  }
+
+  .ccp-interior .ccp-section-head {
+    flex-wrap: wrap;
+  }
+}

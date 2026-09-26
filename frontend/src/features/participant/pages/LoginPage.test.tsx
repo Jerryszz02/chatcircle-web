@@ -43,6 +43,9 @@ describe('LoginPage 平台通用登录', () => {
     expect(screen.getByRole('button', { name: '注册账号' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '忘记密码' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '使用原用户名账号迁移' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: '站点导航' })).toBeInTheDocument();
+    expect(screen.getByRole('contentinfo')).toBeInTheDocument();
+    expect(screen.getAllByRole('main')).toHaveLength(1);
     // 顶部提供返回首页入口
     expect(screen.getByRole('link', { name: '返回首页' })).toHaveAttribute('href', '/');
   });

@@ -3,7 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { normalizeApiError, type ApiError } from '../../../shared/api/http';
 import { participantAuth } from '../../../shared/auth';
 import type { ParticipantAccountRecord } from '../../../shared/api/types';
-import { Button, Card, Loading, PageLayout } from '../../../shared/ui';
+import { Button, Card, Loading } from '../../../shared/ui';
+import { ParticipantPageLayout } from '../components/ParticipantPageLayout';
 import { getMeOverview, isUnauthorized, type MeOverview } from '../api';
 import { MyPairingCardView } from '../components/MyPairingCard';
 import { PhoneBindingForm } from '../components/PhoneBindingForm';
@@ -88,7 +89,7 @@ export function MePage() {
   );
 
   return (
-    <PageLayout section="参与者端" title="我的中心" actions={headerActions} className="ccp-root" backTo="/">
+    <ParticipantPageLayout section="参与者端" title="我的中心" actions={headerActions} backTo="/">
       {loading ? <Loading fullscreen /> : null}
 
       {!loading && error ? (
@@ -227,6 +228,6 @@ export function MePage() {
           </Card>
         </>
       ) : null}
-    </PageLayout>
+    </ParticipantPageLayout>
   );
 }

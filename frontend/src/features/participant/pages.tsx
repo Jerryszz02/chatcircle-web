@@ -3,6 +3,7 @@
  * 页面实现位于 ./pages/，复用组件位于 ./components/，领域逻辑位于 ./lib/。
  */
 import './participant.css';
+import './site.css';
 
 export { HomePage } from './pages/HomePage';
 export { AboutPage } from './pages/AboutPage';

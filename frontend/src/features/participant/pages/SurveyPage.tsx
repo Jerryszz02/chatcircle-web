@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { normalizeApiError } from '../../../shared/api/http';
 import { participantAuth } from '../../../shared/auth';
-import { Button, Card, Loading, Modal, PageLayout, useToast } from '../../../shared/ui';
+import { Button, Card, Loading, Modal, useToast } from '../../../shared/ui';
+import { ParticipantPageLayout } from '../components/ParticipantPageLayout';
 import {
   getSubmission,
   getSurveyByToken,
@@ -142,10 +143,9 @@ export function SurveyPage() {
   }
 
   return (
-    <PageLayout
+    <ParticipantPageLayout
       section="参与者端"
       title={meta ? meta.survey.title : '问卷填写'}
-      className="ccp-root"
       backTo="/"
     >
       {phase.kind === 'loading' ? <Loading fullscreen /> : null}
@@ -249,6 +249,6 @@ export function SurveyPage() {
           </Link>
         </Card>
       ) : null}
-    </PageLayout>
+    </ParticipantPageLayout>
   );
 }
