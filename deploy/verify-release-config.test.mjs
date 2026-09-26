@@ -10,8 +10,17 @@ import {
   hasCandidateBackupRuntimeSmoke,
   hasBuiltBackupRuntime,
   hasCandidateImagePreflightBuild,
+  hasCandidatePublicWebSmoke,
+  hasBuiltPublicWebRuntime,
+  hasFunctionalSpaNoindex,
+  hasIsolatedPublicWebService,
   hasLoopbackOnlyPocketBasePort,
   hasPostDeployHealthCheck,
+  hasPostDeployPublicWebGate,
+  hasPublicWebCaddyRouting,
+  hasPublicWebPostDeployHealthCheck,
+  hasPublicWebUpstreamConfig,
+  hasRegisterBeforePublicActivity,
   hasCiSuccessGate,
   hasImmutableDeploySha,
   hasManualShaCiValidation,
@@ -21,6 +30,7 @@ import {
   hasRuntimeImagePreflightPull,
   hasSerializedBackupGateBeforeSwitch,
   hasStandardCaddyPublicPorts,
+  hasXffOverrideOnAllUpstreams,
   rejectsLegacyServerOverride,
   usesStandardAutomaticHttps,
 } from './release-config-checks.mjs';
@@ -318,4 +328,203 @@ test('production SMS preflight still passes without optional STS token or scheme
     preflight: `
           for name in ${required}; do`,
   })), true);
+});
+
+// —— 公开页 SSR 渲染服务（public-web）检查 ——
+
+const publicWebCompose = `
+  app:
+    image: chatcircle-app:\${CC_RELEASE_SHA:-local}
+  public-web:
+    image: chatcircle-public-web:\${CC_RELEASE_SHA:-local}
+    build:
+      context: .
+      dockerfile: deploy/public-web.Dockerfile
+      args:
+        CC_RELEASE_SHA: \${CC_RELEASE_SHA:-local}
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      PORT: 3100
+      CC_SITE_ORIGIN: \${CC_SITE_ORIGIN:-https://chatcircle.empact.cn}
+      CC_PB_INTERNAL_URL: http://app:8090
+    restart: unless-stopped
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - '80:80'
+      - '443:443'
+volumes:
+  pb_data:
+`;
+
+test('public-web compose 服务必须提交绑定、配置齐全且无 host 端口/卷', () => {
+  assert.equal(hasBuiltPublicWebRuntime(publicWebCompose), true);
+  assert.equal(hasIsolatedPublicWebService(publicWebCompose), true);
+  assert.equal(hasPublicWebUpstreamConfig(publicWebCompose), true);
+});
+
+test('public-web 发布 host 端口或挂卷即拒绝', () => {
+  const withPorts = publicWebCompose.replace('    environment:', '    ports:\n      - "3100:3100"\n    environment:');
+  assert.equal(hasIsolatedPublicWebService(withPorts), false);
+  const withVolume = publicWebCompose.replace('    environment:', '    volumes:\n      - pb_data:/data\n    environment:');
+  assert.equal(hasIsolatedPublicWebService(withVolume), false);
+  assert.equal(hasIsolatedPublicWebService('app:\n    image: x'), false);
+});
+
+test('public-web 上游必须指向 compose 私网的 app:8090', () => {
+  assert.equal(
+    hasPublicWebUpstreamConfig(publicWebCompose.replace('http://app:8090', 'http://127.0.0.1:8090')),
+    false,
+  );
+  assert.equal(hasBuiltPublicWebRuntime(''), false);
+});
+
+const caddyWithPublicWeb = `
+chatcircle.empact.cn {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+	@publicMeta path /public-assets/* /robots.txt /sitemap.xml
+	@api path /api/*
+	@spaAssets path /assets/*
+	@functionalSpa path /login /me /trainings /checkin/* /training-checkin/* /survey/* /admin/* /super/* /a/*/register
+	@publicPages path / /about /privacy /activities /activities/past /a/* /posts/*
+	route {
+		handle /_/* {
+			respond 403
+		}
+		handle @publicMeta {
+			reverse_proxy public-web:3100 {
+				header_up X-Forwarded-For {remote_host}
+			}
+		}
+		handle @api {
+			reverse_proxy app:8090 {
+				header_up X-Forwarded-For {remote_host}
+			}
+		}
+		handle @spaAssets {
+			reverse_proxy app:8090 {
+				header_up X-Forwarded-For {remote_host}
+			}
+		}
+		handle @functionalSpa {
+			header X-Robots-Tag "noindex"
+			reverse_proxy app:8090 {
+				header_up X-Forwarded-For {remote_host}
+			}
+		}
+		handle @publicPages {
+			reverse_proxy public-web:3100 {
+				header_up X-Forwarded-For {remote_host}
+			}
+		}
+		handle {
+			reverse_proxy public-web:3100 {
+				header_up X-Forwarded-For {remote_host}
+			}
+		}
+	}
+}
+`;
+
+test('Caddy 公开页路由、功能 SPA noindex、顺序与 XFF 覆盖', () => {
+  assert.equal(hasPublicWebCaddyRouting(caddyWithPublicWeb), true);
+  assert.equal(hasFunctionalSpaNoindex(caddyWithPublicWeb), true);
+  assert.equal(hasRegisterBeforePublicActivity(caddyWithPublicWeb), true);
+  assert.equal(hasXffOverrideOnAllUpstreams(caddyWithPublicWeb), true);
+  assert.equal(hasActiveAdminConsoleBlock(caddyWithPublicWeb), true);
+});
+
+test('Caddy 公开页路由缺路径或缺上游即拒绝', () => {
+  assert.equal(
+    hasPublicWebCaddyRouting(caddyWithPublicWeb.replace('/sitemap.xml', '')),
+    false,
+    'publicMeta 缺 /sitemap.xml 不应通过',
+  );
+  assert.equal(
+    hasPublicWebCaddyRouting(caddyWithPublicWeb.replace('/activities/past', '')),
+    false,
+    'publicPages 缺 /activities/past 不应通过',
+  );
+  assert.equal(
+    hasPublicWebCaddyRouting(caddyWithPublicWeb.replaceAll('reverse_proxy public-web:3100', 'reverse_proxy public-web:3101')),
+    false,
+  );
+  assert.equal(hasPublicWebCaddyRouting('chatcircle.empact.cn {\n\treverse_proxy app:8090\n}'), false);
+});
+
+test('Caddy 功能 SPA 缺 noindex 或路径不全即拒绝', () => {
+  assert.equal(
+    hasFunctionalSpaNoindex(caddyWithPublicWeb.replace('	header X-Robots-Tag "noindex"\n', '')),
+    false,
+  );
+  assert.equal(
+    hasFunctionalSpaNoindex(caddyWithPublicWeb.replace(' /a/*/register', '')),
+    false,
+    '功能组缺 /a/*/register 不应通过',
+  );
+});
+
+test('报名路由必须先于公开活动详情命中', () => {
+  const removed = caddyWithPublicWeb.replace(/handle @functionalSpa \{[\s\S]*?\n\t\t\}\n/, '');
+  assert.equal(hasRegisterBeforePublicActivity(removed), false, '缺功能组 handle 不应通过');
+
+  // 真正交换顺序：功能组 handle 挪到兜底 handle 前（即公开组之后，/a/* 会先截获 /a/*/register）
+  const functionalHandle = /(\t\thandle @functionalSpa \{[\s\S]*?\n\t\t\}\n)/;
+  const match = functionalHandle.exec(caddyWithPublicWeb);
+  const without = caddyWithPublicWeb.replace(functionalHandle, '');
+  const swapped = without.replace(/\t\thandle \{/, `${match[1]}\t\thandle {`);
+  assert.notEqual(swapped, without, '测试 fixture 必须真的交换了顺序');
+  assert.equal(hasRegisterBeforePublicActivity(swapped), false, '功能组排在公开组之后不应通过');
+});
+
+test('任一上游缺 XFF 覆盖即拒绝', () => {
+  // 只保留 publicMeta 一处 XFF，其余上游移除
+  const missing = caddyWithPublicWeb.replace(
+    /handle @publicPages \{\n\t\t\treverse_proxy public-web:3100 \{\n\t\t\t\theader_up X-Forwarded-For \{remote_host\}\n\t\t\t\}\n\t\t\}/,
+    'handle @publicPages {\n\t\t\treverse_proxy public-web:3100\n\t\t}',
+  );
+  assert.equal(hasXffOverrideOnAllUpstreams(missing), false);
+  // 只剩单上游的旧配置（无 route 分组）不满足双侧覆盖
+  assert.equal(hasXffOverrideOnAllUpstreams(`
+    handle {
+      reverse_proxy app:8090 {
+        header_up X-Forwarded-For {remote_host}
+      }
+    }
+  `), false);
+});
+
+test('public-web 部署 workflow 门禁：smoke 顺序、容器健康与 SSR 标记', () => {
+  const source = workflow({
+    preflight: `
+          docker compose --project-name "$preflight_project" build
+          ./deploy/smoke-public-web-runtime.sh "chatcircle-public-web:$target_sha"`,
+    deploy: `
+          public_web_id="$(docker compose ps -q public-web)"
+          public_web_healthy=0
+          status="$(docker inspect --format '{{.State.Health.Status}}' "$public_web_id" 2>/dev/null || echo '')"
+          docker compose logs --tail=120 public-web
+          home_html="$(curl --fail https://chatcircle.empact.cn/)"
+          grep -q 'rel="canonical"' <<<"$home_html"
+          grep -q '__CC_PUBLIC_DATA__' <<<"$home_html"
+          curl --fail https://chatcircle.empact.cn/robots.txt`,
+  });
+  assert.equal(hasCandidatePublicWebSmoke(source), true);
+  assert.equal(hasPublicWebPostDeployHealthCheck(source), true);
+  assert.equal(hasPostDeployPublicWebGate(source), true);
+
+  // smoke 必须先于构建之后（顺序颠倒不允许）
+  assert.equal(hasCandidatePublicWebSmoke(workflow({
+    preflight: `
+          ./deploy/smoke-public-web-runtime.sh "chatcircle-public-web:$target_sha"
+          docker compose --project-name "$preflight_project" build`,
+  })), false);
+  // 只 curl 健康端点不算 SSR 门禁
+  assert.equal(hasPostDeployPublicWebGate(workflow({
+    deploy: 'curl --fail https://chatcircle.empact.cn/api/cc/health',
+  })), false);
 });

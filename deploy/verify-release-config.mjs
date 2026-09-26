@@ -16,10 +16,19 @@ import {
   hasActiveConfigText,
   hasCandidateImagePreflightBuild,
   hasCandidateBackupRuntimeSmoke,
+  hasCandidatePublicWebSmoke,
   hasBackupPostDeployHealthCheck,
   hasBackupPreDeployReadiness,
   hasBackupRevisionBinding,
   hasBuiltBackupRuntime,
+  hasBuiltPublicWebRuntime,
+  hasFunctionalSpaNoindex,
+  hasIsolatedPublicWebService,
+  hasPostDeployPublicWebGate,
+  hasPublicWebCaddyRouting,
+  hasPublicWebPostDeployHealthCheck,
+  hasPublicWebUpstreamConfig,
+  hasRegisterBeforePublicActivity,
   hasSerializedBackupGateBeforeSwitch,
   hasLoopbackOnlyPocketBasePort,
   hasPostDeployHealthCheck,
@@ -31,6 +40,7 @@ import {
   hasPreflightSmsValidation,
   hasRuntimeImagePreflightPull,
   hasStandardCaddyPublicPorts,
+  hasXffOverrideOnAllUpstreams,
   rejectsLegacyServerOverride,
   stripConfigComments,
   usesStandardAutomaticHttps,
@@ -45,6 +55,7 @@ const files = {
   caddy: read('deploy/Caddyfile'),
   deployWorkflow: read('.github/workflows/deploy.yml'),
   backupDockerfile: read('deploy/backup.Dockerfile'),
+  publicWebDockerfile: read('deploy/public-web.Dockerfile'),
   phoneHook: read('backend/pb_hooks/phoneauth.pb.js'),
   phoneUi: read('frontend/src/features/participant/lib/phone.ts'),
   gitignore: read('.gitignore'),
@@ -105,6 +116,27 @@ check(
 );
 
 check(
+  'public-web 使用提交绑定的构建镜像',
+  hasBuiltPublicWebRuntime(files.compose)
+    && /ARG CC_RELEASE_SHA/.test(files.publicWebDockerfile)
+    && /LABEL org\.opencontainers\.image\.revision/.test(files.publicWebDockerfile)
+    && /CMD \["node", "dist-public\/server\/index\.js"\]/.test(files.publicWebDockerfile),
+  'public-web 必须由 deploy/public-web.Dockerfile 构建、以 CC_RELEASE_SHA 标记并运行渲染服务 bundle',
+);
+
+check(
+  'public-web 不发布 host 端口、不挂卷',
+  hasIsolatedPublicWebService(files.compose),
+  '公开渲染服务只允许经 Docker 私网被 Caddy 访问，不得发布 host 端口或挂载 pb_data',
+);
+
+check(
+  'public-web 上游与站点 origin 配置',
+  hasPublicWebUpstreamConfig(files.compose),
+  'CC_PB_INTERNAL_URL 必须指向 app:8090，CC_SITE_ORIGIN 默认 https://chatcircle.empact.cn',
+);
+
+check(
   'Caddy 使用标准 80/443',
   hasStandardCaddyPublicPorts(files.compose),
   '生产 Caddy 必须发布 80:80 与 443:443，且不得保留 8443',
@@ -141,6 +173,30 @@ check(
   'Caddy PB 管理台封闭',
   hasActiveAdminConsoleBlock(files.caddy),
   '缺少活动的 handle /_/* { respond 403 } 配置块',
+);
+
+check(
+  'Caddy 公开页 SSR 路由',
+  hasPublicWebCaddyRouting(files.caddy),
+  '缺少 /public-assets、robots.txt、sitemap.xml 或公开页路径到 public-web:3100 的路由（含兜底 404）',
+);
+
+check(
+  'Caddy 功能 SPA 路径 noindex',
+  hasFunctionalSpaNoindex(files.caddy),
+  '功能 SPA 路径组必须完整（登录/我的/培训/签到/问卷/管理端/报名），带 header X-Robots-Tag "noindex" 并反代 app:8090',
+);
+
+check(
+  'Caddy 报名路由先于公开活动详情',
+  hasRegisterBeforePublicActivity(files.caddy),
+  '/a/*/register（功能页）必须在 /a/*（公开页）之前命中，否则报名页会被 SSR 404',
+);
+
+check(
+  'Caddy 全部上游覆盖 XFF',
+  hasXffOverrideOnAllUpstreams(files.caddy),
+  'app:8090 与 public-web:3100 每个 reverse_proxy 块都必须覆盖 X-Forwarded-For',
 );
 
 check(
@@ -189,6 +245,12 @@ check(
   '部署预检候选 backup 无网络启动 smoke',
   hasCandidateBackupRuntimeSmoke(files.deployWorkflow),
   '候选 backup 镜像构建后必须运行 deploy/smoke-backup-runtime.sh，避免仅凭 build 放行',
+);
+
+check(
+  '部署预检候选 public-web 无网络启动 smoke',
+  hasCandidatePublicWebSmoke(files.deployWorkflow),
+  '候选 public-web 镜像构建后必须运行 deploy/smoke-public-web-runtime.sh，避免仅凭 build 放行',
 );
 
 check(
@@ -244,6 +306,18 @@ check(
   '部署后 backup 镜像绑定目标 SHA',
   hasBackupRevisionBinding(files.deployWorkflow),
   '生产更新后必须确认 backup OCI revision 与目标提交一致',
+);
+
+check(
+  '部署后 public-web 容器健康检查',
+  hasPublicWebPostDeployHealthCheck(files.deployWorkflow),
+  '生产更新后必须等待 public-web healthcheck healthy，并在失败时输出诊断',
+);
+
+check(
+  '部署后公开页 SSR 门禁',
+  hasPostDeployPublicWebGate(files.deployWorkflow),
+  '上线后必须校验首页原始 HTML 的 canonical/__CC_PUBLIC_DATA__ 标记与 robots.txt 的 Sitemap 行',
 );
 
 check(

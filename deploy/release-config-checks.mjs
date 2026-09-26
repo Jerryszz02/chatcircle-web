@@ -211,3 +211,146 @@ export function hasManualShaCiValidation(workflow) {
     && /REQUESTED_SHA:\s*\$\{\{ inputs\.deploy_sha \}\}/.test(active)
     && /SHA 必须是 40 位/.test(active);
 }
+
+// —— 公开页 SSR 渲染服务（public-web，见 docs/planning/public-web-ssr-plan.md）——
+
+/** 取 compose 中某服务的配置块（两空格缩进的服务键到下一个同级/顶层键为止）。 */
+function getComposeServiceBlock(compose, serviceName) {
+  const lines = stripConfigComments(compose).split('\n');
+  const start = lines.findIndex((line) => new RegExp(`^  ${serviceName}:\\s*$`).test(line));
+  if (start < 0) return '';
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^  \S/.test(lines[index]) || /^\S/.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start, end).join('\n');
+}
+
+/** 从 openBraceIndex（'{' 的位置）起做括号配对，返回含大括号的完整块；配对失败返回 ''。 */
+function extractBracedBlock(text, openBraceIndex) {
+  let depth = 0;
+  for (let index = openBraceIndex; index < text.length; index += 1) {
+    if (text[index] === '{') depth += 1;
+    else if (text[index] === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(openBraceIndex, index + 1);
+    }
+  }
+  return '';
+}
+
+/** 取 Caddyfile 中匹配 pattern 的指令的完整 { } 块（支持嵌套，如 handle 内的 reverse_proxy）。 */
+function extractDirectiveBlock(activeConfig, pattern) {
+  const match = pattern.exec(activeConfig);
+  if (!match) return '';
+  return extractBracedBlock(activeConfig, activeConfig.indexOf('{', match.index));
+}
+
+/** 取 Caddyfile 命名匹配器的 path 列表（@name path ... 单行定义）。 */
+function getMatcherPaths(activeConfig, matcherName) {
+  const match = new RegExp(`@${matcherName}\\s+path\\s+([^\\n]+)`).exec(activeConfig);
+  return match ? match[1].trim().split(/\s+/) : null;
+}
+
+// Caddy 路由口径（与 frontend/src/public/routes.ts、frontend/src/router.tsx 一一对应）
+export const PUBLIC_META_CADDY_PATHS = ['/public-assets/*', '/robots.txt', '/sitemap.xml'];
+export const PUBLIC_PAGE_CADDY_PATHS = ['/', '/about', '/privacy', '/activities', '/activities/past', '/a/*', '/posts/*'];
+export const FUNCTIONAL_SPA_CADDY_PATHS = [
+  '/login', '/me', '/trainings', '/checkin/*', '/training-checkin/*', '/survey/*',
+  '/admin/*', '/super/*', '/a/*/register',
+];
+
+export function hasBuiltPublicWebRuntime(compose) {
+  const block = getComposeServiceBlock(compose, 'public-web');
+  return block !== ''
+    && /image:\s+chatcircle-public-web:\$\{CC_RELEASE_SHA:-local\}/.test(block)
+    && /context:\s+\.\s*$/m.test(block)
+    && /dockerfile:\s+deploy\/public-web\.Dockerfile/.test(block);
+}
+
+export function hasIsolatedPublicWebService(compose) {
+  const block = getComposeServiceBlock(compose, 'public-web');
+  // 不发布 host 端口、不挂任何卷（尤其不得碰 pb_data）：仅经 Docker 私网被 Caddy 访问
+  return block !== ''
+    && !/^\s+ports:/m.test(block)
+    && !/^\s+volumes:/m.test(block)
+    && !block.includes('pb_data');
+}
+
+export function hasPublicWebUpstreamConfig(compose) {
+  const block = getComposeServiceBlock(compose, 'public-web');
+  return /CC_PB_INTERNAL_URL:\s*http:\/\/app:8090\s*$/m.test(block)
+    && /CC_SITE_ORIGIN:\s*\$\{CC_SITE_ORIGIN:-https:\/\/chatcircle\.empact\.cn\}/.test(block);
+}
+
+export function hasPublicWebCaddyRouting(caddyfile) {
+  const active = stripConfigComments(caddyfile);
+  const covers = (actual, expected) => actual !== null && expected.every((path) => actual.includes(path));
+  // 静态资源/爬虫入口与公开页两组 matcher 指向 public-web，外加兜底 handle 的真实 404
+  return /\broute\s*\{/.test(active)
+    && covers(getMatcherPaths(active, 'publicMeta'), PUBLIC_META_CADDY_PATHS)
+    && covers(getMatcherPaths(active, 'publicPages'), PUBLIC_PAGE_CADDY_PATHS)
+    && extractDirectiveBlock(active, /handle\s+@publicMeta\b/).includes('reverse_proxy public-web:3100')
+    && extractDirectiveBlock(active, /handle\s+@publicPages\b/).includes('reverse_proxy public-web:3100')
+    && extractDirectiveBlock(active, /handle\s*\{/).includes('reverse_proxy public-web:3100');
+}
+
+export function hasFunctionalSpaNoindex(caddyfile) {
+  const active = stripConfigComments(caddyfile);
+  const paths = getMatcherPaths(active, 'functionalSpa');
+  if (!paths || !FUNCTIONAL_SPA_CADDY_PATHS.every((path) => paths.includes(path))) return false;
+  const block = extractDirectiveBlock(active, /handle\s+@functionalSpa\b/);
+  return /header\s+X-Robots-Tag\s+"noindex"/.test(block)
+    && block.includes('reverse_proxy app:8090');
+}
+
+export function hasRegisterBeforePublicActivity(caddyfile) {
+  const active = stripConfigComments(caddyfile);
+  // /a/:id/register（功能 SPA）必须先于 /a/*（公开详情）命中，否则报名页会被 SSR 404
+  const functional = active.search(/handle\s+@functionalSpa\b/);
+  const publicPages = active.search(/handle\s+@publicPages\b/);
+  return functional >= 0 && publicPages >= 0 && functional < publicPages;
+}
+
+export function hasXffOverrideOnAllUpstreams(caddyfile) {
+  const active = stripConfigComments(caddyfile);
+  // 每个 reverse_proxy 上游都必须带覆盖 XFF 的块（app 与 public-web 两侧缺一不可；
+  // 无 { } 块的 reverse_proxy 视为缺 XFF，不得漏数）
+  const upstreams = [...active.matchAll(/\breverse_proxy\s+\S+/g)];
+  if (upstreams.length < 2) return false;
+  return upstreams.every((upstream) => {
+    const afterTarget = upstream.index + upstream[0].length;
+    const rest = active.slice(afterTarget);
+    if (!/^\s*\{/.test(rest)) return false;
+    const block = extractBracedBlock(active, afterTarget + rest.indexOf('{'));
+    return /header_up\s+X-Forwarded-For\s+\{remote_host\}/.test(block);
+  });
+}
+
+export function hasCandidatePublicWebSmoke(workflow) {
+  const step = preflightStep(workflow);
+  const build = step.indexOf('docker compose --project-name "$preflight_project" build');
+  const smoke = step.indexOf('./deploy/smoke-public-web-runtime.sh "chatcircle-public-web:$target_sha"');
+  return build >= 0 && smoke >= 0 && build < smoke;
+}
+
+export function hasPublicWebPostDeployHealthCheck(workflow) {
+  const step = deployStep(workflow);
+  return /public_web_id="\$\(docker compose ps -q public-web\)"/.test(step)
+    && /public_web_healthy=0/.test(step)
+    && /docker inspect[^\n]*\.State\.Health\.Status/.test(step)
+    && /docker compose logs --tail=120 public-web/.test(step);
+}
+
+export function hasPostDeployPublicWebGate(workflow) {
+  const step = deployStep(workflow);
+  // 首页原始 HTML 必须带 canonical 与首帧数据标记（证明经 SSR 渲染而非 SPA 空壳），
+  // robots.txt 由渲染服务下发且含 sitemap 指引
+  return step.includes('https://chatcircle.empact.cn/')
+    && step.includes('rel="canonical"')
+    && step.includes('__CC_PUBLIC_DATA__')
+    && step.includes('https://chatcircle.empact.cn/robots.txt');
+}

@@ -2,6 +2,7 @@
 node_modules
 frontend/node_modules
 frontend/dist
+frontend/dist-public
 backend/pocketbase
 backend/pb_data
 backend/pb_public

@@ -145,7 +145,7 @@ jobs:
           echo "Validating Docker Compose configuration..."
           docker compose config -q
 
-          # 只预拉取 image-only 的 Caddy；backup 是本提交构建的候选镜像，下面统一 build。
+          # 只预拉取 image-only 的 Caddy；backup 与 public-web 是本提交构建的候选镜像，下面统一 build。
           # 不会启动或替换生产容器。
           echo "Pulling candidate runtime images..."
           docker compose --project-name "$preflight_project" pull caddy
@@ -158,6 +158,10 @@ jobs:
           # Exercise the exact candidate backup image with no network, volumes,
           # or production credentials before any production checkout changes.
           ./deploy/smoke-backup-runtime.sh "chatcircle-backup:$target_sha"
+
+          # 候选 public-web 镜像同样先过无网络/无上游 smoke：验证降级与 404/503 口径，
+          # 避免仅凭 build 放行一个起不来的公开入口
+          ./deploy/smoke-public-web-runtime.sh "chatcircle-public-web:$target_sha"
 
           # Compose 的 :? 只能验证非空；手机号 HMAC key 还有 >=32 字符的运行时约束，
           # 生产短信凭据/场景模板在 production+aliyun 时必须全部非空。这里在隔离 project 的
@@ -208,6 +212,7 @@ jobs:
           # A queued old run must not silently deploy a newer local main.
           git merge-base --is-ancestor "$previous_sha" "$target_sha"
           docker image inspect "chatcircle-app:$target_sha" >/dev/null
+          docker image inspect "chatcircle-public-web:$target_sha" >/dev/null
           # Keep an application-consistent recovery point before automatic migrations.
           # The running service must be the reviewed cron image before this call can
           # share its lock with the scheduled job.  Bound the readiness wait so a
@@ -250,6 +255,12 @@ jobs:
 
           # Run the exact image built during preflight, without a second build/pull.
           docker compose up --no-build --pull never -d
+
+          # Caddyfile 是只读 bind mount：纯内容变更不会触发 compose 重建 caddy 容器，
+          # 运行中的 caddy 进程仍持旧路由表（公开页 SSR 的分发规则就是纯内容变更）。
+          # 显式优雅 reload 让按提交绑定的 Caddyfile 立即生效；reload 失败即报错退出
+          # （caddy 保留旧配置继续服务，不会被半写配置打挂）。
+          docker compose exec -T --interactive=false caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile </dev/null
 
           # 生产 app 不向 host 发布 8090；按容器 healthcheck 状态判定健康。
           # 最多等待约 90 秒（45 × 2s）。
@@ -295,10 +306,54 @@ jobs:
           backup_revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$backup_id")"
           test "$backup_revision" = "$target_sha"
 
+          # public-web 容器健康门禁（compose healthcheck 探 /healthz 浅活，不依赖上游）。
+          # 故障影响面仅限公开路由（功能 SPA 与 /api 不受影响），但仍按与其他服务
+          # 相同的口径 fail-loud：回滚沿用既有「重放上一 SHA」机制——public-web 镜像
+          # 与 Caddyfile 都随提交绑定，无需额外回滚通道。
+          public_web_id="$(docker compose ps -q public-web)"
+          if [ -z "$public_web_id" ]; then
+            echo "ERROR: public-web 容器未创建" >&2
+            docker compose ps || true
+            exit 1
+          fi
+          public_web_healthy=0
+          for attempt in $(seq 1 45); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' "$public_web_id" 2>/dev/null || echo '')"
+            if [ "$status" = "healthy" ]; then
+              public_web_healthy=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$public_web_healthy" -ne 1 ]; then
+            echo "ERROR: 部署后 public-web 容器健康检查失败（90 秒内未达 healthy）" >&2
+            docker compose ps || true
+            docker compose logs --tail=120 public-web || true
+            exit 1
+          fi
+          public_web_revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$public_web_id")"
+          test "$public_web_revision" = "$target_sha"
+
           docker compose ps
           revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$app_id")"
           test "$revision" = "$target_sha"
           curl --fail --silent --show-error --retry 3 --retry-connrefused --connect-timeout 10 --max-time 20 \
             https://chatcircle.empact.cn/api/cc/health >/dev/null
+
+          # 公开页 SSR 门禁：首页原始 HTML 必须带 canonical 与首帧数据标记
+          # （证明经 public-web SSR 渲染，而非 SPA 空壳）；robots.txt 由渲染服务下发。
+          # 用 here-string 而非管道喂 grep，避免 grep -q 提前关闭管道触发 SIGPIPE 误判。
+          home_html="$(curl --fail --silent --show-error --retry 3 --retry-connrefused --connect-timeout 10 --max-time 20 \
+            https://chatcircle.empact.cn/)"
+          if ! grep -q 'rel="canonical"' <<<"$home_html" || ! grep -q '__CC_PUBLIC_DATA__' <<<"$home_html"; then
+            echo "ERROR: 首页原始 HTML 缺少 canonical/__CC_PUBLIC_DATA__ 标记，公开页 SSR 未生效" >&2
+            exit 1
+          fi
+          robots_txt="$(curl --fail --silent --show-error --retry 3 --retry-connrefused --connect-timeout 10 --max-time 20 \
+            https://chatcircle.empact.cn/robots.txt)"
+          if ! grep -q '^Sitemap: https://chatcircle.empact.cn/sitemap.xml$' <<<"$robots_txt"; then
+            echo "ERROR: /robots.txt 缺少 Sitemap 行，公开页路由未命中 public-web" >&2
+            exit 1
+          fi
           echo "Deploy healthy: $target_sha"
           REMOTE
