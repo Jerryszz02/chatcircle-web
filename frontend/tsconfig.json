@@ -17,5 +17,11 @@
     "noEmit": true,
     "types": ["node", "vite/client", "vitest/globals"]
   },
-  "include": ["src", "vite.config.ts"]
+  "include": [
+    "src",
+    "server",
+    "vite.config.ts",
+    "vite.public.client.config.ts",
+    "vite.public.server.config.ts"
+  ]
 }

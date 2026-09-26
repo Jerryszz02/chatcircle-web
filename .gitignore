@@ -2,6 +2,7 @@
 node_modules/
 dist/
 coverage/
+frontend/dist-public/
 
 # PocketBase：二进制与数据不入库（backend/README.md）
 backend/pocketbase
