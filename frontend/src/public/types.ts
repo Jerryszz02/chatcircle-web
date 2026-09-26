@@ -50,7 +50,9 @@ export interface PublicActivityDetailView {
   };
 }
 
-/** 公开推文（字段白名单；不含 status/created_by/updated_by 与系统字段）。 */
+/** 公开推文（字段白名单；不含 status/created_by/updated_by 与系统字段）。
+ * 列表卡片经服务端 fields 收窄、不含 body_md（避免列表/sitemap 响应越过大小上限）；
+ * body_md 仅详情端点下发。 */
 export interface PublicPostView {
   id: string;
   title: string;

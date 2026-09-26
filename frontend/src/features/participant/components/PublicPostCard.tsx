@@ -21,7 +21,11 @@ function postSummary(post: Pick<PublicPostView, 'summary' | 'body_md'>): string 
     : normalized;
 }
 
-/** 公开推文卡片（SSR 安全纯组件）：首页“往期活动”和完整往期页共用。 */
+/**
+ * 公开推文卡片（SSR 安全纯组件）：首页“往期活动”和完整往期页共用。
+ * 阅读全文入口不依赖 body_md 判空：列表数据经服务端 fields 收窄后不含正文，
+ * 而后端要求 body_md 与 external_url 至少填一个——无外链即有站内正文可链。
+ */
 export function PublicPostCard({ post }: { post: PublicPostView }) {
   const coverUrl = postCoverUrl(post);
   const summary = postSummary(post);
@@ -47,11 +51,11 @@ export function PublicPostCard({ post }: { post: PublicPostView }) {
           >
             阅读全文
           </a>
-        ) : post.body_md?.trim() ? (
+        ) : (
           <NavAnchor href={`/posts/${post.id}`} className="cc-btn cc-btn-secondary cc-btn-block">
             阅读全文
           </NavAnchor>
-        ) : null}
+        )}
       </div>
     </li>
   );

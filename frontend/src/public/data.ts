@@ -50,6 +50,13 @@ const DEFAULT_MAX_INFLIGHT = 32;
 /** 公开推文排序：后台置顶优先，其余按首次发布时间倒序（与 participant/api.ts 口径一致）。 */
 const PUBLIC_POSTS_SORT = '-is_pinned,-published_at';
 
+/**
+ * 列表请求的服务端字段收窄（PocketBase fields 参数）：列表卡片只需要这些字段，
+ * 不拉 body_md 全文——正文累积后单页响应会越过 maxBytes 上限，导致列表/sitemap
+ * 误报 503；完整正文仅由详情端点（fetchPublicPost）获取。
+ */
+const POST_LIST_FIELDS = 'id,title,summary,cover,external_url,is_pinned,published_at';
+
 /** sitemap 枚举推文的分页大小与硬上限。 */
 const SITEMAP_PAGE_SIZE = 100;
 const SITEMAP_MAX_POSTS = 500;
@@ -234,37 +241,59 @@ export function createPublicDataClient(config: PublicDataConfig) {
     }
   }
 
-  async function fetchPostsPage(page: number, perPage: number): Promise<PublicPostView[]> {
+  async function fetchPostsPage(
+    page: number,
+    perPage: number,
+    fields: string,
+  ): Promise<Record<string, unknown>[]> {
     const raw = await fetchJson(
-      `/api/collections/posts/records?page=${page}&perPage=${perPage}&sort=${encodeURIComponent(PUBLIC_POSTS_SORT)}`,
+      `/api/collections/posts/records?page=${page}&perPage=${perPage}&sort=${encodeURIComponent(PUBLIC_POSTS_SORT)}&fields=${encodeURIComponent(fields)}`,
       'list',
     );
     const body = asRecord(raw);
     if (!body || !Array.isArray(body.items)) {
       throw new UpstreamError('上游响应格式异常（posts list）');
     }
-    return (body.items as unknown[]).map(mapPost);
+    return body.items as Record<string, unknown>[];
   }
 
   /**
-   * 枚举全部公开推文（sitemap 用）：perPage=100 循环，硬上限 500；
-   * 截断时返回 truncated=true（调用方记 warn 日志）。
+   * 枚举全部公开推文 id（sitemap 用）：fields=id 只取标识，perPage=100 循环，
+   * 硬上限 500；截断时返回 truncated=true（调用方记 warn 日志）。
    */
-  async function fetchAllPublicPostsForSitemap(): Promise<{
-    posts: PublicPostView[];
+  async function fetchAllPublicPostIdsForSitemap(): Promise<{
+    ids: string[];
     truncated: boolean;
   }> {
+    const ids: string[] = [];
+    let page = 1;
+    for (;;) {
+      const items = await fetchPostsPage(page, SITEMAP_PAGE_SIZE, 'id');
+      for (const item of items) {
+        const id = asString(item.id);
+        if (!id) throw new UpstreamError('上游响应格式异常（posts sitemap id）');
+        ids.push(id);
+      }
+      if (items.length < SITEMAP_PAGE_SIZE) {
+        return { ids, truncated: false };
+      }
+      // 满页且已达硬上限：可能还有剩余，标记截断
+      if (ids.length >= SITEMAP_MAX_POSTS) {
+        return { ids: ids.slice(0, SITEMAP_MAX_POSTS), truncated: true };
+      }
+      page += 1;
+    }
+  }
+
+  /** 分页取全部公开推文列表卡片（无 body_md 全文；硬上限同 sitemap 口径）。 */
+  async function fetchAllPublicPostCards(): Promise<PublicPostView[]> {
     const posts: PublicPostView[] = [];
     let page = 1;
     for (;;) {
-      const items = await fetchPostsPage(page, SITEMAP_PAGE_SIZE);
-      posts.push(...items);
-      if (items.length < SITEMAP_PAGE_SIZE) {
-        return { posts, truncated: false };
-      }
-      // 满页且已达硬上限：可能还有剩余，标记截断
-      if (posts.length >= SITEMAP_MAX_POSTS) {
-        return { posts: posts.slice(0, SITEMAP_MAX_POSTS), truncated: true };
+      const items = await fetchPostsPage(page, SITEMAP_PAGE_SIZE, POST_LIST_FIELDS);
+      posts.push(...items.map(mapPost));
+      if (items.length < SITEMAP_PAGE_SIZE || posts.length >= SITEMAP_MAX_POSTS) {
+        return posts.slice(0, SITEMAP_MAX_POSTS);
       }
       page += 1;
     }
@@ -288,17 +317,18 @@ export function createPublicDataClient(config: PublicDataConfig) {
     },
 
     /**
-     * 公开推文列表。传 limit 时取单页；不传则分页取全部（硬上限同 sitemap 口径）。
+     * 公开推文列表卡片（经 fields 收窄，不含 body_md 全文）。
+     * 传 limit 时取单页；不传则分页取全部（硬上限同 sitemap 口径）。
      */
     async fetchPublicPosts(limit?: number): Promise<PublicPostView[]> {
       if (limit !== undefined) {
-        return fetchPostsPage(1, limit);
+        const items = await fetchPostsPage(1, limit, POST_LIST_FIELDS);
+        return items.map(mapPost);
       }
-      const { posts } = await fetchAllPublicPostsForSitemap();
-      return posts;
+      return fetchAllPublicPostCards();
     },
 
-    fetchAllPublicPostsForSitemap,
+    fetchAllPublicPostIdsForSitemap,
 
     /** 公开推文详情（404/隐藏 → PublicNotFoundError，不泄露可见性）。 */
     async fetchPublicPost(id: string): Promise<PublicPostView> {

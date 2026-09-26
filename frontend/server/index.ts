@@ -258,7 +258,7 @@ export function createPublicServer(options: PublicServerOptions): Server {
     const [current, past, postsResult] = await Promise.all([
       dataClient.fetchPublicActivities('current'),
       dataClient.fetchPublicActivities('past'),
-      dataClient.fetchAllPublicPostsForSitemap(),
+      dataClient.fetchAllPublicPostIdsForSitemap(),
     ]);
     if (postsResult.truncated) {
       log(JSON.stringify({ level: 'warn', msg: 'sitemap 推文枚举达到硬上限，已截断' }));
@@ -268,7 +268,7 @@ export function createPublicServer(options: PublicServerOptions): Server {
         ...PUBLIC_STATIC_PATHS,
         ...current.map((a) => `/a/${a.id}`),
         ...past.map((a) => `/a/${a.id}`),
-        ...postsResult.posts.map((p) => `/posts/${p.id}`),
+        ...postsResult.ids.map((id) => `/posts/${id}`),
       ]),
     ];
     const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls

@@ -301,31 +301,34 @@ describe('错误口径', () => {
 });
 
 describe('分页', () => {
-  it('fetchAllPublicPostsForSitemap 循环翻页直至不满页', async () => {
+  it('fetchAllPublicPostIdsForSitemap 循环翻页直至不满页，且只取 id 字段', async () => {
     const pages: Record<number, unknown[]> = {
       1: Array.from({ length: 100 }, (_, i) => postRaw({ id: `p${i}` })),
       2: Array.from({ length: 100 }, (_, i) => postRaw({ id: `p${100 + i}` })),
       3: Array.from({ length: 30 }, (_, i) => postRaw({ id: `p${200 + i}` })),
     };
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: RequestInfo | URL) => {
-        const page = Number(new URL(String(url)).searchParams.get('page'));
-        return jsonResponse({
-          page,
-          perPage: 100,
-          totalItems: 230,
-          totalPages: 3,
-          items: pages[page] ?? [],
-        });
-      }),
-    );
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const parsed = new URL(String(url));
+      const page = Number(parsed.searchParams.get('page'));
+      return jsonResponse({
+        page,
+        perPage: 100,
+        totalItems: 230,
+        totalPages: 3,
+        items: pages[page] ?? [],
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
     const client = createPublicDataClient(CONFIG);
-    const { posts, truncated } = await client.fetchAllPublicPostsForSitemap();
-    expect(posts).toHaveLength(230);
+    const { ids, truncated } = await client.fetchAllPublicPostIdsForSitemap();
+    expect(ids).toHaveLength(230);
     expect(truncated).toBe(false);
-    expect(posts[0].id).toBe('p0');
-    expect(posts[229].id).toBe('p229');
+    expect(ids[0]).toBe('p0');
+    expect(ids[229]).toBe('p229');
+    // sitemap 只需要 id：fields 收窄避免累积正文越过响应大小上限
+    for (const call of fetchMock.mock.calls) {
+      expect(new URL(String(call[0])).searchParams.get('fields')).toBe('id');
+    }
   });
 
   it('超过 500 硬上限截断并标记 truncated', async () => {
@@ -343,12 +346,12 @@ describe('分页', () => {
       }),
     );
     const client = createPublicDataClient(CONFIG);
-    const { posts, truncated } = await client.fetchAllPublicPostsForSitemap();
-    expect(posts).toHaveLength(500);
+    const { ids, truncated } = await client.fetchAllPublicPostIdsForSitemap();
+    expect(ids).toHaveLength(500);
     expect(truncated).toBe(true);
   });
 
-  it('fetchPublicPosts(limit) 取单页', async () => {
+  it('fetchPublicPosts(limit) 取单页，列表请求不拉 body_md 全文', async () => {
     const fetchMock = vi.fn<(url: RequestInfo | URL) => Promise<Response>>(async () =>
       jsonResponse({ page: 1, perPage: 2, totalItems: 10, totalPages: 5, items: [postRaw()] }),
     );
@@ -356,7 +359,11 @@ describe('分页', () => {
     const client = createPublicDataClient(CONFIG);
     const posts = await client.fetchPublicPosts(2);
     expect(posts).toHaveLength(1);
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('perPage=2');
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(url.searchParams.get('perPage')).toBe('2');
+    const fields = url.searchParams.get('fields') ?? '';
+    expect(fields).toContain('title');
+    expect(fields).not.toContain('body_md');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
