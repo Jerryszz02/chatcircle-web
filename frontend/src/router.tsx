@@ -1,4 +1,5 @@
 import { AdminEmailPage } from './features/admin/pages/AdminEmailPage';
+import { NotFoundPage } from './features/participant/pages/NotFoundPage';
 import { PrivacyPage } from './features/participant/pages/PrivacyPage';
 import { PostPage } from './features/participant/pages/PostPage';
 import { Route, Routes } from 'react-router-dom';
@@ -239,7 +240,7 @@ export function AppRoutes() {
         }
       />
 
-      <Route path="*" element={<HomePage />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 }

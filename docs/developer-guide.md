@@ -52,6 +52,7 @@
 ```
 ├── frontend/            # React SPA。src/features/{participant,admin,superadmin} + src/shared/
 │                        #   详见 frontend 各节；操作手册级内容不在这里，全在本文 §6
+│                        #   另有 src/public/ + server/（公开页 SSR，见 §6.8），构建产物 dist-public/
 ├── backend/             # PocketBase 后端
 │   ├── pb_migrations/   #   版本化 schema（28 个迁移文件 / 26 个业务或内部集合），schema 变更的唯一入口
 │   ├── pb_hooks/        #   服务端业务规则（JSVM *.pb.js）：54 个自定义路由 + Realtime 守卫 + 写守卫 + 审计
@@ -62,14 +63,14 @@
 │   └── pocketbase       #   二进制需手工下载，【不入库】
 ├── mcp/                 # 给数据分析 agent 用的 MCP server（取数走导出 API、报告回传 reports 集合）
 ├── e2e/                 # Playwright 主链路端到端测试（L4）
-├── deploy/              # backup.sh 每日备份、Caddy 反代配置、生产部署手册
+├── deploy/              # backup.sh 每日备份、Caddy 反代配置、public-web 镜像与 smoke、生产部署手册
 ├── docs/
 │   ├── developer-guide.md      # 本文：代码现状与修改指南
 │   ├── planning/               # 设计与需求基线文档（非现状描述），索引见 planning/README.md
 │   └── security-hardening-2026-08.md  # 2026-08 安全加固专项记录
 ├── .github/workflows/   # ci.yml（PR 必过）/ deploy.yml（推 main 自动部署）/ e2e.yml
 ├── Dockerfile           # 多阶段：前端 build → PocketBase 运行时（一体化镜像）
-├── docker-compose.yml   # app + backup + caddy 三服务
+├── docker-compose.yml   # app + public-web + backup + caddy 四服务
 └── .env.example         # 全部环境变量（真实 .env 与 secrets 不入库）
 ```
 
@@ -104,7 +105,7 @@ Docker 一键启动（生产同构）：`cp .env.example .env` → **先填好 `
 4. **无硬删除**。全部 26 个业务/内部集合 `deleteRule: null`；停用/归档/作废/撤销/释放一律用状态字段表达（FR-AUD-001）。改代码时不要引入任何删除语义。
 5. **pb_hooks 是隔离作用域的 JS，不是 Node 项目**。PocketBase 0.28 JSVM 中各 `*.pb.js` 文件作用域完全隔离，没有 import/全局共享。`pb_hooks/lib/` 下三个文件（http/ratelimit/audit）是**契约标准源，运行时不会被加载**；每个领域文件把所需工具函数**原样内联**在自己闭包里。**改 lib 语义后必须同步所有内联副本**——这是本仓库最大的维护陷阱（文件头部有"勿手工改副本"警告）。
 
-整体请求路径（生产）：浏览器 → Caddy（TLS、安全头、封 `/_/*`）→ PocketBase（`pb_public/` 静态前端 + 集合 API + `/api/cc/*` hooks）→ SQLite。
+整体请求路径（生产）：浏览器 → Caddy（TLS、安全头、封 `/_/*`、按路径分发）→ 公开路由走 public-web:3100（SSR），`/api/*` 与功能 SPA 走 PocketBase（`pb_public/` 静态前端 + 集合 API + `/api/cc/*` hooks）→ SQLite。public-web 的上游也只有 PocketBase（匿名公开端点）。
 
 ## 5. 后端详解
 
@@ -370,6 +371,37 @@ src/
 
 Vitest + jsdom + Testing Library，51 个测试文件与源码 colocate，主力打**纯函数 lib**（状态机、文案、表单校验）与页面行为（`src/test/mockApi.ts` 的 `stubApi()` 按"METHOD 路径片段"stub fetch，`makeTestToken/saveParticipantSession` 注入登录态）；`router.test.tsx` 用 MemoryRouter 验证三分区守卫。运行 `npm test`。
 
+### 6.8 公开页 SSR / GEO
+
+公开页（`/`、`/about`、`/privacy`、`/activities`、`/activities/past`、`/a/:id`、`/posts/:id`）由独立的渲染服务 `public-web` 做服务端渲染，让搜索引擎与无 JS 抓取方直接读到正文与元信息；功能页（登录后的业务界面）仍是原 SPA。设计决策与否决方案见 [planning/public-web-ssr-plan.md](planning/public-web-ssr-plan.md)。
+
+```text
+浏览器/爬虫
+  ▼
+Caddy（按路径精确分发，见 deploy/Caddyfile 文件头注释）
+  ├─ 公开页 + /public-assets/* + /robots.txt + /sitemap.xml + 未知路径 → public-web:3100（SSR）
+  │     │ 仅匿名公开端点（/api/cc/public/*、posts 集合）
+  │     ▼
+  └─ /api/* + /assets/* + 功能 SPA（/login /me /admin/* /super/* /a/:id/register …）→ app:8090
+                                  ↑ public-web 的上游也是它
+```
+
+- **公开数据层白名单原则**：`src/public/data.ts` 只调匿名可读的公开端点，且所有响应经白名单 mapper 收窄成 `src/public/types.ts` 的 DTO——`registration_fields`、`created_by/updated_by`、手机号等字段一律剔除，不得进入公开 HTML。新增公开页字段 = 先加 DTO 字段再加 mapper，**不得直接透传上游 JSON**。草稿/下架/隐藏内容返回 404 通用页，不泄露存在性。
+- **代码位置**：`src/public/`（路由、元信息、数据层、视图，渲染与 SPA 共用组件）、`server/`（node:http 服务，无框架无运行时依赖）；构建产物 `dist-public/{client,server}`。
+- **命令**：`npm run build:public`（client + server 两个 bundle）、`npm run start:public`（本地起渲染服务，默认 3100）、`npm run test:public`（`src/public` + `server` 的 vitest 子集）。配置项见 `server/config.ts`（`PORT` / `CC_SITE_ORIGIN` / `CC_PB_INTERNAL_URL` / `CC_PUBLIC_FETCH_TIMEOUT_MS` / `CC_PUBLIC_MAX_INFLIGHT`，全部非密钥）。
+- **路由分界**：Caddy path matcher 无通配符即精确匹配；`/a/:id/register`（功能页）必须在 `/a/*`（公开详情）之前命中；未知路径一律由渲染服务回真实 404（不再是 SPA 假 200）。**新增公开/功能路由时三处同步**：`src/public/routes.ts`、`src/router.tsx`、`deploy/Caddyfile`（`deploy/verify-release-config.mjs` 会静态守住 Caddy 一侧）。
+- **元信息口径**：每页 `title/description/canonical/og:*` 由 `src/public/metadata.ts` 生成；首帧数据以 `<script type="application/json" id="__CC_PUBLIC_DATA__">` 内嵌（非可执行脚本，CSP 无需放行 inline script），客户端 hydrate 直接复用。`robots.txt` 由渲染服务下发（功能路径 Disallow + GPTBot 全站退出 + Sitemap 行），功能 SPA 路径另有 Caddy 服务端 `X-Robots-Tag: noindex` 双保险；`sitemap.xml` 只列当前会返回 200 的 URL，上游失败时 503，绝不返回空 sitemap 伪装成功。
+- **无 JS 可读验证**：
+
+```sh
+npm run build:public && npm run start:public   # 另需本地 PocketBase 在 8090
+curl -s http://127.0.0.1:3100/ | grep -o 'rel="canonical"'        # SSR 元信息
+curl -s http://127.0.0.1:3100/ | grep -c '__CC_PUBLIC_DATA__'     # 首帧数据标记
+curl -s http://127.0.0.1:3100/robots.txt                          # Disallow 与 Sitemap 行
+```
+
+线上口径同理（`https://chatcircle.empact.cn/`），部署门禁已自动化这三项断言。
+
 ## 7. 端到端业务流程（前后端串起来）
 
 **参与者主链路**：广场/详情（`GET /api/cc/public/activities*`）→ 登录/注册（用户名/手机号+密码，或手机号验证码；新用户须在 `/login` 或报名链路用「用户名+密码+手机号」注册，首次验证不再自动建号）→ 提交报名（`POST .../register`，按所选角色的 role_scope 字段渲染表单）→ 在 `/me`（`GET /api/cc/me/overview`）看审核状态和绑定/换绑手机号 → 到场扫固定二维码 → `POST /api/cc/checkin/self`（幂等）→ 活动后问卷草稿/提交。
@@ -425,7 +457,7 @@ CI（`.github/workflows/ci.yml`，push 到 main 与全部 PR 触发，三 job �
 ## 10. 部署与运维速览
 
 - **一体化镜像**（根 `Dockerfile`）：stage1 构建前端 → stage2 alpine 下载 PB 0.28.4（sha256 硬校验）+ 拷入 `pb_public`/`pb_migrations`/`pb_hooks`；`VOLUME /pb/pb_data`；容器启动时 `serve` 自动应用迁移（与本地需手动 `migrate up` 不同）。
-- **compose 三服务**：`app`（生产基础 compose 默认不向 host 发布端口，只在 Docker 私网供 Caddy/backup 以 app:8090 访问；显式叠加 `deploy/docker-compose.debug.yml` 才发布回环 `127.0.0.1:8090`）、`backup`（crond 每日北京时间 02:00 跑 `deploy/backup.sh`：PB `/api/backups` 一致性快照 → 下载 ZIP → 校验 → 删服务端副本 → 30 天滚动 → 写 `last_backup.json` 标记并直写 `audit_logs` 驱动超管告警）、`caddy`（TLS 走阿里云 DNS-01，安全响应头，封 `/_/*` 管理台，反代 app:8090 并覆写 XFF）。
+- **compose 四服务**：`app`（生产基础 compose 默认不向 host 发布端口，只在 Docker 私网供 Caddy/backup/public-web 以 app:8090 访问；显式叠加 `deploy/docker-compose.debug.yml` 才发布回环 `127.0.0.1:8090`）、`public-web`（公开页 SSR，见 §6.8；无密钥、不挂 pb_data、不发布 host 端口）、`backup`（crond 每日北京时间 02:00 跑 `deploy/backup.sh`：PB `/api/backups` 一致性快照 → 下载 ZIP → 校验 → 删服务端副本 → 30 天滚动 → 写 `last_backup.json` 标记并直写 `audit_logs` 驱动超管告警）、`caddy`（标准 80/443 Automatic HTTPS，安全响应头，封 `/_/*` 管理台，按路径分发到 public-web/app 并覆写 XFF）。
 - **部署流水线**：push main → `deploy.yml` SSH 到 ECS `/opt/chatcircle` → `git merge --ff-only origin/main` → `docker compose up --build -d`。
 - **恢复**：stop app → 用 `cc_daily_*.zip` 覆盖 pb_data → start（compose 文件尾注释）。
 - **环境变量**：全部见 `.env.example`（PB 版本、备份保留天数、超管与 agent 服务账号凭据、阿里云密钥；真实 .env 不入库）。

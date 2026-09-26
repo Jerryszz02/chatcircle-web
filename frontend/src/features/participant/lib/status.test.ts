@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ApiError } from '../../../shared/api/http';
-import { bizCodeOf } from '../api';
+import { ApiError, bizCodeOf } from '../../../shared/api/http';
 import {
   activityRoleLabel,
   activityStatusLabel,
@@ -65,7 +64,9 @@ describe('checkinFailureCopy 签到失败分支（FR-CHK-002/003）', () => {
   it('按业务码分开展示', () => {
     expect(checkinFailureCopy(errWith('checkin_not_open')).title).toBe('签到未开放');
     expect(checkinFailureCopy(errWith('checkin_closed')).title).toBe('签到已结束');
-    expect(checkinFailureCopy(errWith('registration_not_approved', 403)).title).toBe('报名未通过审核');
+    expect(checkinFailureCopy(errWith('registration_not_approved', 403)).title).toBe(
+      '报名未通过审核',
+    );
   });
 
   it('无业务码时用服务端 message 兜底', () => {
@@ -119,8 +120,11 @@ describe('角色/活动状态标签', () => {
 });
 
 describe('时间格式化', () => {
-  it('PocketBase 日期格式（空格分隔）转本地展示', () => {
-    expect(formatDateTime('2026-08-05 02:31:55.930Z')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  // 固定 Asia/Shanghai 输出（SSR/CSR 一致性）：断言与运行环境时区无关
+  it('PocketBase 日期格式（空格分隔）转 Asia/Shanghai 展示', () => {
+    expect(formatDateTime('2026-08-05 02:31:55.930Z')).toBe('2026-08-05 10:31');
+    // 跨日边界：UTC 深夜 +8 落到次日凌晨
+    expect(formatDateTime('2026-08-05 16:30:00.000Z')).toBe('2026-08-06 00:30');
   });
 
   it('空值与非法值兜底', () => {
@@ -131,6 +135,6 @@ describe('时间格式化', () => {
 
   it('formatTimeRange 展示起止', () => {
     const range = formatTimeRange('2026-08-05 02:00:00.000Z', '2026-08-05 04:00:00.000Z');
-    expect(range).toContain('至');
+    expect(range).toBe('2026-08-05 10:00 至 2026-08-05 12:00');
   });
 });

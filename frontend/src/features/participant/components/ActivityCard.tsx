@@ -1,9 +1,9 @@
-import { Link } from 'react-router-dom';
-import type { PublicActivityListItem } from '../api';
+import type { PublicActivitySummary } from '../../../public/types';
+import { NavAnchor } from '../../../public/nav';
 import { activityStatusLabel, formatTimeRange, registrationClosedReasonCopy } from '../lib/status';
 
 /**
- * 活动卡片（首页与活动列表页共用，2026-08 UI 重构）：
+ * 活动卡片（SSR 安全纯组件；首页与活动列表页共用，2026-08 UI 重构）：
  * 可选封面占位 + 标题 + 时间地点 + 报名状态 tag + CTA。
  * 封面为图片占位块，待活动照片素材到位后替换。
  */
@@ -11,7 +11,7 @@ export function ActivityCard({
   activity,
   showCover = true,
 }: {
-  activity: PublicActivityListItem;
+  activity: PublicActivitySummary;
   showCover?: boolean;
 }) {
   const reg = activity.registration;
@@ -25,9 +25,9 @@ export function ActivityCard({
       ) : null}
       <div className="ccp-card-body">
         <div className="cc-item-head">
-          <Link to={`/a/${activity.id}`} className="cc-item-title">
+          <NavAnchor href={`/a/${activity.id}`} className="cc-item-title">
             {activity.title}
-          </Link>
+          </NavAnchor>
           {reg.open ? (
             <span className="cc-tag cc-tag-success">报名中</span>
           ) : (
@@ -46,13 +46,16 @@ export function ActivityCard({
           <p className="cc-item-meta">剩余名额：{reg.remaining_total}</p>
         ) : null}
         {reg.open ? (
-          <Link to={`/a/${activity.id}/register`} className="cc-btn cc-btn-primary cc-btn-block">
+          <NavAnchor
+            href={`/a/${activity.id}/register`}
+            className="cc-btn cc-btn-primary cc-btn-block"
+          >
             立即报名
-          </Link>
+          </NavAnchor>
         ) : (
-          <Link to={`/a/${activity.id}`} className="cc-btn cc-btn-secondary cc-btn-block">
+          <NavAnchor href={`/a/${activity.id}`} className="cc-btn cc-btn-secondary cc-btn-block">
             查看详情
-          </Link>
+          </NavAnchor>
         )}
       </div>
     </li>

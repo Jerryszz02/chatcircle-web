@@ -56,6 +56,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
+      - run: npm run build:public
 
   backend-migrations:
     name: backend (pocketbase migrate + hooks 语法检查)
@@ -145,3 +146,13 @@ jobs:
         run: docker build --file deploy/backup.Dockerfile --build-arg CC_RELEASE_SHA=ci --tag chatcircle-backup:ci deploy
       - name: 验证无网络启动与健康门禁
         run: ./deploy/smoke-backup-runtime.sh chatcircle-backup:ci
+
+  public-web-smoke:
+    name: public-web runtime Docker smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 构建 public-web 候选镜像
+        run: docker build --file deploy/public-web.Dockerfile --build-arg CC_RELEASE_SHA=ci --tag chatcircle-public-web:ci .
+      - name: 验证无网络/无上游启动与降级行为
+        run: ./deploy/smoke-public-web-runtime.sh chatcircle-public-web:ci

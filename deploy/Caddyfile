@@ -1,10 +1,25 @@
 # Chat Circles 生产反代：ICP备案完成后使用标准 80/443。
-# Caddy 自动申请/续期 HTTPS 证书，并把外部流量转发到 Docker 私网中的 app:8090。
+# Caddy 自动申请/续期 HTTPS 证书，并按路径把外部流量分发到 Docker 私网中的
+# public-web:3100（公开页 SSR）或 app:8090（功能 SPA + PocketBase API）。
 # 不再使用未备案时期的 :8443 + 阿里云 DNS-01 临时方案，也不需要 DNS AccessKey。
 #
+# ⚠️ 部署注意：线上服务器的 Caddy 可能还有其他 vhost / import（历史遗留站点等），
+# 替换配置时只更新本域名（chatcircle.empact.cn）的 site block，不得整文件覆盖。
+#
 # 生产环境封闭 PocketBase 管理台（/_/ 路径）：日常运营不需要 PB dashboard
-# （统一走产品内 /super 后台），封闭可减少暴露面；临时排障时注释下方
+# （统一走产品内 /super 后台），封闭可减少暴露面；临时排障时注释 route 内
 # handle /_/* 段并 docker compose restart caddy 即可恢复，用完立即还原。
+#
+# 公开页 SSR 与功能 SPA 的分界（口径与 frontend/src/public/routes.ts、
+# frontend/src/router.tsx 一一对应，新增路由时三处同步）：
+#   public-web:3100 —— /public-assets/*、/robots.txt、/sitemap.xml、公开页
+#                     （/、/about、/privacy、/activities、/activities/past、/a/:id、/posts/:id）
+#                     以及兜底未知路径（渲染服务回真实 404，不再是 SPA 假 200）；
+#   app:8090        —— /api/*、SPA 构建资源 /assets/*、功能页 SPA（/login、/me、
+#                     /trainings、/checkin/*、/training-checkin/*、/survey/*、
+#                     /admin/*、/super/*、/a/:id/register）。
+# 注意 /a/:id/register 是功能页（报名），必须先于公开详情 /a/* 命中，
+# 因此它放在功能 SPA 组，且在 route 内排在公开页组之前。
 
 chatcircle.empact.cn {
 	# 不显式配置 tls/dns：Caddy 使用标准 Automatic HTTPS，
@@ -20,16 +35,64 @@ chatcircle.empact.cn {
 		X-Frame-Options "DENY"
 	}
 
-	# 封闭 PB 管理台（见文件头注释）
-	handle /_/* {
-		respond 403
-	}
+	# 路由命名匹配器（site block 顶层定义，route 内按书写顺序求值）。
+	# Caddy path matcher 无通配符即精确匹配：/activities 与 /activities/past 并列互不遮蔽。
+	@publicMeta path /public-assets/* /robots.txt /sitemap.xml
+	@api path /api/*
+	@spaAssets path /assets/*
+	@functionalSpa path /login /me /trainings /checkin/* /training-checkin/* /survey/* /admin/* /super/* /a/*/register
+	@publicPages path / /about /privacy /activities /activities/past /a/* /posts/*
 
-	handle {
-		reverse_proxy app:8090 {
-			# 覆盖（而非追加）客户端伪造的 X-Forwarded-For，
-			# 保证后端日志/审计与后续按 IP 限流拿到的是真实来源
-			header_up X-Forwarded-For {remote_host}
+	# 单一路由块固定求值顺序（handle 互斥：首个命中的 handle 生效，其余跳过）
+	route {
+		# 封闭 PB 管理台（见文件头注释）；安全边界保持在路由最前
+		handle /_/* {
+			respond 403
+		}
+
+		# 公开页静态资源（hash 资源 immutable）与爬虫入口 → public-web
+		handle @publicMeta {
+			reverse_proxy public-web:3100 {
+				# 覆盖（而非追加）客户端伪造的 X-Forwarded-For，
+				# 保证后端日志/审计与后续按 IP 限流拿到的是真实来源
+				header_up X-Forwarded-For {remote_host}
+			}
+		}
+
+		# PocketBase API（含 /api/cc/* 自定义端点与 Realtime）→ app
+		handle @api {
+			reverse_proxy app:8090 {
+				header_up X-Forwarded-For {remote_host}
+			}
+		}
+
+		# SPA 构建资源（Vite 产物，由 PocketBase pb_public 伺服）→ app
+		handle @spaAssets {
+			reverse_proxy app:8090 {
+				header_up X-Forwarded-For {remote_host}
+			}
+		}
+
+		# 功能 SPA（登录态业务界面）→ app；服务端 noindex，与 robots.txt 的 Disallow 双保险
+		handle @functionalSpa {
+			header X-Robots-Tag "noindex"
+			reverse_proxy app:8090 {
+				header_up X-Forwarded-For {remote_host}
+			}
+		}
+
+		# 公开页 SSR → public-web
+		handle @publicPages {
+			reverse_proxy public-web:3100 {
+				header_up X-Forwarded-For {remote_host}
+			}
+		}
+
+		# 兜底：未知路径交给渲染服务回真实 404（含 /a/x/y 之类的多段非法公开路径）
+		handle {
+			reverse_proxy public-web:3100 {
+				header_up X-Forwarded-For {remote_host}
+			}
 		}
 	}
 }

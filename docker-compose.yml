@@ -8,7 +8,7 @@ services:
         CC_RELEASE_SHA: ${CC_RELEASE_SHA:-local}
         VITE_PB_URL: ${VITE_PB_URL:-}
     # 生产默认不向 host 发布 PocketBase 端口（安全审查 finding 8、CWE-345）：
-    # 后端只在 Docker 私网内供 Caddy/backup 访问（app:8090），避免本地不可信进程
+    # 后端只在 Docker 私网内供 Caddy/backup/public-web 访问（app:8090），避免本地不可信进程
     # 直连回环 8090 并伪造 X-Forwarded-For，绕过按来源 IP 的限流与审计归因。
     # 需要本机直连调试（或 TLS 就绪前 MCP 经 SSH 隧道访问）时，显式附加 debug override：
     #   docker compose -f docker-compose.yml -f deploy/docker-compose.debug.yml up
@@ -82,6 +82,43 @@ services:
         max-file: '3'
     # Dockerfile installs tzdata/flock and copies the reviewed script before
     # startup; healthcheck also proves PID 1 is crond and the lock marker exists.
+
+  # 公开页 SSR 渲染服务（frontend/server，构建见 deploy/public-web.Dockerfile）：
+  # 伺服公开介绍/活动广场/活动详情/公开推文的 SSR HTML、/public-assets/*、
+  # robots.txt 与 sitemap.xml。上游只调用匿名公开端点（/api/cc/public/* 与
+  # posts 集合），无任何密钥、不挂 pb_data 卷、不发布 host 端口（同 app 的
+  # 收敛原则，仅 Caddy 经 Docker 私网访问）。
+  # 故障影响面仅限公开路由（Caddy 侧 502/503），功能 SPA 与 /api 不受影响；
+  # 因此 caddy 不得 depends_on 本服务——公开渲染故障不能锁死 Caddy 与原业务。
+  public-web:
+    image: chatcircle-public-web:${CC_RELEASE_SHA:-local}
+    build:
+      context: .
+      dockerfile: deploy/public-web.Dockerfile
+      args:
+        CC_RELEASE_SHA: ${CC_RELEASE_SHA:-local}
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      # 与 frontend/server/config.ts 的配置项一一对应（均有默认值，此处显式写出生产口径）
+      PORT: '3100'
+      CC_SITE_ORIGIN: ${CC_SITE_ORIGIN:-https://chatcircle.empact.cn}
+      CC_PB_INTERNAL_URL: http://app:8090
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    # 镜像为 node:22-alpine 自带 busybox wget；/healthz 是浅活探针，不依赖上游可用
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3100/healthz']
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
   # HTTPS 反代：ICP备案完成后使用标准 80/443。
   # Caddy Automatic HTTPS 负责证书申请/续期和 HTTP→HTTPS 跳转，不再使用
   # 未备案时期的 :8443 + 阿里云 DNS-01，也不再需要 ALIYUN_ACCESS_KEY_*。

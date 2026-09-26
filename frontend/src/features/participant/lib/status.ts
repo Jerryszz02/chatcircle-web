@@ -1,10 +1,6 @@
-import type {
-  ActivityRole,
-  ActivityStatus,
-  RegistrationStatus,
-} from '../../../shared/api/types';
-import { bizCodeOf, type RegistrationClosedReason, type SurveyIneligibleReason } from '../api';
-import { ApiError } from '../../../shared/api/http';
+import type { ActivityRole, ActivityStatus, RegistrationStatus } from '../../../shared/api/types';
+import type { RegistrationClosedReason, SurveyIneligibleReason } from '../api';
+import { ApiError, bizCodeOf } from '../../../shared/api/http';
 
 /**
  * 参与者端状态展示分支（状态机口径：database-design §5.5、PRD §4）。
@@ -147,7 +143,8 @@ export function trainingCheckinFailureCopy(err: ApiError): { title: string; deta
     case 'listener_not_approved':
       return {
         title: '暂未开放培训签到',
-        detail: '需要先报名聆听者并通过审核后才能参加培训签到。请先选择活动报名聆听者，审核通过后再扫码。',
+        detail:
+          '需要先报名聆听者并通过审核后才能参加培训签到。请先选择活动报名聆听者，审核通过后再扫码。',
       };
     default:
       return { title: '签到失败', detail: err.message || '签到未完成，请稍后重试。' };
@@ -159,20 +156,44 @@ export function trainingStatusLabel(status: 'published' | 'closed'): string {
   return status === 'published' ? '进行中' : '已结束';
 }
 
-const pad2 = (n: number) => String(n).padStart(2, '0');
+/**
+ * 展示时区固定为 Asia/Shanghai：公开页 SSR（服务端常为 UTC）与浏览器端
+ * 必须输出同一字符串，否则 hydration 比对不一致；同时活动时间本就按
+ * 中国本地时刻对外沟通。admin/super 端复用各自的 lib/format（本地时区），
+ * 与本函数互不影响。
+ */
+const SHANGHAI_TIME_ZONE = 'Asia/Shanghai';
+
+const shanghaiDateTimeParts = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: SHANGHAI_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
 
 /**
- * PocketBase 日期（'YYYY-MM-DD HH:mm:ss.sssZ'）转本地展示 'YYYY-MM-DD HH:mm'。
- * 导出/界面时区口径属待确认项（technical-design「待确认」#15），界面先按设备本地时区展示。
+ * PocketBase 日期（'YYYY-MM-DD HH:mm:ss.sssZ'）转 'YYYY-MM-DD HH:mm'（Asia/Shanghai）。
  */
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso.replace(' ', 'T'));
   if (Number.isNaN(d.getTime())) return '—';
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const parts: Record<string, string> = {};
+  for (const part of shanghaiDateTimeParts.formatToParts(d)) {
+    if (part.type !== 'literal') parts[part.type] = part.value;
+  }
+  // 个别运行时 hourCycle 不生效时小时可能输出 '24'，归一到 '00'
+  const hour = parts.hour === '24' ? '00' : parts.hour;
+  return `${parts.year}-${parts.month}-${parts.day} ${hour}:${parts.minute}`;
 }
 
 /** 活动起止时间展示。 */
-export function formatTimeRange(start: string | null | undefined, end: string | null | undefined): string {
+export function formatTimeRange(
+  start: string | null | undefined,
+  end: string | null | undefined,
+): string {
   return `${formatDateTime(start)} 至 ${formatDateTime(end)}`;
 }
