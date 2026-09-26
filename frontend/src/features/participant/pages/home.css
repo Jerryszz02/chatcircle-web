@@ -1,67 +1,12 @@
 /* 首页沿用 Empact 官网色板与案例版式；作用域限制在首页。 */
 .ccp-home {
-  --cc-brand-50: #e4eff3;
-  --cc-brand-600: #125284;
-  --cc-brand-700: #125284;
-  --cc-neutral-50: #f3f0e7;
-  --cc-neutral-300: rgb(8 90 136 / 28%);
-  --cc-neutral-600: #4e6979;
-  --cc-neutral-900: #125284;
-  --cc-accent-500: #fb394d;
   --ccp-home-max: 1280px;
   --ccp-home-gutter: clamp(20px, 3.6vw, 52px);
-  color: var(--cc-brand-600);
-  background: var(--cc-neutral-50);
-  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  padding-top: 16px;
-  background-image: linear-gradient(var(--cc-brand-600), var(--cc-brand-600));
-  background-size: 100% 140px;
-  background-repeat: no-repeat;
 }
 
 .ccp-home .ccp-site-main {
   max-width: none;
   padding: 0;
-}
-
-.ccp-home .ccp-site-header {
-  position: relative;
-  width: calc(100% - 40px);
-  max-width: 1336px;
-  margin: 0 auto;
-  border: 0;
-  background: white;
-  backdrop-filter: none;
-}
-
-.ccp-home .ccp-site-header-inner {
-  max-width: none;
-  min-height: 84px;
-  padding: 12px 32px;
-  gap: 24px;
-}
-
-.ccp-home .ccp-site-logo {
-  font-size: 24px;
-}
-
-.ccp-home .ccp-site-logo-img {
-  width: 44px;
-  height: 44px;
-}
-
-.ccp-home .ccp-site-nav a,
-.ccp-home .ccp-site-actions .cc-btn {
-  border-radius: 0;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  color: var(--cc-brand-600);
-  font-size: 16px;
-}
-
-.ccp-home .ccp-site-nav a.active,
-.ccp-home .ccp-site-actions .cc-btn {
-  border-bottom-color: var(--cc-accent-500);
 }
 
 .ccp-home-container {
@@ -261,20 +206,6 @@
 }
 
 @media (max-width: 1000px) {
-  .ccp-home .ccp-site-header-inner {
-    gap: 12px;
-    padding-inline: 20px;
-  }
-
-  .ccp-home .ccp-site-nav a {
-    padding-inline: 8px;
-    font-size: 14px;
-  }
-
-  .ccp-home .ccp-site-logo {
-    font-size: 20px;
-  }
-
   .ccp-home .ccp-card-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -285,51 +216,6 @@
 }
 
 @media (max-width: 760px) {
-  .ccp-home {
-    padding-top: 12px;
-  }
-
-  .ccp-home .ccp-site-header {
-    width: calc(100% - 24px);
-  }
-
-  .ccp-home .ccp-site-header-inner {
-    flex-wrap: wrap;
-    gap: 4px 8px;
-    padding: 10px 12px 4px;
-  }
-
-  .ccp-home .ccp-site-logo {
-    font-size: 18px;
-  }
-
-  .ccp-home .ccp-site-logo-img {
-    width: 32px;
-    height: 32px;
-  }
-
-  .ccp-home .ccp-site-actions {
-    margin-left: auto;
-  }
-
-  .ccp-home .ccp-site-actions .cc-btn {
-    padding-inline: 8px;
-    font-size: 13px;
-  }
-
-  .ccp-home .ccp-site-nav {
-    order: 3;
-    width: 100%;
-    margin-left: 0;
-    justify-content: space-between;
-  }
-
-  .ccp-home .ccp-site-nav a {
-    min-height: 44px;
-    padding-inline: 3px;
-    font-size: 13px;
-  }
-
   .ccp-home-hero {
     padding-block: 40px;
   }

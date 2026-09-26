@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { normalizeApiError, type ApiError } from '../../../shared/api/http';
 import { participantAuth } from '../../../shared/auth';
-import { Card, Loading, PageLayout } from '../../../shared/ui';
+import { Card, Loading } from '../../../shared/ui';
+import { ParticipantPageLayout } from '../components/ParticipantPageLayout';
 import { getMyTrainings, isUnauthorized, type MyTrainingsOverview } from '../api';
 import { formatDateTime, formatTimeRange, trainingStatusLabel } from '../lib/status';
 
@@ -45,7 +46,7 @@ export function TrainingsPage() {
   }, [navigate]);
 
   return (
-    <PageLayout section="参与者端" title="聆听者培训" className="ccp-root" backTo="/me">
+    <ParticipantPageLayout section="参与者端" title="聆听者培训" backTo="/me">
       {loading ? <Loading fullscreen /> : null}
 
       {!loading && error ? (
@@ -121,6 +122,6 @@ export function TrainingsPage() {
           </Card>
         </>
       ) : null}
-    </PageLayout>
+    </ParticipantPageLayout>
   );
 }

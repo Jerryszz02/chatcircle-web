@@ -6,7 +6,8 @@ import { participantAuth } from '../../../shared/auth';
 import { useSessionSnapshot } from '../../../shared/session';
 import { pbClients } from '../../../shared/pocketbase';
 import type { RegistrationRecord } from '../../../shared/api/types';
-import { Button, Card, Loading, PageLayout } from '../../../shared/ui';
+import { Button, Card, Loading } from '../../../shared/ui';
+import { ParticipantPageLayout } from '../components/ParticipantPageLayout';
 import { registerForActivity } from '../api';
 import { ParticipantAccessPanel } from '../components/ParticipantAccessPanel';
 import { RegistrationForm } from '../components/RegistrationForm';
@@ -108,7 +109,7 @@ export function RegisterPage() {
   }, [authed, registrationOpen, activityId, authVersion]);
 
   return (
-    <PageLayout section="参与者端" title="活动报名" className="ccp-root">
+    <ParticipantPageLayout section="参与者端" title="活动报名">
       <div className="cc-auth-mark" aria-hidden="true">
         <span />
         <span />
@@ -191,6 +192,6 @@ export function RegisterPage() {
           />
         </Card>
       ) : null}
-    </PageLayout>
+    </ParticipantPageLayout>
   );
 }

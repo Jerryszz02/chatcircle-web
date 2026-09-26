@@ -38,7 +38,7 @@ async function participantLogin(page: Page, phone: string) {
   await page.getByRole('checkbox').check();
   await page.getByRole('button', { name: '获取验证码' }).click();
   await page.getByRole('textbox', { name: /^验证码/ }).fill(fixture.phoneCode);
-  await page.getByRole('button', { name: '登录', exact: true }).click();
+  await page.getByRole('main').getByRole('button', { name: '登录', exact: true }).click();
   await page.waitForURL('**/me');
 }
 
@@ -59,7 +59,7 @@ test.describe.serial('V1 主链路', () => {
       await page.waitForURL(`**/a/${fixture.activityId}/register`);
       await page.getByRole('textbox', { name: /^用户名或手机号/ }).fill(fixture.participantUsername);
       await page.getByRole('textbox', { name: /^密码$/ }).fill(fixture.participantPassword);
-      await page.getByRole('button', { name: '登录', exact: true }).click();
+      await page.getByRole('main').getByRole('button', { name: '登录', exact: true }).click();
       await expect(page.getByRole('button', { name: '提交报名' })).toBeVisible();
     });
 
