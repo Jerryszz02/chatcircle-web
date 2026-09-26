@@ -38,6 +38,17 @@ export class ApiError extends Error {
 const DEFAULT_MESSAGE = '请求失败，请稍后重试';
 const NETWORK_MESSAGE = '无法连接服务器，请检查网络后重试';
 
+/**
+ * 提取规范化错误中的业务码（后端 jsonError 放入 data.code）。
+ * 用于签到/问卷等需要按失败原因分开展示的场景。
+ */
+export function bizCodeOf(err: ApiError): string | null {
+  const details = err.details;
+  if (!details) return null;
+  const code = details['code'] ?? details['error'];
+  return typeof code === 'string' ? code : null;
+}
+
 /** 把任意异常规范化为 ApiError（幂等，已是 ApiError 则原样返回）。 */
 export function normalizeApiError(err: unknown): ApiError {
   if (err instanceof ApiError) return err;

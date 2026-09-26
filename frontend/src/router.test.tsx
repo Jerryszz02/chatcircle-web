@@ -82,6 +82,14 @@ describe('路由分区（公开页）', () => {
     renderAt('/login');
     expect(screen.getByRole('heading', { name: '平台通用登录' })).toBeInTheDocument();
   });
+
+  it('未知路径渲染 404 视图（不再回退首页），含返回首页/浏览活动链接', () => {
+    renderAt('/no-such-page');
+    expect(screen.getByRole('heading', { name: '页面不存在' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '返回首页' })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: '浏览活动' })).toHaveAttribute('href', '/activities');
+    expect(screen.queryByRole('heading', { name: /真正听见/ })).not.toBeInTheDocument();
+  });
 });
 
 describe('路由守卫（technical-design §5.3）', () => {

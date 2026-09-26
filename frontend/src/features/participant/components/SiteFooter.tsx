@@ -1,8 +1,8 @@
-import { Link } from 'react-router-dom';
 import empactLogo from '../../../assets/brand/empact-logo-tagline-white.png';
 import xiaohongshuIcon from '../../../assets/brand/xiaohongshu.svg';
+import { NavAnchor } from '../../../public/nav';
 
-/** 公开页共用 Empact 品牌页脚，保留 Chat Circles 的联系与导航入口。 */
+/** 公开页共用 Empact 品牌页脚（SSR 安全纯组件），保留 Chat Circles 的联系与导航入口。 */
 export function SiteFooter() {
   return (
     <footer className="ccp-site-footer">
@@ -62,12 +62,12 @@ export function SiteFooter() {
         </nav>
         <div className="ccp-footer-bottom">
           <nav className="ccp-footer-links" aria-label="页脚导航">
-            <Link to="/about">关于我们</Link>
+            <NavAnchor href="/about">关于我们</NavAnchor>
             <a href="mailto:maggie.yang@empact.sg">联系 Chat Circles</a>
-            <Link to="/privacy">隐私政策</Link>
-            <Link to="/admin/login" rel="nofollow">
+            <NavAnchor href="/privacy">隐私政策</NavAnchor>
+            <a href="/admin/login" rel="nofollow">
               后台管理
-            </Link>
+            </a>
           </nav>
           <p className="ccp-footer-copy">© {new Date().getFullYear()} Empact · Chat Circles</p>
           <div className="ccp-footer-legal">

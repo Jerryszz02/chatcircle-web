@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { AccountActions } from './AccountActions';
 import { PublicPageLayout } from './PublicPageLayout';
 
 /** Participant forms share the public shell while keeping a comfortable reading width. */
@@ -17,7 +18,7 @@ export function ParticipantPageLayout({
   children: ReactNode;
 }) {
   return (
-    <PublicPageLayout className="ccp-workflow">
+    <PublicPageLayout className="ccp-workflow" actions={<AccountActions />}>
       {backTo ? (
         <div className="page-back">
           <Link to={backTo} className="cc-btn cc-btn-secondary">

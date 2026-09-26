@@ -1,20 +1,19 @@
-import { Link } from 'react-router-dom';
-import type { PostRecord } from '../../../shared/api/types';
-import { COLLECTION_NAMES } from '../../../shared/api/collections';
-import { pbClients } from '../../../shared/pocketbase';
+import type { PublicPostView } from '../../../public/types';
+import { NavAnchor } from '../../../public/nav';
 import { formatDateTime } from '../lib/status';
 
 const SUMMARY_LENGTH = 120;
 
-function postCoverUrl(post: Pick<PostRecord, 'id' | 'cover'>): string {
+/**
+ * 推文封面文件 URL（同源相对路径，绕开 pb SDK：本组件需在服务端渲染图中复用）。
+ * 与 PocketBase 文件伺服规则一致：/api/files/{collectionName}/{recordId}/{filename}。
+ */
+function postCoverUrl(post: Pick<PublicPostView, 'id' | 'cover'>): string {
   if (!post.cover) return '';
-  return pbClients.participant.files.getUrl(
-    { id: post.id, collectionName: COLLECTION_NAMES.posts },
-    post.cover,
-  );
+  return `/api/files/posts/${encodeURIComponent(post.id)}/${encodeURIComponent(post.cover)}`;
 }
 
-function postSummary(post: Pick<PostRecord, 'summary' | 'body_md'>): string {
+function postSummary(post: Pick<PublicPostView, 'summary' | 'body_md'>): string {
   const text = post.summary?.trim() || post.body_md?.trim() || '';
   const normalized = text.replace(/\s+/g, ' ');
   return normalized.length > SUMMARY_LENGTH
@@ -22,8 +21,8 @@ function postSummary(post: Pick<PostRecord, 'summary' | 'body_md'>): string {
     : normalized;
 }
 
-/** 公开推文卡片：首页“往期活动”和完整往期页共用。 */
-export function PublicPostCard({ post }: { post: PostRecord }) {
+/** 公开推文卡片（SSR 安全纯组件）：首页“往期活动”和完整往期页共用。 */
+export function PublicPostCard({ post }: { post: PublicPostView }) {
   const coverUrl = postCoverUrl(post);
   const summary = postSummary(post);
   const externalUrl = post.external_url?.trim();
@@ -49,9 +48,9 @@ export function PublicPostCard({ post }: { post: PostRecord }) {
             阅读全文
           </a>
         ) : post.body_md?.trim() ? (
-          <Link to={`/posts/${post.id}`} className="cc-btn cc-btn-secondary cc-btn-block">
+          <NavAnchor href={`/posts/${post.id}`} className="cc-btn cc-btn-secondary cc-btn-block">
             阅读全文
-          </Link>
+          </NavAnchor>
         ) : null}
       </div>
     </li>

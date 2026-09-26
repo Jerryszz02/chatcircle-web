@@ -457,14 +457,9 @@ export function getSubmission(submissionId: string): Promise<SubmissionDetail> {
 
 /**
  * 提取规范化错误中的业务码（后端 jsonError 放入 data.code）。
- * 用于签到/问卷等需要按失败原因分开展示的场景。
+ * 实现已移至 shared/api/http（供不加载 pb client 的纯模块复用），此处 re-export 兼容旧引用。
  */
-export function bizCodeOf(err: ApiError): string | null {
-  const details = err.details;
-  if (!details) return null;
-  const code = details['code'] ?? details['error'];
-  return typeof code === 'string' ? code : null;
-}
+export { bizCodeOf } from '../../shared/api/http';
 
 /** 是否为 401 未授权（token 过期等）：页面据此引导重新登录。 */
 export function isUnauthorized(err: unknown): boolean {
