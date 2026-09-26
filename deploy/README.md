@@ -9,16 +9,19 @@
 浏览器
   │ HTTP 80 / HTTPS 443
   ▼
-Caddy（Automatic HTTPS、HTTP→HTTPS、反向代理）
+Caddy（Automatic HTTPS、HTTP→HTTPS、按路径反向代理）
   │ Docker 私网
-  ▼
-PocketBase app:8090（前端静态资源 + API + hooks）
-  │
-  ├─ pb_data 持久化卷
-  └─ backup 服务每日一致性备份 → backups 卷
+  ├─ 公开路由 → public-web:3100（公开页 SSR：/、/about、/privacy、/activities、
+  │             /activities/past、/a/:id、/posts/:id、/public-assets/*、
+  │             /robots.txt、/sitemap.xml、未知路径真实 404；无密钥、不挂 pb_data）
+  └─ 功能路由 → app:8090（PocketBase：/api/*、SPA 构建资源 /assets/*、
+                功能 SPA /login /me /admin/* /super/* /a/:id/register 等）
+    │
+    ├─ pb_data 持久化卷
+    └─ backup 服务每日一致性备份 → backups 卷
 ```
 
-生产基础 Compose **不向宿主机发布 PocketBase 8090**；只有 Caddy/backup 通过 Docker 私网访问 `app:8090`。需要本机调试时才显式叠加 `deploy/docker-compose.debug.yml`。
+生产基础 Compose **不向宿主机发布 PocketBase 8090**；只有 Caddy/backup/public-web 通过 Docker 私网访问 `app:8090`。public-web 同样不发布 host 端口，只被 Caddy 访问。需要本机调试时才显式叠加 `deploy/docker-compose.debug.yml`。
 
 ## 2. 生产环境变量
 
@@ -105,14 +108,16 @@ PR 合并到 `main` 后 GitHub Actions 自动：
 1. SSH 到 ECS，只执行 `git fetch`；
 2. 在临时 detached worktree 复制生产 `.env`；
 3. `docker compose config -q`；
-4. 只预拉取 Caddy；backup 使用本提交的构建上下文；
+4. 只预拉取 Caddy；backup 与 public-web 使用本提交的构建上下文；
 5. 构建候选镜像；
 6. 构建后用无网络、无卷、无凭据的 smoke 启动候选 backup 镜像，并验证故意损坏脚本会变为 unhealthy；
-7. 检查 `CC_PHONE_HASH_KEY >= 32` 和 production+aliyun 短信必填变量；
-8. 等待当前 backup runtime 就绪并执行一次成功备份；
-9. 上述门禁全部通过后才 fast-forward `/opt/chatcircle/main`；
-10. `docker compose up --no-build --pull never -d`，只使用预检构建的候选镜像；
-11. 轮询 app 与 backup 容器 healthcheck，90 秒内必须进入 `healthy`，并核对镜像 revision。
+7. 同样以无网络、无上游 smoke 验证候选 public-web 镜像（降级 200/503、robots、真实 404）；
+8. 检查 `CC_PHONE_HASH_KEY >= 32` 和 production+aliyun 短信必填变量；
+9. 等待当前 backup runtime 就绪并执行一次成功备份；
+10. 上述门禁全部通过后才 fast-forward `/opt/chatcircle/main`；
+11. `docker compose up --no-build --pull never -d`，只使用预检构建的候选镜像；随后 `caddy reload` 让按提交绑定的 Caddyfile 立即生效（bind mount 的纯内容变更不会触发容器重建）；
+12. 轮询 app、backup 与 public-web 容器 healthcheck，90 秒内必须进入 `healthy`，并核对镜像 revision；
+13. 线上门禁：`/api/cc/health` 200；首页原始 HTML 含 `rel="canonical"` 与 `__CC_PUBLIC_DATA__`（证明经 public-web SSR 而非 SPA 空壳）；`/robots.txt` 200 且含 Sitemap 行。
 
 缺 Secret、Compose 配置错误、镜像拉取失败或 build 失败都会发生在生产工作区更新之前。
 
@@ -172,9 +177,22 @@ chatcircle.empact.cn
 
 - `/_/*` 返回 403，生产不暴露 PocketBase 管理台；
 - HSTS、CSP、nosniff、X-Frame-Options 等安全头由 Caddy 下发；
-- Caddy 覆盖客户端传入的 `X-Forwarded-For`，后端来源 IP 以代理实际连接为准。
+- Caddy 覆盖客户端传入的 `X-Forwarded-For`（app 与 public-web 两个上游都覆盖），后端来源 IP 以代理实际连接为准；
+- 按路径分发：公开页 SSR → public-web:3100，功能 SPA 与 `/api/*` → app:8090；功能 SPA 路径带 `X-Robots-Tag: noindex`。完整路由表与维护口径见 `deploy/Caddyfile` 文件头注释；
+- ⚠️ 线上服务器的 Caddy 若还有其他 vhost/import，部署时只替换本域名（chatcircle.empact.cn）的 site block。
 
-## 5. 备份与恢复
+## 5. 公开页渲染服务（public-web）
+
+公开页（首页、关于、隐私、活动广场、活动详情、公开推文）由独立的 `public-web` 服务做服务端渲染（SSR），让搜索引擎与无 JS 抓取方直接读到正文、canonical/OG 元信息与 robots/sitemap；功能页（登录后的业务界面）仍是 PocketBase 同源伺服的 SPA。设计决策与否决方案见 [docs/planning/public-web-ssr-plan.md](../docs/planning/public-web-ssr-plan.md)，路由分界以 `deploy/Caddyfile` 文件头注释为准。
+
+- 镜像：`deploy/public-web.Dockerfile`（两阶段构建，运行时只带 `dist-public/`，无 node_modules 依赖）；与 app/backup 一样按 `CC_RELEASE_SHA` 标记，`docker compose build` 统一构建。
+- 职责：SSR HTML、`/public-assets/*`（hash 资源 immutable）、`/robots.txt`、`/sitemap.xml`、未知路径的真实 404。
+- 配置（全部非密钥，compose 已显式给出生产口径）：`PORT`（3100）、`CC_SITE_ORIGIN`（canonical/OG/sitemap 的对外 origin，默认 `https://chatcircle.empact.cn`）、`CC_PB_INTERNAL_URL`（上游 PocketBase，私网 `http://app:8090`）；可选 `CC_PUBLIC_FETCH_TIMEOUT_MS`（单请求上游超时，默认 5000）、`CC_PUBLIC_MAX_INFLIGHT`（在飞上游请求上限，默认 32）。
+- 健康检查：compose healthcheck 探 `/healthz`（浅活，不依赖上游）；`/readyz` 探上游 `/api/health`（2 秒超时），排障时用它区分「渲染服务挂」与「上游挂」。
+- 故障影响面：public-web 崩溃或未就绪只让公开路由在 Caddy 侧 502/503，功能 SPA 与 `/api/*` 不受影响（caddy 不 depends_on public-web，公开渲染故障不会锁死原业务）。上游 PocketBase 故障时首页降级为 200（静态介绍仍在，列表区显示错误态），其余公开页 503 + `Retry-After: 30`，任何情况下不得挂死连接。
+- 回滚：不单独发明机制——public-web 镜像与 Caddyfile 都随提交绑定，用 workflow_dispatch 重放上一个成功部署的 SHA 即整体回退。
+
+## 6. 备份与恢复
 
 每日备份由 Compose `backup` 服务中的前台 `crond` 执行镜像内的 `/etc/periodic/daily/backup`：
 
@@ -218,7 +236,7 @@ docker compose --project-name chatcircle \
 
 异地 OSS 上传、加密、30 天生命周期、定时任务与恢复验收见 [异地备份手册](offsite-backup.md)。脚本需显式配置后启用，当前未验证真实异地副本。隐私政策、管理员 SMTP 与保留期限执行见 [隐私运营手册](../docs/privacy-operations.md)。
 
-## 6. 常用排障
+## 7. 常用排障
 
 查看服务：
 
@@ -230,6 +248,13 @@ docker compose ps
 
 ```bash
 docker compose logs --tail=120 app
+```
+
+查看 public-web（公开页 SSR；访问日志为 JSON 行，含 method/pathname/status/ms）：
+
+```bash
+docker compose logs --tail=120 public-web
+docker compose exec public-web wget -qO- http://127.0.0.1:3100/readyz   # 区分渲染服务挂 vs 上游挂
 ```
 
 查看 Caddy/证书：
@@ -261,7 +286,7 @@ done
 
 不要把 `.env`、AccessKey Secret、手机号 HMAC key 或超管密码贴进 issue/PR/聊天截图。
 
-## 7. 发布前人工门禁
+## 8. 发布前人工门禁
 
 自动化无法替代以下检查：
 
@@ -272,5 +297,6 @@ done
 - 真机短信登录/注册、绑定、换绑三类模板均成功；
 - `https://chatcircle.empact.cn` 正常，无 `:8443`；
 - `/api/health`、管理端、超级管理端和参与者端均正常；
+- 公开页无 JS 可读：`curl -s https://chatcircle.empact.cn/ | grep -o 'rel="canonical"'` 与 `__CC_PUBLIC_DATA__` 均有命中，`curl -I https://chatcircle.empact.cn/login` 带 `X-Robots-Tag: noindex`（部署门禁已自动化前两项，此处人工复核）；
 - 备份最近一次成功；
 - 公安备案已于 2026-09-14 通过（沪公网安备31010402337130号，主域名 empact.cn），需在网站页脚补公安备案编号及查询链接（https://beian.mps.gov.cn/，属于合规展示，不影响当前 80/443 技术切换）。

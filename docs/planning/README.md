@@ -65,6 +65,7 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 | [ui-design.md](ui-design.md) | 前端视觉与交互规范：色彩/字体/间距/动效 token、组件规则、响应式与无障碍基线、文案语气、图表样式；仅含纯前端 UI，业务口径以 PRD 与本目录其他文档为准 |
 | [account-event-workflow-prd.md](account-event-workflow-prd.md) | **2026-08-27 专项升级主入口**：手机号账号、机构活动全流程、实时看板、现场编号与配对、参与者端展示、细粒度导出、隐私边界、API 草案、并行任务和验收清单 |
 | [production-readiness-batch-1-plan.md](production-readiness-batch-1-plan.md) | 历史第一批任务书；代码已由 #49/#50/#51/#52/#53 落地，真实外部验收仍按发布清单执行 |
+| [public-web-ssr-plan.md](public-web-ssr-plan.md) | 公开页 SSR / GEO：public-web 渲染服务的架构决策、权限边界与否决方案（一次性静态快照、整站换框架等） |
 | [release-checklist.md](../release-checklist.md) | **T7 当前发布验收入口**：自动化门禁、测试环境、真机/合规/生产放行；运维操作细节链接 `deploy/README.md` |
 
 ## 有意跳过的目录文档
