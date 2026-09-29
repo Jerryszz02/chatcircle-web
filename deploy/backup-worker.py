@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 import hashlib
 import os
+import re
 from pathlib import Path
 import secrets
 import sqlite3
@@ -61,9 +62,10 @@ def main():
     partial = dest / ('.' + name + '.partial')
     result = dict(result='failure', file='', bytes=0, reason='')
     try:
-        days = int(os.environ.get('BACKUP_RETENTION_DAYS', '30'))
-        if days < 1:
-            raise ValueError('invalid retention days')
+        raw_count = os.environ.get('BACKUP_RETENTION_COUNT', '2')
+        if not re.fullmatch(r'[1-9][0-9]{0,5}', raw_count):
+            raise ValueError('invalid retention count')
+        count = int(raw_count)
         with request('snapshot') as response, partial.open('wb') as out:
             import shutil
             shutil.copyfileobj(response, out)
@@ -79,11 +81,17 @@ def main():
         archive_meta = dict(file=name, bytes=final.stat().st_size,
                             release_sha=os.environ.get('CC_RELEASE_SHA', 'unknown'), sha256=digest.hexdigest())
         atomic_json(dest / (name + '.json'), archive_meta)
-        # Retention semantics stay unchanged here; PR #79 owns count retention.
-        for old in dest.glob('cc_daily_*.zip'):
-            if old != final and not old.is_symlink() and old.stat().st_mtime < time.time() - days * 86400:
-                old.unlink()
-                (dest / (old.name + '.json')).unlink(missing_ok=True)
+        # Preserve PR #79: newest N by nanosecond mtime, always including this
+        # verified archive. Validate every retained recovery point before deletion.
+        managed = [path for path in dest.glob('cc_daily_*.zip')
+                   if path != final and path.is_file() and not path.is_symlink()
+                   and re.fullmatch(r'cc_daily_\d{8}_\d{6}(?:_[0-9a-f]{16})?\.zip', path.name)]
+        managed.sort(key=lambda path: path.stat().st_mtime_ns, reverse=True)
+        for previous in managed[:count - 1]:
+            verify(previous)
+        for old in managed[count - 1:]:
+            old.unlink()
+            (dest / (old.name + '.json')).unlink(missing_ok=True)
         result.update(archive_meta)
         result['result'] = 'success'
     except Exception as error:

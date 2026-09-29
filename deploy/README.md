@@ -202,7 +202,7 @@ chatcircle.empact.cn
 
 - app 通过内部专用接口调用 PocketBase 一致性备份，流式下载后删除本次服务端副本；不接受调用者传入文件路径，也不提供恢复接口。
 - backup 仅挂载 backups 卷，只有 `CC_BACKUP_KEY`，不能使用原生超管 API；网关拒绝 `/api/cc/internal/*`。
-- 下载后验证 ZIP CRC、data.db 和 auxiliary.db 的 SQLite quick_check，原子落盘；默认保留 `BACKUP_RETENTION_DAYS=30` 天（另一 PR 的两份保留策略独立处理）。每份归档附带版本/SHA-256 元数据，最近结果写 last_backup.json，并通过受限接口写固定备份审计。
+- 下载后验证 ZIP CRC、data.db 和 auxiliary.db 的 SQLite quick_check，原子落盘；默认保留最新 `BACKUP_RETENTION_COUNT=2` 份，保持已合并 PR #79 的策略；按纳秒修改时间排序，先验证所有保留点再清理。每份归档附带版本/SHA-256 元数据，最近结果写 last_backup.json，并通过受限接口写固定备份审计。
 - runtime healthy 只证明调度器心跳；`check-backup.py` 独立检查失败、36 小时未更新、归档缺失/大小变化；宿主机监控也能发现 backup 容器停止。
 
 ```bash

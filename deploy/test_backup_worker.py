@@ -23,7 +23,7 @@ class WorkerTests(unittest.TestCase):
             dest = Path(folder)
             old = dest / 'cc_daily_20260101_020000_1234567890abcdef.zip'
             old.write_bytes(b'previous verified snapshot')
-            with patch.dict(os.environ, {'BACKUP_DEST': folder, 'BACKUP_RETENTION_DAYS': '1'}), patch.object(worker, 'request', side_effect=[io.BytesIO(b'PKtruncated'), io.BytesIO(b'{}')]) as api:
+            with patch.dict(os.environ, {'BACKUP_DEST': folder, 'BACKUP_RETENTION_COUNT': '2'}), patch.object(worker, 'request', side_effect=[io.BytesIO(b'PKtruncated'), io.BytesIO(b'{}')]) as api:
                 self.assertEqual(worker.main(), 1)
             self.assertTrue(old.exists())
             self.assertFalse(list(dest.glob('*.partial')))

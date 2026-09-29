@@ -457,10 +457,10 @@ CI（`.github/workflows/ci.yml`，push 到 main 与全部 PR 触发，三 job �
 ## 10. 部署与运维速览
 
 - **一体化镜像**（根 `Dockerfile`）：stage1 构建前端 → stage2 alpine 下载 PB 0.28.4（sha256 硬校验）+ 拷入 `pb_public`/`pb_migrations`/`pb_hooks`；`VOLUME /pb/pb_data`；容器启动时 `serve` 自动应用迁移（与本地需手动 `migrate up` 不同）。
-- **compose 四服务**：`app`（生产基础 compose 默认不向 host 发布端口，只在 Docker 私网供 Caddy/backup/public-web 以 app:8090 访问；显式叠加 `deploy/docker-compose.debug.yml` 才发布回环 `127.0.0.1:8090`）、`public-web`（公开页 SSR，见 §6.8；无密钥、不挂 pb_data、不发布 host 端口）、`backup`（crond 每日北京时间 02:00 跑 `deploy/backup.sh`：PB `/api/backups` 一致性快照 → 下载 ZIP → 校验 → 删服务端副本 → 30 天滚动 → 写 `last_backup.json` 标记并直写 `audit_logs` 驱动超管告警）、`caddy`（标准 80/443 Automatic HTTPS，安全响应头，封 `/_/*` 管理台，按路径分发到 public-web/app 并覆写 XFF）。
+- **compose 四服务**：`app`（生产基础 compose 默认不向 host 发布端口，只在 Docker 私网供 Caddy/backup/public-web 以 app:8090 访问；显式叠加 `deploy/docker-compose.debug.yml` 才发布回环 `127.0.0.1:8090`）、`public-web`（公开页 SSR，见 §6.8；无密钥、不挂 pb_data、不发布 host 端口）、`backup`（crond 每日北京时间 02:00 跑 `deploy/backup.sh`：PB `/api/backups` 一致性快照 → 下载 ZIP → 校验 → 删服务端副本 → 本机保留最近 2 份（定时与部署前备份合计） → 写 `last_backup.json` 标记并直写 `audit_logs` 驱动超管告警）、`caddy`（标准 80/443 Automatic HTTPS，安全响应头，封 `/_/*` 管理台，按路径分发到 public-web/app 并覆写 XFF）。
 - **部署流水线**：push main → `deploy.yml` SSH 到 ECS `/opt/chatcircle` → `git merge --ff-only origin/main` → `docker compose up --build -d`。
 - **恢复**：stop app → 用 `cc_daily_*.zip` 覆盖 pb_data → start（compose 文件尾注释）。
-- **环境变量**：全部见 `.env.example`（PB 版本、备份保留天数、超管与 agent 服务账号凭据、阿里云密钥；真实 .env 不入库）。
+- **环境变量**：全部见 `.env.example`（PB 版本、备份保留份数、超管与 agent 服务账号凭据、阿里云密钥；真实 .env 不入库）。
 - 细节与已知未验证项（Docker 构建/备份脚本在真实容器环境的验证状态、服务器上待删的 override 文件）以 `deploy/README.md` 为准。
 
 ## 11. 红线速查（改代码前必读）
