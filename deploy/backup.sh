@@ -199,7 +199,11 @@ cleanup_server_copy
 ARCHIVES=$(for archive in "$DEST"/cc_daily_*.zip; do
     [ -f "$archive" ] && [ ! -L "$archive" ] || continue
     basename "$archive"
-done | LC_ALL=C grep -E '^cc_daily_[0-9]{8}_[0-9]{6}(_[0-9a-f]{16})?\.zip$' | LC_ALL=C sort -r)
+done | LC_ALL=C grep -E '^cc_daily_[0-9]{8}_[0-9]{6}(_[0-9a-f]{16})?\.zip$')
+# Only validated basenames enter this word split. GNU ls in the runtime sorts
+# by nanosecond mtime, unlike the filename's second-resolution timestamp and
+# random suffix. BSD ls on macOS also preserves subsecond order in local tests.
+ARCHIVES=$(cd "$DEST" && LC_ALL=C ls -1td -- $ARCHIVES)
 kept=1
 for archive in $ARCHIVES; do
     [ "$archive" != "$NAME" ] || continue

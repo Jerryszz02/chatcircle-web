@@ -3,8 +3,9 @@ FROM alpine:3.20
 # Install runtime dependencies while building the immutable candidate image.  apk
 # can hang when the package mirror is unreachable, so KILL provides a hard bound
 # for preflight and CI instead of leaving a production container half-started.
-RUN timeout -s KILL 120 apk add --no-cache tzdata flock unzip \
+RUN timeout -s KILL 120 apk add --no-cache tzdata flock unzip coreutils \
     && test -e /usr/share/zoneinfo/Asia/Shanghai \
+    && ls --version >/dev/null \
     && command -v unzip >/dev/null \
     && command -v flock >/dev/null
 

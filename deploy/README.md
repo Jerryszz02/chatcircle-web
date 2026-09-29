@@ -199,7 +199,7 @@ chatcircle.empact.cn
 
 每日备份由 Compose `backup` 服务中的前台 `crond` 执行镜像内的 `/etc/periodic/daily/backup`：
 
-- `deploy/backup.Dockerfile` 在构建期安装 `tzdata`、`flock` 与 `unzip`，并以 `CC_RELEASE_SHA` 标记镜像；启动时不访问 apk 镜像源；
+- `deploy/backup.Dockerfile` 在构建期安装 `tzdata`、`flock`、`unzip` 与 `coreutils`（GNU `ls` 按亚秒级写入时间排序），并以 `CC_RELEASE_SHA` 标记镜像；启动时不访问 apk 镜像源；
 - 使用 PocketBase 备份 API 创建 SQLite + 上传文件一致性 ZIP；
 - 下载到 `backups` 持久化卷；
 - 默认保留最近 `BACKUP_RETENTION_COUNT=2` 份本机自动归档，定时和部署前备份合并计数；新 ZIP 与拟保留的旧 ZIP 完整校验通过后才清理，失败时保留历史归档；

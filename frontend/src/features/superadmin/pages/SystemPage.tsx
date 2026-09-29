@@ -194,7 +194,7 @@ export function SuperSystemPage() {
                   <th>说明</th>
                   <td className="sa-cell-wrap">
                     {backup.status?.lastBackup?.message ??
-                      '数据库及上传文件每日自动备份，默认保留最近 30 天（PRD §12.3）。'}
+                      '数据库及上传文件每日自动备份，本机默认保留最近 2 份（含部署前备份）。'}
                   </td>
                 </tr>
               </tbody>

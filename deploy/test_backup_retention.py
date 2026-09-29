@@ -72,6 +72,25 @@ else:
         self.assertTrue(link.is_symlink())
         self.assertEqual(target.read_bytes(), b'untouched')
 
+    def test_same_second_uses_subsecond_write_order_not_random_suffix(self):
+        # The newer archive sorts before the older one lexically. Both writes
+        # share the same whole-second mtime, as with fast serialized backups.
+        for p in self.old:
+            p.unlink()
+        older = self.dest / 'cc_daily_20260101_000000_ffffffffffffffff.zip'
+        newer = self.dest / 'cc_daily_20260101_000000_0000000000000000.zip'
+        second_ns = 1767225600 * 1_000_000_000
+        for p, offset in [(older, 100_000_000), (newer, 900_000_000)]:
+            with zipfile.ZipFile(p, 'w') as z:
+                z.writestr('data.db', b'fixture')
+            os.utime(p, ns=(second_ns + offset, second_ns + offset))
+        self.assertEqual(int(older.stat().st_mtime), int(newer.stat().st_mtime))
+        result = self.run_backup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(newer.exists(), 'immediately preceding backup must survive')
+        self.assertFalse(older.exists(), 'older random-high suffix must be pruned')
+        self.assertEqual(len(list(self.dest.glob('*.zip'))), 2)
+
     def test_new_corrupt_zip_never_prunes_history(self):
         result = self.run_backup(CORRUPT_DOWNLOAD='1')
         self.assertNotEqual(result.returncode, 0)
