@@ -26,7 +26,7 @@ class BackupLockTests(unittest.TestCase):
                 shim.chmod(0o755)
             wget = commands / 'wget'
             wget.write_text('''#!/usr/bin/env python3
-import json,os,sys,time
+import json,os,sys,time,zipfile
 from pathlib import Path
 root=Path(os.environ['TEST_ROOT'])
 args=sys.argv[1:]
@@ -42,7 +42,8 @@ elif url.endswith('/auth-with-password'):
 elif url.endswith('/api/files/token'):
     print('{"token":"synthetic-file-token"}')
 elif '-qO' in args:
-    Path(args[args.index('-qO')+1]).write_bytes(b'PKsynthetic-backup')
+    with zipfile.ZipFile(args[args.index('-qO')+1], 'w') as archive:
+        archive.writestr('data.db', b'synthetic-backup')
 else:
     print('{}')
 ''')

@@ -36,6 +36,16 @@ good_id="$(docker run --detach --network none \
   "$IMAGE")"
 wait_health "$good_id" healthy 30
 
+# Same-second backups must sort by subsecond write time, not random filenames.
+# No production volume is attached; these files live only in the smoke container.
+docker exec "$good_id" sh -eu -c '
+  mkdir /tmp/retention-order
+  cd /tmp/retention-order
+  touch -d "2026-01-01 00:00:00.100000000 UTC" cc_daily_20260101_000000_ffffffffffffffff.zip
+  touch -d "2026-01-01 00:00:00.900000000 UTC" cc_daily_20260101_000000_0000000000000000.zip
+  test "$(LC_ALL=C ls -1td -- cc_daily_*.zip | head -n 1)" = cc_daily_20260101_000000_0000000000000000.zip
+'
+
 # A broken script must fail the image healthcheck while crond itself remains up.
 bad_id="$(docker run --detach --network none \
   --health-interval=1s --health-start-period=1s --health-retries=2 \

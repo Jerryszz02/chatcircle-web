@@ -7,7 +7,7 @@
 #
 # 流程：健康等待 → 超管登录（凭据仅经环境变量注入；请求体走 600 权限临时文件
 #       --post-file，密码不进进程列表）→ 创建备份 → 下载到 backups 卷 → 校验 ZIP
-#       → 删除服务端副本（成功/失败路径都删）→ 滚动清理 30 天 → 原子写结果标记。
+#       → 删除服务端副本（成功/失败路径都删）→ 滚动保留最近 2 份 → 原子写结果标记。
 #
 # 结果标记：写 $BACKUP_DEST/last_backup.json（result/file/bytes/duration/reason），
 # 先写临时文件再 mv 原子替换；脚本任何非零退出（fail 或 set -e 意外中断）都会
@@ -31,7 +31,7 @@ set -eu
 PB_URL=${PB_URL:-http://app:8090}
 DEST=${BACKUP_DEST:-/backups}
 PBDATA=${BACKUP_PBDATA:-/pbdata}
-RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
+RETENTION_COUNT=${BACKUP_RETENTION_COUNT:-2}
 : "${PB_SUPERUSER_EMAIL:?须以环境变量注入超管邮箱（部署期 secrets，见 .env.example）}"
 : "${PB_SUPERUSER_PASSWORD:?须以环境变量注入超管密码}"
 
@@ -127,10 +127,11 @@ on_exit() {
 }
 trap on_exit EXIT
 
-# 入口校验：保留天数必须为纯数字（供 find -mtime 使用，非法值直接失败）
-case "$RETENTION_DAYS" in
-    ''|0|*[!0-9]*) fail "BACKUP_RETENTION_DAYS 非法（须为正整数）：$RETENTION_DAYS" ;;
+# 入口校验：按份数保留；旧 BACKUP_RETENTION_DAYS 不再参与清理。
+case "$RETENTION_COUNT" in
+    ''|0*|*[!0-9]*) fail "BACKUP_RETENTION_COUNT 非法（须为正整数）：$RETENTION_COUNT" ;;
 esac
+[ "${#RETENTION_COUNT}" -le 6 ] || fail "BACKUP_RETENTION_COUNT 过大"
 
 # 1. 等待 PocketBase 就绪（容器同启时 app 可能尚未起来）
 i=0
@@ -182,17 +183,44 @@ if ! wget -qO "$DEST/$NAME" \
     fail "下载备份文件失败"
 fi
 
-# 5. 校验：非空且为 ZIP（PK 头）
-[ -s "$DEST/$NAME" ] || fail "备份文件为空"
-[ "$(head -c 2 "$DEST/$NAME")" = "PK" ] || fail "备份文件非 ZIP 格式"
+# 5. 完整校验 ZIP（含 CRC）；失败文件不得成为恢复点或触发旧归档清理。
+if ! unzip -tqq "$DEST/$NAME" >/dev/null 2>&1; then
+    rm -f "$DEST/$NAME"
+    fail "备份 ZIP 完整性校验失败"
+fi
 BYTES=$(wc -c < "$DEST/$NAME" | tr -d ' ')
 
 # 6. 删除服务端副本
 cleanup_server_copy
 
-# 7. 滚动清理：删除超过保留天数的归档
-find "$DEST" -name 'cc_daily_*.zip' -type f -mtime "+$((RETENTION_DAYS - 1))" -delete
+# 7. 当前成功备份加上时间最新的 N-1 份；只处理脚本生成的文件名，
+# 不跟随符号链接、不清理手工文件。先验证所有保留点，再开始删除。
+# 锁覆盖整个两阶段清理；不足 N 份或任一保留点损坏时不会删除旧文件。
+ARCHIVES=$(for archive in "$DEST"/cc_daily_*.zip; do
+    [ -f "$archive" ] && [ ! -L "$archive" ] || continue
+    basename "$archive"
+done | LC_ALL=C grep -E '^cc_daily_[0-9]{8}_[0-9]{6}(_[0-9a-f]{16})?\.zip$')
+# Only validated basenames enter this word split. GNU ls in the runtime sorts
+# by nanosecond mtime, unlike the filename's second-resolution timestamp and
+# random suffix. BSD ls on macOS also preserves subsecond order in local tests.
+ARCHIVES=$(cd "$DEST" && LC_ALL=C ls -1td -- $ARCHIVES)
+kept=1
+for archive in $ARCHIVES; do
+    [ "$archive" != "$NAME" ] || continue
+    [ "$kept" -lt "$RETENTION_COUNT" ] || break
+    unzip -tqq "$DEST/$archive" >/dev/null 2>&1 || fail "保留点 ZIP 损坏，已停止清理：$archive"
+    kept=$((kept + 1))
+done
+kept=1
+for archive in $ARCHIVES; do
+    [ "$archive" != "$NAME" ] || continue
+    if [ "$kept" -lt "$RETENTION_COUNT" ]; then
+        kept=$((kept + 1))
+    else
+        rm -f "$DEST/$archive"
+    fi
+done
 
 write_marker success "$NAME" "$BYTES" ""
 record_audit success "$NAME" "$BYTES" "" || echo "[backup] warn: 备份成功审计写入失败" >&2
-echo "[backup] written: $DEST/$NAME (${BYTES} bytes, retention: ${RETENTION_DAYS} days)"
+echo "[backup] written: $DEST/$NAME (${BYTES} bytes, retention: ${RETENTION_COUNT} archives)"
