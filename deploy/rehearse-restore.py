@@ -24,6 +24,21 @@ def run(args, cwd=None, data=None):
     return result.stdout
 
 
+def finish_rehearsal(compose, root, report, keep_running):
+    report['resources_retained'] = keep_running
+    try:
+        if not keep_running:
+            # No -v: all recovery data/config bind mounts remain protected on disk.
+            # The unique project scopes removal to this rehearsal's containers/networks.
+            run(compose + ['down'])
+            report['resources_cleaned'] = True
+    except Exception:
+        report['resources_cleaned'] = False
+        raise
+    finally:
+        (root / 'report.json').write_text(json.dumps(report, indent=2))
+
+
 def main(args):
     os.umask(0o077)
     root = args.destination.resolve()
@@ -166,9 +181,10 @@ print('AUTH_AND_BACKUP_STATUS_OK')
         run(compose + ['start', 'app'])
         report['result'] = 'success'
     finally:
-        report['production_unchanged'] = run(['docker', 'inspect', '-f', '{{.Image}}', app_id]).decode().strip() == before
-        (root / 'report.json').write_text(json.dumps(report, indent=2))
-        # Leave isolated services for the explicit notification failure/recovery drill.
+        try:
+            report['production_unchanged'] = run(['docker', 'inspect', '-f', '{{.Image}}', app_id]).decode().strip() == before
+        finally:
+            finish_rehearsal(compose, root, report, args.keep_running)
     print(json.dumps(report))
 
 
@@ -177,6 +193,7 @@ if __name__ == '__main__':
     parser.add_argument('--production', type=Path, default=Path('/opt/chatcircle'))
     parser.add_argument('--destination', type=Path, required=True)
     parser.add_argument('--tag', required=True)
+    parser.add_argument('--keep-running', action='store_true', help='Explicitly retain isolated services for a notification drill; clean up afterward')
     try: main(parser.parse_args())
     except Exception as error:
         print('REHEARSAL_ERROR: ' + type(error).__name__ + ': ' + str(error))
