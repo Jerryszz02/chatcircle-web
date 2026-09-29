@@ -111,8 +111,8 @@ check(
     && /ARG CC_RELEASE_SHA/.test(files.backupDockerfile)
     && /LABEL org\.opencontainers\.image\.revision/.test(files.backupDockerfile)
     && /timeout -s KILL 120 apk add --no-cache tzdata flock/.test(files.backupDockerfile)
-    && /CMD \["crond", "-f", "-d", "8"\]/.test(files.backupDockerfile),
-  'backup 必须在构建期安装依赖、复制脚本并以前台 crond 启动，禁止运行时 apk 安装',
+    && /CMD \["python3", "\/usr\/local\/bin\/backup-scheduler\.py"\]/.test(files.backupDockerfile),
+  'backup 必须在构建期安装依赖、复制脚本并以非 root scheduler 启动，禁止运行时 apk 安装',
 );
 
 check(

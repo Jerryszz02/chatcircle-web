@@ -50,6 +50,7 @@ CC_SMS_TEMPLATE_VERIFY_BOUND_CODE=100005
 
 PB_SUPERUSER_EMAIL=<生产超管邮箱>
 PB_SUPERUSER_PASSWORD=<生产超管密码>
+CC_BACKUP_KEY=<至少32字符的随机专用备份密钥>
 ```
 
 `ALIBABA_CLOUD_SECURITY_TOKEN` 仅在使用 STS 临时凭据时填写；`CC_SMS_SCHEME_NAME` 可选。
@@ -65,7 +66,7 @@ docker compose exec app ./pocketbase superuser create \
   --dir /pb/pb_data
 ```
 
-已有生产数据卷且超级管理员已经存在时不要重复创建；这一步只用于首次初始化。该账号同时用于 `/super` 与 `backup` 服务认证，所以漏掉会导致超级管理端无法登录、定时备份认证失败。
+已有生产数据卷且超级管理员已经存在时不要重复创建；这一步只用于首次初始化。该账号仅用于超级管理与受控运维；backup 使用独立 CC_BACKUP_KEY，不持有超管凭据。
 
 **不再需要：**
 
@@ -197,46 +198,29 @@ chatcircle.empact.cn
 
 ## 6. 备份与恢复
 
-每日备份由 Compose `backup` 服务中的前台 `crond` 执行镜像内的 `/etc/periodic/daily/backup`：
+每日备份由非 root `backup-scheduler.py` 在 Asia/Shanghai 02:00 执行 `/etc/periodic/daily/backup`。手工与定时任务共用 `.backup.lock`，不要删除锁文件。
 
-- `deploy/backup.Dockerfile` 在构建期安装 `tzdata`、`flock`、`unzip` 与 `coreutils`（GNU `ls` 按亚秒级写入时间排序），并以 `CC_RELEASE_SHA` 标记镜像；启动时不访问 apk 镜像源；
-- 使用 PocketBase 备份 API 创建 SQLite + 上传文件一致性 ZIP；
-- 下载到 `backups` 持久化卷；
-- 默认保留最近 `BACKUP_RETENTION_COUNT=2` 份本机自动归档，定时和部署前备份合并计数；新 ZIP 与拟保留的旧 ZIP 完整校验通过后才清理，失败时保留历史归档；
-- 旧 `BACKUP_RETENTION_DAYS` 不再生效；更新镜像并重建 backup 容器后，首次成功备份会按份数清理既有自动归档，手工文件和符号链接保持不动；
-- 结果写 `last_backup.json`；
-- 尽力写入 `audit_logs` 的 `backup.success` / `backup.failed`，供超级管理后台告警。
-
-手工触发：
+- app 通过内部专用接口调用 PocketBase 一致性备份，流式下载后删除本次服务端副本；不接受调用者传入文件路径，也不提供恢复接口。
+- backup 仅挂载 backups 卷，只有 `CC_BACKUP_KEY`，不能使用原生超管 API；网关拒绝 `/api/cc/internal/*`。
+- 下载后验证 ZIP CRC、data.db 和 auxiliary.db 的 SQLite quick_check，原子落盘；默认保留最新 `BACKUP_RETENTION_COUNT=2` 份，保持已合并 PR #79 的策略；按纳秒修改时间排序，先验证所有保留点再清理。每份归档附带版本/SHA-256 元数据，最近结果写 last_backup.json，并通过受限接口写固定备份审计。
+- runtime healthy 只证明调度器心跳；`check-backup.py` 独立检查失败、36 小时未更新、归档缺失/大小变化；宿主机监控也能发现 backup 容器停止。
 
 ```bash
-docker compose exec backup sh /etc/periodic/daily/backup
-docker compose exec backup cat /backups/last_backup.json
+docker compose exec -T backup sh /etc/periodic/daily/backup
+docker compose exec -T backup python3 /usr/local/bin/check-backup.py
 ```
 
-备份脚本使用备份卷中的 `.backup.lock` 阻塞锁，cron 和部署调用会排队，锁覆盖创建、下载、清理、结果标记及审计全过程；失败退出同样释放锁。不要删除锁文件，否则等待进程可能锁住不同 inode。归档文件名带随机后缀，避免同秒完成的两次调用覆盖文件；异地上传兼容新旧文件名。
+**升级顺序**：先在受控 `.env` 中预置至少 32 字符的随机 `CC_BACKUP_KEY`，候选镜像验证通过后，使用旧服务生成成功备份，再运行 `prepare-runtime-volumes.sh` 将 app/backups/Caddy 的确切命名卷调整为 UID/GID 10001。旧 root 进程仍可读写；最后切换整个 Compose，app 和 backup 必须同时升级。部署流水线会执行卷迁移和新服务的首次实际备份。不再支持把新版 backup 单独连接到没有专用接口的旧 app。
 
-**首次升级到构建期 runtime**：旧容器可能仍在启动时执行 `apk add`，更新 Git 不会改变它。部署会在切换生产提交前有限等待 backup runtime 就绪（PID 1 为 `crond`、脚本锁标记和 `flock` 存在），并在就绪后执行一次成功备份；任一条件失败都会停止。需要先更新 backup 服务：避开每日 02:00 窗口，用 `docker compose exec backup ps` 确认没有尚在运行的备份，等待其完成后，再用已审核版本的独立 checkout 仅替换 backup 服务。示例（项目名应与现有 Compose 项目一致）：
+四个服务均非 root、只读根目录、no-new-privileges、cap_drop ALL；仅 Caddy 保留 NET_BIND_SERVICE。app 512 MiB/128 PIDs，其他服务各 192 MiB（backup 32、公开页和网关64 PIDs），合计运行内存上限1088 MiB；宿主机/Empact/构建另计。四条内部网络按业务连接拆分；app 单独出口，Caddy 保留现有 default 网桥，以保持 Empact 到宿主机的代理地址。Docker 网络不能替代接口鉴权。
 
-```sh
-export CC_RELEASE_SHA="$(git -C /path/to/reviewed-checkout rev-parse HEAD)"
-docker compose --project-name chatcircle \
-  --env-file /opt/chatcircle/.env \
-  -f /path/to/reviewed-checkout/docker-compose.yml \
-  --project-directory /path/to/reviewed-checkout \
-  build backup
-docker compose --project-name chatcircle \
-  --env-file /opt/chatcircle/.env \
-  -f /path/to/reviewed-checkout/docker-compose.yml \
-  --project-directory /path/to/reviewed-checkout \
-  up --no-deps --no-build --pull never -d backup
+真实恢复与邮件告警的操作、前置配置和验收边界见 [备份恢复与告警手册](backup-recovery.md)。恢复必须针对明确目标、匹配代码版本与 HMAC key；禁止直接用生产数据卷做演练。可复用的隔离演练命令（镜像已构建）：
+
+```bash
+python3 deploy/rehearse-restore.py --tag <候选镜像标签> --destination /var/lib/chatcircle-rehearsal/<全新目录>
 ```
 
-只更新 backup 服务，不重建 app；确认 `docker compose ps` 显示 healthy，且 `/etc/periodic/daily/backup` 含 `# cc-backup-lock-v1`、`command -v flock` 成功，再重跑固定 SHA 的部署。在正式部署接管配置前保留该独立 checkout。此一次性操作不能在旧备份尚未结束时执行。
-
-容器 `healthy` 只证明 runtime、脚本和 cron 进程可用，不证明最近一次备份成功；成功备份仍以 `/backups/last_backup.json` 的 `result=success`、归档 ZIP 校验和必要时的 `data.db`/`auxiliary.db` SQLite `quick_check` 为准。部署保留“成功备份后再切换 Git 提交”的门禁，部署后的 healthcheck 也只负责发现 runtime 退化。
-
-恢复属于运维操作，执行前必须确认目标环境和备份文件，并事后补写恢复审计。最小流程：停止 app → 从最近一致备份恢复 `pb_data` → 启动 app → 校验账号、机构、活动、报名、签到、问卷与答卷。
+该命令只复制当前成功归档，使用独立目录/内部网络，不开放宿主机端口，不配置短信/邮件凭据。保留隔离容器供告警演练，结束后按报告中的唯一 project 停止容器；恢复目录包含业务数据和环境密钥，必须受控保存。
 
 异地 OSS 上传、加密、30 天生命周期、定时任务与恢复验收见 [异地备份手册](offsite-backup.md)。脚本需显式配置后启用，当前未验证真实异地副本。隐私政策、管理员 SMTP 与保留期限执行见 [隐私运营手册](../docs/privacy-operations.md)。
 

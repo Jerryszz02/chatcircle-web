@@ -1,0 +1,10 @@
+[Unit]
+Description=Check ChatCircle backups every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Unit=chatcircle-backup-monitor.service
+
+[Install]
+WantedBy=timers.target

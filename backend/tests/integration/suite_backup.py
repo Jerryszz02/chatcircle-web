@@ -75,3 +75,38 @@ def run(ctx):
     seed_backup_audit('backup.success', 'success', file_name='cc_daily_20260810_030000.zip')
     s, r = call(base, 'GET', '/api/cc/super/backup-status', token=st)
     rep.check('BKP-10 再次成功后备警解除（alert=false）', s == 200 and r.get('alert') is False, r)
+
+    # ---------- 5. Scoped worker capability never becomes superuser auth ----------
+    import io
+    import zipfile
+    key = 'cc-it-backup-capability-key-32-characters'
+    headers = {'X-Backup-Key': key}
+    for label, request_headers in [('missing', {}), ('wrong', {'X-Backup-Key': 'wrong'})]:
+        s, r = call(base, 'POST', '/api/cc/internal/backup/snapshot', {}, headers=request_headers)
+        rep.check('BKP-11 snapshot rejects ' + label + ' key', s == 403, r)
+    s, raw = call(base, 'POST', '/api/cc/internal/backup/snapshot', {}, headers=headers, raw=True)
+    valid = False
+    if s == 200:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            valid = 'data.db' in archive.namelist() and archive.testzip() is None
+    rep.check('BKP-12 scoped capability downloads a real consistent ZIP', s == 200 and valid)
+    s, r = call(base, 'GET', '/api/backups', token=st)
+    rep.check('BKP-13 snapshot leaves no worker copy', s == 200 and not any(x.get('key', '').startswith('cc_worker_') for x in r), r)
+    for method, path, body in [
+        ('GET', '/api/settings', None),
+        ('POST', '/api/collections/organizations/records', {'name': 'forbidden'}),
+        ('POST', '/api/backups', {'name': 'forbidden.zip'}),
+        ('POST', '/api/backups/anything.zip/restore', {}),
+    ]:
+        s, r = call(base, method, path, body, token=key, headers=headers)
+        rep.check('BKP-14 worker cannot use native admin API ' + path, s in (401, 403, 404), r)
+    s, r = call(base, 'POST', '/api/cc/internal/backup/result', {'result': 'success', 'file': '../../bad'}, headers=headers)
+    rep.check('BKP-15 result validation rejects forged shape/path', s == 400, r)
+    for result, expected_alert in [('failure', True), ('success', False)]:
+        time.sleep(.02)
+        payload = dict(result=result, file='cc_daily_20260929_020000_1234567890abcdef.zip' if result == 'success' else '',
+                       bytes=123 if result == 'success' else 0, duration_ms=100, reason='isolated failure' if expected_alert else '')
+        s, r = call(base, 'POST', '/api/cc/internal/backup/result', payload, headers=headers)
+        rep.check('BKP-16 scoped result accepted: ' + result, s == 200, r)
+        s, r = call(base, 'GET', '/api/cc/super/backup-status', token=st)
+        rep.check('BKP-17 scoped result drives alert: ' + result, s == 200 and r.get('alert') is expected_alert, r)

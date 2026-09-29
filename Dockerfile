@@ -35,6 +35,9 @@ COPY backend/pb_migrations ./pb_migrations
 COPY backend/pb_hooks ./pb_hooks
 
 # 数据（SQLite + 上传文件）放命名卷 /pb/pb_data，镜像与数据分离（PRD §12.3）
+RUN addgroup -g 10001 app && adduser -D -u 10001 -G app app \
+    && mkdir -p /pb/pb_data && chown 10001:10001 /pb/pb_data
+USER 10001:10001
 VOLUME ["/pb/pb_data"]
 EXPOSE 8090
 # 启动时自动应用 pb_migrations 后伺服

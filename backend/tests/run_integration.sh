@@ -83,6 +83,7 @@ echo "[INFO] migrate up 完成（$(grep -cE '^Applied' "$WORK/migrate.log" || tr
 python3 "$SCRIPT_DIR/integration/run.py" --sql-fixture --data-dir "$DATA_DIR"
 
 # --- 5. 启动 serve（显式三目录参数） ----------------------------------------------
+CC_BACKUP_KEY=cc-it-backup-capability-key-32-characters \
 CC_ENVIRONMENT=test \
 CC_SMS_PROVIDER=mock \
 CC_SMS_MOCK_CODE=246810 \

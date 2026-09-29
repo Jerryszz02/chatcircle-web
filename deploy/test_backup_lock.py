@@ -24,37 +24,40 @@ class BackupLockTests(unittest.TestCase):
                 shim = commands / 'flock'
                 shim.write_text('#!/usr/bin/env python3\nimport fcntl,sys\nfcntl.flock(int(sys.argv[-1]), fcntl.LOCK_EX)\n')
                 shim.chmod(0o755)
-            wget = commands / 'wget'
-            wget.write_text('''#!/usr/bin/env python3
-import json,os,sys,time,zipfile
-from pathlib import Path
-root=Path(os.environ['TEST_ROOT'])
-args=sys.argv[1:]
-url=args[-1]
-if url.endswith('/api/health'):
-    with (root/'events').open('a') as log: log.write(os.environ['RUN_ID']+'\\n')
-    if os.environ.get('HOLD_HEALTH')=='1':
-        while not (root/'release').exists(): time.sleep(.01)
-    print('{}')
-elif url.endswith('/auth-with-password'):
-    if os.environ.get('FAIL_AUTH')=='1': sys.exit(1)
-    print('{"token":"synthetic-test-token"}')
-elif url.endswith('/api/files/token'):
-    print('{"token":"synthetic-file-token"}')
-elif '-qO' in args:
-    with zipfile.ZipFile(args[args.index('-qO')+1], 'w') as archive:
-        archive.writestr('data.db', b'synthetic-backup')
-else:
-    print('{}')
-''')
-            wget.chmod(0o755)
+            # Execute the real worker against a bounded local HTTP fixture.
+            import io, sqlite3, zipfile, threading
+            from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+            db = root / 'fixture.db'
+            sqlite3.connect(db).close()
+            payload = io.BytesIO()
+            with zipfile.ZipFile(payload, 'w') as archive:
+                archive.write(db, 'data.db')
+            request_count = [0]
+            class Handler(BaseHTTPRequestHandler):
+                def log_message(self, *args): pass
+                def do_POST(self):
+                    if self.path.endswith('/snapshot'):
+                        request_count[0] += 1
+                        run_id = 'first' if request_count[0] == 1 else 'second'
+                        with (root / 'events').open('a') as log: log.write(run_id + '\n')
+                        if run_id == 'first':
+                            while not (root / 'release').exists(): time.sleep(.01)
+                        if fail_first and run_id == 'first':
+                            self.send_error(503); return
+                        self.send_response(200); self.end_headers(); self.wfile.write(payload.getvalue())
+                    else:
+                        self.send_response(200); self.end_headers(); self.wfile.write(b'{}')
+            server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
             dest = root / 'backups'
             dest.mkdir()
             marker = dest / 'last_backup.json'
             marker.write_text('{"result":"previous"}')
             env = {**os.environ, 'PATH': str(commands) + os.pathsep + os.environ['PATH'],
                    'TEST_ROOT': str(root), 'BACKUP_DEST': str(dest), 'BACKUP_PBDATA': str(root / 'pbdata'),
-                   'PB_SUPERUSER_EMAIL': 'synthetic@example.test', 'PB_SUPERUSER_PASSWORD': 'synthetic-password'}
+                   'PB_URL': 'http://127.0.0.1:%s' % server.server_port,
+                   'CC_BACKUP_KEY': 'synthetic-backup-test-key-32-characters'}
             first = subprocess.Popen(['sh', str(SCRIPT)], env={**env, 'RUN_ID': 'first', 'HOLD_HEALTH': '1',
                                      'FAIL_AUTH': '1' if fail_first else '0'}, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             second = None
@@ -83,6 +86,8 @@ else:
                 for process in (first, second):
                     if process:
                         process.communicate(timeout=10)
+                server.shutdown()
+                server.server_close()
 
     def test_deploy_rejects_legacy_script_before_invocation(self):
         workflow = Path(__file__).parents[1].joinpath('.github/workflows/deploy.yml').read_text()

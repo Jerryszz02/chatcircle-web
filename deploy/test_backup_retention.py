@@ -1,8 +1,13 @@
-"""Run the real shell retention path with synthetic HTTP and real ZIP validation."""
+"""Exercise real worker retention with synthetic HTTP and real SQLite ZIPs."""
 import json
 import os
 from pathlib import Path
 import shutil
+import io
+import importlib.util
+import sqlite3
+from types import SimpleNamespace
+from unittest.mock import patch
 import subprocess
 import tempfile
 import unittest
@@ -18,42 +23,29 @@ class BackupRetentionTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.dest = self.root / 'backups'
         self.dest.mkdir()
-        commands = self.root / 'bin'
-        commands.mkdir()
-        if not shutil.which('flock'):
-            shim = commands / 'flock'
-            shim.write_text('#!/usr/bin/env python3\nimport fcntl,sys\nfcntl.flock(int(sys.argv[-1]), fcntl.LOCK_EX)\n')
-            shim.chmod(0o755)
-        wget = commands / 'wget'
-        wget.write_text('''#!/usr/bin/env python3
-import os,sys,zipfile
-from pathlib import Path
-args=sys.argv[1:]
-if '-qO' in args:
-    path=Path(args[args.index('-qO')+1])
-    if os.environ.get('CORRUPT_DOWNLOAD'):
-        path.write_bytes(b'PKtruncated')
-    else:
-        with zipfile.ZipFile(path,'w') as z: z.writestr('data.db',b'fixture')
-elif args[-1].endswith('/auth-with-password') or args[-1].endswith('/api/files/token'):
-    print('{"token":"synthetic"}')
-else:
-    print('{}')
-''')
-        wget.chmod(0o755)
-        self.env = {**os.environ, 'PATH': str(commands) + os.pathsep + os.environ['PATH'],
-                    'BACKUP_DEST': str(self.dest), 'BACKUP_PBDATA': str(self.root / 'pbdata'),
-                    'PB_SUPERUSER_EMAIL': 'test@example.test', 'PB_SUPERUSER_PASSWORD': 'synthetic'}
-        self.env.pop('BACKUP_RETENTION_COUNT', None)
+        self.env = {'BACKUP_DEST': str(self.dest)}
+        db = self.root / 'fixture.db'
+        with sqlite3.connect(db) as conn:
+            conn.execute('CREATE TABLE fixture (id INTEGER PRIMARY KEY)')
+        self.database = db.read_bytes()
+        spec = importlib.util.spec_from_file_location('worker', SCRIPT.with_name('backup-worker.py'))
+        self.worker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.worker)
         self.old = []
         for i in range(1, 5):
             p = self.dest / ('cc_daily_20260101_%06d.zip' % i)
             with zipfile.ZipFile(p, 'w') as z:
-                z.writestr('data.db', b'fixture')
+                z.writestr('data.db', self.database)
             self.old.append(p)
 
     def run_backup(self, **extra):
-        return subprocess.run(['sh', str(SCRIPT)], env={**self.env, **extra}, capture_output=True, text=True)
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, 'w') as archive:
+            archive.writestr('data.db', self.database)
+        def request(path, body=None):
+            return io.BytesIO((b'PKtruncated' if extra.get('CORRUPT_DOWNLOAD') else payload.getvalue()) if path == 'snapshot' else b'{}')
+        with patch.dict(os.environ, {**self.env, **extra}, clear=True), patch.object(self.worker, 'request', side_effect=request):
+            return SimpleNamespace(returncode=self.worker.main(), stderr='')
 
     def test_default_keeps_latest_two_and_preserves_unmanaged_files(self):
         manual = self.dest / 'cc_daily_manual.zip'
@@ -82,7 +74,7 @@ else:
         second_ns = 1767225600 * 1_000_000_000
         for p, offset in [(older, 100_000_000), (newer, 900_000_000)]:
             with zipfile.ZipFile(p, 'w') as z:
-                z.writestr('data.db', b'fixture')
+                z.writestr('data.db', self.database)
             os.utime(p, ns=(second_ns + offset, second_ns + offset))
         self.assertEqual(int(older.stat().st_mtime), int(newer.stat().st_mtime))
         result = self.run_backup()
