@@ -220,7 +220,7 @@ docker compose exec -T backup python3 /usr/local/bin/check-backup.py
 python3 deploy/rehearse-restore.py --tag <候选镜像标签> --destination /var/lib/chatcircle-rehearsal/<全新目录>
 ```
 
-该命令只复制当前成功归档，使用独立目录/内部网络，不开放宿主机端口，不配置短信/邮件凭据。保留隔离容器供告警演练，结束后按报告中的唯一 project 停止容器；恢复目录包含业务数据和环境密钥，必须受控保存。
+该命令只复制当前成功归档，使用独立目录/内部网络，不开放宿主机端口，不配置短信/邮件凭据。默认在成功或失败退出时删除本次隔离容器和网络，保留受控恢复目录。需要继续邮件演练时显式加 `--keep-running`，结束后按报告中的唯一 project 执行 `down`（不加 `-v`）。恢复目录包含业务数据和环境密钥，必须受控保存。
 
 异地 OSS 上传、加密、30 天生命周期、定时任务与恢复验收见 [异地备份手册](offsite-backup.md)。脚本需显式配置后启用，当前未验证真实异地副本。隐私政策、管理员 SMTP 与保留期限执行见 [隐私运营手册](../docs/privacy-operations.md)。
 

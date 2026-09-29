@@ -30,6 +30,25 @@ class WorkerTests(unittest.TestCase):
             self.assertEqual(json.loads((dest / 'last_backup.json').read_text())['result'], 'failure')
             self.assertEqual(api.call_args.args[0], 'result')
 
+
+    def test_rehearsal_releases_networks_without_deleting_recovery_data(self):
+        rehearsal = load('rehearse-restore.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); data = root / 'data'; data.mkdir(); (data / 'preserve').touch()
+            compose = ['docker', 'compose', '-p', 'cc-restore-fixture', '-f', str(root / 'docker-compose.yml')]
+            with patch.object(rehearsal, 'run') as command:
+                rehearsal.finish_rehearsal(compose, root, {}, False)
+                command.assert_called_once_with(compose + ['down'])
+            self.assertTrue((data / 'preserve').exists())
+            self.assertTrue(json.loads((root / 'report.json').read_text())['resources_cleaned'])
+            with patch.object(rehearsal, 'run') as command:
+                rehearsal.finish_rehearsal(compose, root, {}, True)
+                command.assert_not_called()
+            self.assertTrue(json.loads((root / 'report.json').read_text())['resources_retained'])
+            with patch.object(rehearsal, 'run', side_effect=RuntimeError):
+                with self.assertRaises(RuntimeError): rehearsal.finish_rehearsal(compose, root, {}, False)
+            self.assertFalse(json.loads((root / 'report.json').read_text())['resources_cleaned'])
+
     def test_restore_rejects_zip_traversal_and_existing_destination(self):
         restore = load('restore-files.py')
         with tempfile.TemporaryDirectory() as folder:
