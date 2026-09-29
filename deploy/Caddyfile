@@ -3,8 +3,8 @@
 # public-web:3100（公开页 SSR）或 app:8090（功能 SPA + PocketBase API）。
 # 不再使用未备案时期的 :8443 + 阿里云 DNS-01 临时方案，也不需要 DNS AccessKey。
 #
-# ⚠️ 部署注意：线上服务器的 Caddy 可能还有其他 vhost / import（历史遗留站点等），
-# 替换配置时只更新本域名（chatcircle.empact.cn）的 site block，不得整文件覆盖。
+# 同一网关上的其他站点放在 caddy_config 持久卷 /config/sites/*.caddy，
+# 不直接追加到本文件，避免阻塞 Git 部署；迁移前须备份并验证其他站点配置。
 #
 # 生产环境封闭 PocketBase 管理台（/_/ 路径）：日常运营不需要 PB dashboard
 # （统一走产品内 /super 后台），封闭可减少暴露面；临时排障时注释 route 内
@@ -20,6 +20,9 @@
 #                     /admin/*、/super/*、/a/:id/register）。
 # 注意 /a/:id/register 是功能页（报名），必须先于公开详情 /a/* 命中，
 # 因此它放在功能 SPA 组，且在 route 内排在公开页组之前。
+
+# 空目录可正常启动；已有站点配置随持久卷保留，不随仓库版本覆盖。
+import /config/sites/*.caddy
 
 chatcircle.empact.cn {
 	# 不显式配置 tls/dns：Caddy 使用标准 Automatic HTTPS，
