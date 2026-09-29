@@ -179,7 +179,10 @@ chatcircle.empact.cn
 - HSTS、CSP、nosniff、X-Frame-Options 等安全头由 Caddy 下发；
 - Caddy 覆盖客户端传入的 `X-Forwarded-For`（app 与 public-web 两个上游都覆盖），后端来源 IP 以代理实际连接为准；
 - 按路径分发：公开页 SSR → public-web:3100，功能 SPA 与 `/api/*` → app:8090；功能 SPA 路径带 `X-Robots-Tag: noindex`。完整路由表与维护口径见 `deploy/Caddyfile` 文件头注释；
-- ⚠️ 线上服务器的 Caddy 若还有其他 vhost/import，部署时只替换本域名（chatcircle.empact.cn）的 site block。
+- 同一网关上的其他站点配置存放在 `caddy_config` 持久卷中的 `/config/sites/*.caddy`，由仓库 Caddyfile 的顶层 `import` 加载。空目录无需额外配置。不要再直接向 `deploy/Caddyfile` 追加其他站点，以免阻塞 Git 快进。
+- 迁移已有追加配置时，先独立备份完整 Caddyfile 与 Git diff，确认改动仅为其他站点的完整 block，再将这些 block 原样存入 `/config/sites/`。先使用候选 Caddyfile 执行 `caddy validate`，确认成功后才恢复仓库文件并部署；未知修改或校验失败必须保留原配置并停止。
+- 可通过 `docker compose cp <已审核的站点配置> caddy:/config/sites/<站点>.caddy` 维护站点文件（目录须先创建），校验后使用既有 `caddy reload` 流程生效。不要在这些文件里重复定义 `chatcircle.empact.cn`。
+- `/config/sites/` 不包含在 PocketBase 每日数据备份中，修改前须单独备份到服务器受保护目录；不得用 `docker compose down -v` 删除网关配置和证书卷。回滚到不支持此 import 的旧版本前，须先恢复完整网关配置，不能直接套用旧的单站点 Caddyfile。
 
 ## 5. 公开页渲染服务（public-web）
 
