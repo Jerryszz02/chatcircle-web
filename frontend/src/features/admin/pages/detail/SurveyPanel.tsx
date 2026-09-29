@@ -91,6 +91,7 @@ export function SurveyPanel({ activity }: { activity: ActivityRecord }) {
         template_version_id: template.current_version_id,
         title: createTitle.trim(),
         role_scope: template.role_scope && template.role_scope !== 'both' ? template.role_scope : createRoleScope,
+        phase: template.role_scope && template.role_scope !== 'both' ? 'after' : undefined,
       });
       setShowCreate(false);
       setCreateTitle('');
@@ -162,7 +163,7 @@ export function SurveyPanel({ activity }: { activity: ActivityRecord }) {
             onChange={(e) => {
               setCreateTemplateId(e.target.value);
               const template = templates.find((item) => item.id === e.target.value);
-              setCreateRoleScope(template?.role_scope ?? 'both');
+              setCreateRoleScope(template?.role_scope || 'both');
               if (template) setCreateTitle(template.name);
             }}
           >

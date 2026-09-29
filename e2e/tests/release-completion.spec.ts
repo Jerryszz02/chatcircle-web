@@ -22,8 +22,11 @@ test("创建向导保存现场和问卷计划，机构模板复用不直接发�
   await page.getByLabel("预计签到开放时间").fill("2027-09-01T09:30");
   await page.getByLabel("启用现场配对").uncheck();
   await page.getByRole("button", { name: "下一步" }).click();
-  await page.getByRole("checkbox").first().check();
-  await page.getByLabel(/问卷阶段/).selectOption("after");
+  await expect(page.getByRole("checkbox", { name: /CHATTER_REGISTRATION|LISTENER_REGISTRATION/ })).toHaveCount(0);
+  await page.getByRole("checkbox", { name: /CHATTER_POST_20260924/ }).check();
+  await expect(page.getByLabel(/Chatter.*适用角色/)).toHaveValue("speaker");
+  await expect(page.getByLabel(/Chatter.*适用角色/)).toBeDisabled();
+  await expect(page.getByText("问卷阶段：活动后")).toBeVisible();
   await page.getByLabel(/预计开放时间/).fill("2027-09-01T12:00");
   await page.getByRole("button", { name: "下一步" }).click();
   await expect(page.getByText(/现场配对：关闭/)).toBeVisible();

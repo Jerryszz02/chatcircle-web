@@ -146,8 +146,8 @@ test.describe.serial('V1 主链路', () => {
       await adminPage.getByRole('tab', { name: '问卷管理' }).click();
       await adminPage.getByRole('button', { name: '从模板创建问卷' }).click();
       const dialog = adminPage.getByRole('dialog', { name: '从模板创建问卷' });
-      // 第一个占位选项之后即唯一模板
-      await dialog.locator('#survey-template').selectOption({ index: 1 });
+      // 固定选择本测试的三题模板，避免依赖标准模板目录排序。
+      await dialog.locator('#survey-template').selectOption('tplalpha0000001');
       await dialog.getByLabel('问卷标题').fill(fixture.surveyTitle);
       await dialog.getByRole('button', { name: '创建' }).click();
       await expect(dialog).toBeHidden();

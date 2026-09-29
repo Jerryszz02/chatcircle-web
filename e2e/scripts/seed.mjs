@@ -65,7 +65,7 @@ export function seedTemplatesSql(dbPath) {
     ],
   });
   const sqls = [
-    `INSERT INTO survey_templates (id, template_code, name, description, status, current_version_id, created, updated) VALUES ('tplalpha0000001', 'PARTICIPANT_POST_V1', '活动后问卷 V1', '', 'active', 'veralpha0000001', '${now}', '${now}');`,
+    `INSERT INTO survey_templates (id, template_code, name, description, status, kind, role_scope, current_version_id, created, updated) VALUES ('tplalpha0000001', 'PARTICIPANT_POST_V1', '活动后问卷 V1', '', 'active', 'survey', 'both', 'veralpha0000001', '${now}', '${now}');`,
     `INSERT INTO survey_template_versions (id, template_id, version, schema_json, published_at, published_by, created, updated) VALUES ('veralpha0000001', 'tplalpha0000001', 1, '${schema}', '2026-08-01 00:00:00.000Z', 'superfixture000', '${now}', '${now}');`,
   ];
   for (const sql of sqls) {
@@ -132,6 +132,13 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     fieldDefs[code] = r.id;
   }
 
+  // 主链路 fixture 显式选择旧四字段；新标准目录的默认启用策略由报名模板专属测试验证。
+  // 必须显式关闭其余字段，避免省略配置触发生产默认值并改变这组固定断言。
+  const allFieldDefs = await call('GET', `${pbUrl}/api/collections/registration_field_defs/records?perPage=500`, undefined, ST);
+  const disabledFields = allFieldDefs.items
+    .filter((field) => !Object.values(fieldDefs).includes(field.id))
+    .map((field) => ({ field_def_id: field.id, enabled: false, required: false }));
+
   // 一次性邀请码 → 管理员注册（FR-ORG-002 链路本身也是 fixture 的一部分）
   const inv = await call('POST', `${pbUrl}/api/cc/super/invites`, { organization_id: org.id }, ST);
   const inviteToken = inv.invite.token;
@@ -162,6 +169,7 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     group_tag: '',
     form_config_json: {
       fields: [
+        ...disabledFields,
         { field_def_id: fieldDefs.nickname, enabled: true, required: true },
         { field_def_id: fieldDefs.FULL_NAME, enabled: true, required: true },
         { field_def_id: fieldDefs.age, enabled: true, required: false },
@@ -199,6 +207,7 @@ export async function seedBizData(pbUrl, superEmail, superPassword) {
     group_tag: '',
     form_config_json: {
       fields: [
+        ...disabledFields,
         { field_def_id: fieldDefs.nickname, enabled: true, required: true },
         { field_def_id: fieldDefs.FULL_NAME, enabled: true, required: true },
       ],
