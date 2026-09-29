@@ -536,6 +536,8 @@ routerAdd('POST', '/api/cc/super/templates', (e) => {
       const versionsCol = txApp.findCollectionByNameOrId('survey_template_versions');
 
       const tpl = new Record(templatesCol);
+      tpl.set('kind', 'survey');
+      tpl.set('role_scope', 'both');
       tpl.set('template_code', templateCode);
       tpl.set('name', name);
       tpl.set('description', description);
@@ -703,6 +705,9 @@ routerAdd('POST', '/api/cc/super/templates/{id}/publish', (e) => {
     template = $app.findRecordById('survey_templates', e.request.pathValue('id'));
   } catch (_) {
     return jsonError(e, 404, 'not_found', '模板不存在');
+  }
+  if (template.get('kind') === 'registration') {
+    return jsonError(e, 400, 'validation_failed', '报名模板与标准报名字段同步维护，不能发布为活动后问卷');
   }
   if (template.get('status') !== 'active') {
     return jsonError(e, 400, 'invalid_transition', '模板已停用，不能发布新版本');

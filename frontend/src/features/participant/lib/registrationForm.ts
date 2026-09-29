@@ -25,10 +25,49 @@ export interface RegistrationFieldModel {
   roleScope: RoleScope;
   /** 选项（仅 single_choice / multi_choice 有值）。 */
   options: ChoiceOption[];
+  config?: RegistrationFieldConfig;
+}
+
+export interface RegistrationFieldConfig {
+  input_type?: 'email' | 'tel' | 'textarea' | 'ack';
+  hint?: string;
+  section?: string;
+  order_index?: number;
+  show_when?: { field_code: string; value: string };
 }
 
 /** 表单值（key = field_def_id）：text/number/date/single_choice 为 string，multi_choice 为 string[]。 */
 export type RegistrationFormValues = Record<string, string | string[]>;
+
+function parseFieldConfig(raw: unknown): RegistrationFieldConfig | undefined {
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  const config: RegistrationFieldConfig = {};
+  if (['email', 'tel', 'textarea', 'ack'].includes(String(input.input_type))) {
+    config.input_type = input.input_type as RegistrationFieldConfig['input_type'];
+  }
+  if (typeof input.hint === 'string') config.hint = input.hint;
+  if (typeof input.section === 'string') config.section = input.section;
+  if (typeof input.order_index === 'number' && Number.isFinite(input.order_index)) {
+    config.order_index = input.order_index;
+  }
+  const showWhen = input.show_when;
+  if (showWhen && typeof showWhen === 'object' && !Array.isArray(showWhen)) {
+    const condition = showWhen as Record<string, unknown>;
+    if (typeof condition.field_code === 'string' && typeof condition.value === 'string') {
+      config.show_when = { field_code: condition.field_code, value: condition.value };
+    }
+  }
+  return config;
+}
 
 /** 字段是否适用于当前角色：both 恒适用；角色字段仅对应角色适用；未选角色时只出 both。 */
 export function isFieldApplicable(roleScope: RoleScope, role: ActivityRole | ''): boolean {
@@ -54,11 +93,43 @@ export function buildRegistrationFormModel(
       isSensitive: f.is_sensitive,
       required: f.required,
       roleScope: f.role_scope ?? 'both',
+      config: parseFieldConfig(f.config_json),
       options:
         f.field_type === 'single_choice' || f.field_type === 'multi_choice'
           ? parseChoiceOptions(f.options_json)
           : [],
     }));
+}
+
+/** 条件字段仅在其父字段可见且选中指定值时出现。 */
+export function isRegistrationFieldVisible(
+  model: RegistrationFieldModel,
+  models: RegistrationFieldModel[],
+  values: RegistrationFormValues,
+  seen: Set<string> = new Set(),
+): boolean {
+  const condition = model.config?.show_when;
+  if (!condition) return true;
+  if (seen.has(model.id)) return false;
+  const parent = models.find((item) => item.fieldCode === condition.field_code);
+  if (!parent) return false;
+  const parentValue = values[parent.id];
+  const matches = Array.isArray(parentValue)
+    ? parentValue.includes(condition.value)
+    : parentValue === condition.value;
+  return matches && isRegistrationFieldVisible(parent, models, values, new Set([...seen, model.id]));
+}
+
+export function pruneHiddenRegistrationValues(
+  models: RegistrationFieldModel[],
+  values: RegistrationFormValues,
+): RegistrationFormValues {
+  return Object.fromEntries(
+    Object.entries(values).filter(([id]) => {
+      const model = models.find((item) => item.id === id);
+      return model && isRegistrationFieldVisible(model, models, values);
+    }),
+  );
 }
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -85,6 +156,11 @@ export function validateFieldValue(
 
   switch (model.fieldType) {
     case 'text':
+      if (model.config?.input_type === 'email') {
+        return typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
+          ? null
+          : `「${model.label}」邮箱格式不正确`;
+      }
       return null;
     case 'number':
       return typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value))
@@ -121,6 +197,7 @@ export function validateRegistrationForm(
   const fieldErrors: Record<string, string> = {};
   for (const model of models) {
     if (!isFieldApplicable(model.roleScope, role)) continue;
+    if (!isRegistrationFieldVisible(model, models, values)) continue;
     const err = validateFieldValue(model, values[model.id]);
     if (err) fieldErrors[model.id] = err;
   }
@@ -142,6 +219,7 @@ export function buildRegistrationAnswersPayload(
   const payload: RegistrationAnswerInput[] = [];
   for (const model of models) {
     if (role !== undefined && !isFieldApplicable(model.roleScope, role)) continue;
+    if (!isRegistrationFieldVisible(model, models, values)) continue;
     const value = values[model.id];
     if (value === undefined) continue;
     if (Array.isArray(value)) {

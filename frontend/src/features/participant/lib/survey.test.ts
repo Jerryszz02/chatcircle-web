@@ -5,6 +5,8 @@ import {
   buildSurveyAnswersPayload,
   buildSurveyFormModel,
   isAnswerEmpty,
+  isSurveyQuestionVisible,
+  pruneHiddenSurveyAnswers,
   scaleRange,
   validateQuestionAnswer,
   validateSurveyAnswers,
@@ -62,6 +64,17 @@ describe('buildSurveyFormModel', () => {
     ]);
     expect(models.map((m) => m.questionCode)).toEqual(['A', 'B']);
     expect(models[0].options).toEqual([{ value: 'x', label: 'X' }]);
+  });
+
+  it('解析已知量表、编号及条件配置，忽略未知正则', () => {
+    const models = buildSurveyFormModel([
+      question({ question_code: 'SCALE', question_type: 'scale_1_5', validation_json: { labels: { 1: '完全没有', 5: '非常充实' } } }),
+      question({ question_code: 'TAG', validation_json: { pattern: '^C[0-9]+$' } }),
+      question({ question_code: 'UNKNOWN', validation_json: { pattern: '.*' } }),
+    ]);
+    expect(models[0].validation?.labels).toEqual({ 1: '完全没有', 5: '非常充实' });
+    expect(models[1].validation?.pattern).toBe('^C[0-9]+$');
+    expect(models[2].validation?.pattern).toBeUndefined();
   });
 });
 
@@ -129,6 +142,39 @@ describe('validateQuestionAnswer 各题型校验', () => {
     expect(validateQuestionAnswer(m, 11)).toContain('0–10');
     expect(validateQuestionAnswer(m, 0)).toBeNull();
     expect(validateQuestionAnswer(m, 10)).toBeNull();
+  });
+
+  it('Listener Tag 仅接受 C 后接数字', () => {
+    const m = modelOf({ validation: { pattern: '^C[0-9]+$' } });
+    expect(validateQuestionAnswer(m, 'C07')).toBeNull();
+    expect(validateQuestionAnswer(m, 'C')).toContain('如 C07');
+    expect(validateQuestionAnswer(m, 'c07')).toContain('如 C07');
+    expect(validateQuestionAnswer(m, 'C07a')).toContain('如 C07');
+  });
+});
+
+describe('Q21 条件补充项与互斥答案', () => {
+  const models = buildSurveyFormModel([
+    question({ question_code: 'CPOST_Q21', question_type: 'multi_choice', required: true,
+      options_json: [{ value: 'other', label: '其他' }, { value: 'community', label: '社区活动' }, { value: 'nothing_for_now', label: '暂时没有' }],
+      validation_json: { exclusive_values: ['nothing_for_now'] }, order_index: 1 }),
+    question({ question_code: 'CPOST_Q21_OTHER', question_type: 'text_long', required: true,
+      validation_json: { show_when: { question_code: 'CPOST_Q21', value: 'other' } }, order_index: 2 }),
+  ]);
+
+  it('other 入选才显示且必答，隐藏答案不会校验或提交', () => {
+    expect(isSurveyQuestionVisible(models[1], models, { CPOST_Q21: ['other'] })).toBe(true);
+    expect(validateSurveyAnswers(models, { CPOST_Q21: ['other'] }).CPOST_Q21_OTHER).toBe('本题为必答题');
+    const stale = { CPOST_Q21: ['community'], CPOST_Q21_OTHER: '旧补充' };
+    expect(isSurveyQuestionVisible(models[1], models, stale)).toBe(false);
+    expect(pruneHiddenSurveyAnswers(models, stale)).toEqual({ CPOST_Q21: ['community'] });
+    expect(validateSurveyAnswers(models, stale)).toEqual({});
+    expect(buildSurveyAnswersPayload(models, stale)).toEqual([{ question_code: 'CPOST_Q21', value: ['community'] }]);
+  });
+
+  it('互斥选项与其它选项混选时阻止提交', () => {
+    expect(validateQuestionAnswer(models[0], ['nothing_for_now', 'other'])).toContain('互斥选项');
+    expect(validateQuestionAnswer(models[0], ['nothing_for_now'])).toBeNull();
   });
 });
 

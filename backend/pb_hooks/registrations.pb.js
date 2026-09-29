@@ -147,7 +147,8 @@ routerAdd('POST', '/api/cc/activities/{id}/register', (e) => {
   for (const def of defs) {
     const cfg = def.get('field_code') === 'FULL_NAME' && !def.get('organization_id')
       ? { enabled: true, required: true } : fieldConfig[def.id] || {};
-    if (cfg.enabled === false) continue; // 活动级停用
+    const config = ccJson(def.get('config_json'), {});
+    if (cfg.enabled === false || (cfg.enabled == null && config.default_disabled === true)) continue; // 活动级停用
     const item = {
       def: def,
       required: cfg.required != null ? !!cfg.required : !!def.get('required_default'),
@@ -162,7 +163,8 @@ routerAdd('POST', '/api/cc/activities/{id}/register', (e) => {
 
   // 选项成员校验：options_json 约定为 [{value,label}] 或字符串数组（草案 D-1，可解析才校验）
   const assertChoiceMember = (def, values) => {
-    const options = ccJson(def.get('options_json'), []);
+    const rawOptions = ccJson(def.get('options_json'), []);
+    const options = Array.isArray(rawOptions) ? rawOptions : rawOptions.options;
     if (!Array.isArray(options) || options.length === 0) return;
     const allowed = options.map((o) => (typeof o === 'string' ? o : o && o.value));
     if (allowed.some((v) => typeof v !== 'string')) return;
@@ -180,6 +182,10 @@ routerAdd('POST', '/api/cc/activities/{id}/register', (e) => {
     if (type === 'text') {
       if (typeof value !== 'string') ccError(400, 'INVALID_VALUE', '字段 ' + code + ' 须为文本');
       if (value.length > 2000) ccError(400, 'INVALID_VALUE', '字段 ' + code + ' 文本长度不可超过 2000 字符');
+      const config = ccJson(def.get('config_json'), {});
+      if (config.input_type === 'email' && value.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())) {
+        ccError(400, 'INVALID_VALUE', '请输入有效电子邮箱');
+      }
     } else if (type === 'number') {
       if (typeof value !== 'number' || !isFinite(value)) ccError(400, 'INVALID_VALUE', '字段 ' + code + ' 须为有限数字');
     } else if (type === 'single_choice') {
@@ -201,6 +207,12 @@ routerAdd('POST', '/api/cc/activities/{id}/register', (e) => {
 
   const answers = Array.isArray(body.answers) ? body.answers : [];
   const seen = {};
+  const isVisible = (item) => {
+    const condition = ccJson(item.def.get('config_json'), {}).show_when;
+    if (!condition) return true;
+    const parent = Object.keys(defById).find((id) => defById[id].def.get('field_code') === condition.field_code);
+    return !!parent && answers.some((answer) => answer && answer.field_def_id === parent && answer.value === condition.value);
+  };
   for (const ans of answers) {
     if (!ans || typeof ans !== 'object') ccError(400, 'INVALID_ANSWERS', '答案格式不正确');
     const item = defById[ans.field_def_id];
@@ -211,12 +223,13 @@ routerAdd('POST', '/api/cc/activities/{id}/register', (e) => {
       }
       ccError(400, 'INVALID_FIELD', '报名字段不存在或未启用');
     }
+    if (!isVisible(item)) ccError(400, 'field_not_applicable', '补充字段仅在对应选项被选择时填写');
     if (seen[ans.field_def_id]) ccError(400, 'DUPLICATE_FIELD', '同一字段重复提交');
     seen[ans.field_def_id] = true;
     validateAnswerValue(item.def, ans.value);
   }
   for (const defId in defById) {
-    if (!defById[defId].required) continue;
+    if (!defById[defId].required || !isVisible(defById[defId])) continue;
     const ans = answers.find((a) => a && a.field_def_id === defId);
     if (!ans || ans.value == null || (typeof ans.value === 'string' && ans.value.trim() === '') ||
         (Array.isArray(ans.value) && ans.value.length === 0)) {

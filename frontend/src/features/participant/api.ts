@@ -162,6 +162,8 @@ export interface PublicRegistrationField {
   /** 适用角色：both=两角色均作答；speaker/listener=仅对应角色报名时出现并参与校验。 */
   role_scope: RoleScope;
   options_json?: unknown;
+  /** 模板展示配置（分组、控件类型及条件显示）；旧字段可缺省。 */
+  config_json?: unknown;
 }
 
 /** GET /api/cc/public/activities/:id 响应。 */

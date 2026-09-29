@@ -154,6 +154,8 @@ run_migrate "单独 down 后再次 migrate up 成功" "$WORK/up_seed.log" up
 if command -v sqlite3 >/dev/null 2>&1; then
   BACKFILLED_ACTIVITIES="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM activities WHERE organization_id='migpageorg00001' AND next_speaker_sequence=1 AND next_listener_sequence=1;")"
   check_eq "T2 分页回填覆盖全部 501 条存量活动" "$BACKFILLED_ACTIVITIES" "501"
+  check_eq "回滚再升级后仍有四份生效表单" \
+    "$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM survey_templates WHERE status='active';")" "4"
   SEED_AUDITS="$(sqlite3 "$DATA_DIR/data.db" "SELECT count(*) FROM audit_logs WHERE action='post.create' AND target_type='post' AND target_id IN ('postreview00001','postreview00002') AND actor_id='system' AND actor_role='system';")"
   check_eq "再次 up 后恰有两条 system seed 审计" "$SEED_AUDITS" "2"
 fi
@@ -337,6 +339,17 @@ VALUES
    '2026-06-10 10:00:00.000Z', '2026-06-10 12:00:00.000Z', 'published', 2, 1, 1,
    0, '', '', 'old_smoke_token_1', '', '{}',
    '2026-06-01 00:00:00.000Z', '2026-06-01 00:00:00.000Z');
+INSERT INTO survey_templates
+  (id, template_code, name, status, current_version_id)
+VALUES ('oldsmoketpl0001', 'OLD_PRE_SMOKE', '旧前测模板', 'active', 'oldsmokevrs0001');
+INSERT INTO survey_template_versions
+  (id, template_id, version, schema_json, published_at, published_by)
+VALUES ('oldsmokevrs0001', 'oldsmoketpl0001', 1,
+  '{"questions":[{"question_code":"OLD_Q1","title":"历史题干","question_type":"text_short"}]}',
+  '2026-06-01 00:00:00.000Z', 'system');
+INSERT INTO registration_field_defs
+  (id, organization_id, field_code, field_type, label, source_type, required_default, status, role_scope)
+VALUES ('oldsmokefld0001', '', 'OLD_SCHOOL', 'text', '旧学校字段', 'standard', 1, 'active', 'both');
 SQL
   ok "旧库已造 1 机构 + 1 存量活动（旧 schema 列，无 T2 配对字段）"
 else
@@ -383,6 +396,15 @@ fid = os.environ.get('FIELD_ID', '')
 print('yes' if any(isinstance(f, dict) and f.get('field_def_id') == fid and f.get('required') for f in fields) else 'no')
 ")"
 check_eq "升级后保存活动幂等注入必填姓名字段" "$INJECTED" "yes"
+check_eq "升级后生效模板恰为两份报名与两份后测" \
+  "$(sqlite3 "$OLD_DATA/data.db" "SELECT count(*) FROM survey_templates WHERE status='active';")" "4"
+check_eq "旧前测模板停用但版本题干保留" \
+  "$(sqlite3 "$OLD_DATA/data.db" "SELECT status || ':' || (SELECT json_extract(schema_json, '$.questions[0].title') FROM survey_template_versions WHERE id='oldsmokevrs0001') FROM survey_templates WHERE id='oldsmoketpl0001';")" "disabled:历史题干"
+check_eq "旧活动继续启用升级前学校字段" \
+  "$(sqlite3 "$OLD_DATA/data.db" "SELECT count(*) FROM activities, json_each(form_config_json, '$.fields') AS f WHERE activities.id='oldsmokeact0001' AND json_extract(f.value, '$.field_def_id')='oldsmokefld0001' AND json_extract(f.value, '$.enabled')=1 AND json_extract(f.value, '$.required')=1;")" "1"
+check_eq "旧活动没有被自动追加启用新报名题" \
+  "$(sqlite3 "$OLD_DATA/data.db" "SELECT count(*) FROM activities, json_each(form_config_json, '$.fields') AS f JOIN registration_field_defs d ON d.id=json_extract(f.value, '$.field_def_id') WHERE activities.id='oldsmokeact0001' AND (d.field_code LIKE 'C24_%' OR d.field_code LIKE 'L24_%') AND json_extract(f.value, '$.enabled')=1;")" "0"
+
 kill "$OLD_SERVE_PID" 2>/dev/null || true
 OLD_SERVE_PID=""
 

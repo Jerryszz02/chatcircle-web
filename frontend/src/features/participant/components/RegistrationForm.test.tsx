@@ -245,3 +245,46 @@ describe('RegistrationForm 分角色渲染（role_scope）', () => {
     expect(screen.getByRole('textbox', { name: /聆听经验/ })).toHaveValue('');
   });
 });
+
+describe('RegistrationForm 模板控件与预览', () => {
+  const templateFields: PublicRegistrationField[] = [
+    { id: 'email', field_code: 'email', field_type: 'text', label: '电子邮箱', source_type: 'standard', is_sensitive: false, required: true, role_scope: 'speaker', config_json: { section: '基本信息', input_type: 'email', order_index: 1 } },
+    { id: 'gender', field_code: 'gender', field_type: 'single_choice', label: '性别', source_type: 'standard', is_sensitive: false, required: false, role_scope: 'speaker', options_json: [{ value: 'other', label: '自我描述' }, { value: 'Man', label: '男' }], config_json: { section: '基本信息', order_index: 2 } },
+    { id: 'gender_other', field_code: 'gender_other', field_type: 'text', label: '性别自我描述', source_type: 'standard', is_sensitive: false, required: true, role_scope: 'speaker', config_json: { section: '基本信息', order_index: 3, show_when: { field_code: 'gender', value: 'other' } } },
+    { id: 'story', field_code: 'story', field_type: 'text', label: '想聊的话', source_type: 'standard', is_sensitive: false, required: false, role_scope: 'speaker', config_json: { section: '参与背景', input_type: 'textarea', order_index: 1, hint: '一句话即可' } },
+    { id: 'consent', field_code: 'consent', field_type: 'single_choice', label: '我同意参与', source_type: 'standard', is_sensitive: false, required: true, role_scope: 'speaker', options_json: [{ value: 'agree', label: '同意' }], config_json: { section: '参与约定', input_type: 'ack', order_index: 1 } },
+  ];
+
+  it('固定角色预览按分组展示控件并只做本地校验', async () => {
+    const submit = renderForm({ fields: templateFields, initialRole: 'speaker', preview: true });
+    expect(screen.queryByRole('radio', { name: /倾诉者/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '基本信息' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '想聊的话' }).tagName).toBe('TEXTAREA');
+    expect(screen.getByText('一句话即可')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '性别自我描述' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: '电子邮箱' }), { target: { value: 'bad' } });
+    fireEvent.click(screen.getByRole('button', { name: '检查填写' }));
+    expect(await screen.findByText('「电子邮箱」邮箱格式不正确')).toBeInTheDocument();
+    expect(submit).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('textbox', { name: '电子邮箱' }), { target: { value: 'person@example.com' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /我同意参与/ }));
+    fireEvent.click(screen.getByRole('button', { name: '检查填写' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('填写检查通过');
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('other 补充字段只在触发时必填，切回后清空', async () => {
+    const submit = renderForm({ fields: templateFields, initialRole: 'speaker' });
+    fireEvent.change(screen.getByRole('textbox', { name: '电子邮箱' }), { target: { value: 'person@example.com' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /我同意参与/ }));
+    fireEvent.click(screen.getByRole('radio', { name: '自我描述' }));
+    fireEvent.click(screen.getByRole('button', { name: '提交报名' }));
+    expect(await screen.findByText('请填写「性别自我描述」')).toBeInTheDocument();
+    expect(submit).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('textbox', { name: '性别自我描述' }), { target: { value: '描述' } });
+    fireEvent.click(screen.getByRole('radio', { name: '男' }));
+    expect(screen.queryByRole('textbox', { name: '性别自我描述' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: '自我描述' }));
+    expect(screen.getByRole('textbox', { name: '性别自我描述' })).toHaveValue('');
+  });
+});
