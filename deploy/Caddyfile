@@ -48,6 +48,11 @@ chatcircle.empact.cn {
 
 	# 单一路由块固定求值顺序（handle 互斥：首个命中的 handle 生效，其余跳过）
 	route {
+		# 内部能力接口不可从公网调用（即使持有备份 key）。
+		handle /api/cc/internal/* {
+			respond 403
+		}
+
 		# 封闭 PB 管理台（见文件头注释）；安全边界保持在路由最前
 		handle /_/* {
 			respond 403

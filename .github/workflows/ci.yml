@@ -145,7 +145,9 @@ jobs:
       - name: 构建 backup 候选镜像
         run: docker build --file deploy/backup.Dockerfile --build-arg CC_RELEASE_SHA=ci --tag chatcircle-backup:ci deploy
       - name: 验证无网络启动与健康门禁
-        run: ./deploy/smoke-backup-runtime.sh chatcircle-backup:ci
+        run: |
+          ./deploy/smoke-backup-runtime.sh chatcircle-backup:ci
+          ./deploy/smoke-runtime-permissions.sh chatcircle-backup:ci
 
   public-web-smoke:
     name: public-web runtime Docker smoke

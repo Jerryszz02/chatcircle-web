@@ -331,7 +331,7 @@ routerAdd('GET', '/api/cc/super/backup-status', (e) => {
 
 // ---------------------------------------------------------------------------
 // POST /api/cc/super/backup/run — 已下线（410 Gone）
-// JSVM 无法调用 PocketBase 内部一致性备份（createBackup 需 Go context，hooks 内不可用），
+// 历史实现未使用 PocketBase 内部一致性备份；当前内部端点使用 e.request.context()。
 // 原「库文件复制」并非一致性快照（假备份，可能截断写入中的页）；每日一致性快照由
 // deploy/backup.sh（POST /api/backups，SQLite 在线备份）负责（technical-design §5.8）。
 // 不再写 backup.success 审计，force_fail 故障注入参数一并移除。

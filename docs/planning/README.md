@@ -53,6 +53,8 @@ Chat Circles 以统一活动链接/二维码承载全部参与者链路，用全
 
 本轮实施计划：[上线整改实施计划](production-readiness-completion-plan.md)。运营执行：[隐私运营手册](../privacy-operations.md)、[异地备份](../../deploy/offsite-backup.md)。
 
+本轮运行安全计划：[备份与运行隔离修复](backup-security-plan.md)（2026-09-29，实施与线上验收分开记录）。
+
 ## 已生成文档
 
 | 文档 | 用途 |

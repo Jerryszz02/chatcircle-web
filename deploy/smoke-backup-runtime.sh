@@ -33,13 +33,13 @@ wait_health() {
 
 good_id="$(docker run --detach --network none \
   --health-interval=1s --health-start-period=1s --health-retries=2 \
-  "$IMAGE")"
+  --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,size=32m,mode=1777 "$IMAGE")"
 wait_health "$good_id" healthy 30
 
-# A broken script must fail the image healthcheck while crond itself remains up.
+# A broken script must fail the image healthcheck while the scheduler itself remains up.
 bad_id="$(docker run --detach --network none \
-  --health-interval=1s --health-start-period=1s --health-retries=2 \
-  "$IMAGE" sh -eu -c 'chmod -x /etc/periodic/daily/backup; exec crond -f -d 8')"
+  --health-interval=1s --health-start-period=1s --health-retries=2 --user 0 \
+  "$IMAGE" sh -eu -c 'chmod -x /etc/periodic/daily/backup; exec python3 /usr/local/bin/backup-scheduler.py')"
 wait_health "$bad_id" unhealthy 30
 test "$(docker inspect --format '{{.State.Running}}' "$bad_id")" = true
-test "$(docker exec "$bad_id" cat /proc/1/comm)" = crond
+test "$(docker exec "$bad_id" cat /proc/1/comm)" = python3

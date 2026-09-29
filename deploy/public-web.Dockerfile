@@ -23,6 +23,7 @@ WORKDIR /app
 # server bundle 已全量打包（ssr.noExternal），运行时无需 node_modules；
 # 仅需 server/index.js（入口 + 渲染）与 client/（manifest + hash 静态资源）
 COPY --from=public-build /app/dist-public ./dist-public
+USER 10001:10001
 EXPOSE 3100
 CMD ["node", "dist-public/server/index.js"]
 

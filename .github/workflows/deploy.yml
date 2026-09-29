@@ -167,6 +167,10 @@ jobs:
           # 生产短信凭据/场景模板在 production+aliyun 时必须全部非空。这里在隔离 project 的
           # 候选 app 容器内校验（变量已实际注入容器），不挂生产端口、不启动依赖、也不接触生产 pb_data。
           docker compose --project-name "$preflight_project" run --rm --no-deps --interactive=false -T --entrypoint sh app -eu -c '
+            if [ "${#CC_BACKUP_KEY}" -lt 32 ]; then
+              echo "ERROR: CC_BACKUP_KEY 必须至少 32 字符" >&2
+              exit 1
+            fi
             if [ "${#CC_PHONE_HASH_KEY}" -lt 32 ]; then
               echo "ERROR: CC_PHONE_HASH_KEY 必须至少 32 字符" >&2
               exit 1
@@ -223,7 +227,7 @@ jobs:
             if [ -n "$backup_id" ] \
               && [ "$(docker inspect --format '{{.State.Running}}' "$backup_id" 2>/dev/null || echo false)" = true ] \
               && docker compose exec -T --interactive=false backup sh -eu -c '
-                test "$(cat /proc/1/comm)" = crond
+                (test "$(cat /proc/1/comm)" = crond || python3 /usr/local/bin/backup-scheduler.py --health)
                 type flock >/dev/null
                 test -x /etc/periodic/daily/backup
                 grep -qx "# cc-backup-lock-v1" /etc/periodic/daily/backup
@@ -248,6 +252,13 @@ jobs:
             fi
             exec sh /etc/periodic/daily/backup
           ' </dev/null
+
+          # Existing processes run as root and remain able to access these volumes.
+          # Use the reviewed candidate helper before switching/recreating as UID 10001.
+          permissions_script="$(mktemp /tmp/chatcircle-permissions.XXXXXX)"
+          git show "$target_sha:deploy/prepare-runtime-volumes.sh" > "$permissions_script"
+          sh "$permissions_script" "chatcircle-backup:$target_sha"
+          rm -f "$permissions_script"
 
           git checkout main
           git merge --ff-only "$target_sha"
@@ -305,6 +316,8 @@ jobs:
           fi
           backup_revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$backup_id")"
           test "$backup_revision" = "$target_sha"
+          docker compose exec -T --interactive=false backup sh /etc/periodic/daily/backup </dev/null
+          docker compose exec -T --interactive=false backup python3 /usr/local/bin/check-backup.py </dev/null
 
           # public-web 容器健康门禁（compose healthcheck 探 /healthz 浅活，不依赖上游）。
           # 故障影响面仅限公开路由（功能 SPA 与 /api 不受影响），但仍按与其他服务
