@@ -272,7 +272,7 @@ export function parseFormConfig(raw: unknown): ActivityFormConfig {
  * 未出现在定义里的旧配置项（如字段已停用）丢弃；新字段默认启用且采用字段的默认必填。
  */
 export function mergeFormConfig(
-  fieldDefIds: { id: string; required_default: boolean }[],
+  fieldDefIds: { id: string; required_default: boolean; config_json?: { default_disabled?: boolean } }[],
   existing: ActivityFormConfig,
 ): ActivityFormFieldConfig[] {
   const byId = new Map(existing.fields.map((f) => [f.field_def_id, f]));
@@ -280,8 +280,8 @@ export function mergeFormConfig(
     const prev = byId.get(def.id);
     return {
       field_def_id: def.id,
-      enabled: prev ? prev.enabled : true,
-      required: prev ? prev.required && prev.enabled : def.required_default,
+      enabled: prev ? prev.enabled : !def.config_json?.default_disabled,
+      required: prev ? prev.required && prev.enabled : !def.config_json?.default_disabled && def.required_default,
     };
   });
 }

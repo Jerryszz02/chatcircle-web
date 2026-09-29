@@ -122,7 +122,7 @@ export function ActivityCreateWizard() {
         setFieldDefs(ordered);
         setFieldConfigs(
           mergeFormConfig(
-            ordered.map((d) => ({ id: d.id, required_default: d.required_default })),
+            ordered.map((d) => ({ id: d.id, required_default: d.required_default, config_json: d.config_json })),
             parseFormConfig(undefined),
           ),
         );
@@ -133,7 +133,7 @@ export function ActivityCreateWizard() {
     cc.surveyTemplates
       .getFullList({ filter: 'status = "active"' })
       .then((list) => {
-        if (!cancelled) setTemplates(list);
+        if (!cancelled) setTemplates(list.filter((template) => template.kind !== 'registration'));
       })
       .catch((err) => {
         if (!cancelled) setTemplatesError(normalizeApiError(err).message);
@@ -224,7 +224,13 @@ export function ActivityCreateWizard() {
       if (existing) return prev.filter((p) => p.templateId !== template.id);
       return [
         ...prev,
-        { templateId: template.id, title: template.name, roleScope: 'both', phase: 'onsite', plannedOpen: '' },
+        {
+          templateId: template.id,
+          title: template.name,
+          roleScope: template.role_scope || 'both',
+          phase: template.role_scope && template.role_scope !== 'both' ? 'after' : 'onsite',
+          plannedOpen: '',
+        },
       ];
     });
   };
@@ -283,7 +289,7 @@ export function ActivityCreateWizard() {
       const results: Array<{ title: string; ok: boolean; error?: string }> = [];
       for (const pick of surveyPicks) {
         const template = (templates ?? []).find((t) => t.id === pick.templateId);
-        if (!template) {
+        if (!template || template.kind === 'registration') {
           results.push({ title: pick.title, ok: false, error: '模板不存在或已停用' });
           continue;
         }
@@ -291,8 +297,8 @@ export function ActivityCreateWizard() {
           await createActivitySurvey(activity.id, {
             template_version_id: template.current_version_id,
             title: pick.title.trim() || template.name,
-            role_scope: pick.roleScope,
-            phase: pick.phase,
+            role_scope: template.role_scope && template.role_scope !== 'both' ? template.role_scope : pick.roleScope,
+            phase: template.role_scope && template.role_scope !== 'both' ? 'after' : pick.phase,
             planned_open_at: fromInputDateTime(pick.plannedOpen),
           });
           results.push({ title: pick.title, ok: true });
@@ -553,6 +559,7 @@ export function ActivityCreateWizard() {
                       className="admin-select"
                       aria-label={`${template.name} 适用角色`}
                       value={pick.roleScope}
+                      disabled={!!template.role_scope && template.role_scope !== 'both'}
                       onChange={(e) => patchSurveyPick(template.id, { roleScope: e.target.value as RoleScope })}
                     >
                       {Object.entries(ROLE_SCOPE_LABELS).map(([value, label]) => (
@@ -561,16 +568,20 @@ export function ActivityCreateWizard() {
                         </option>
                       ))}
                     </select>
-                    <select
-                      className="admin-select"
-                      aria-label={`${template.name} 问卷阶段`}
-                      value={pick.phase}
-                      onChange={(e) => patchSurveyPick(template.id, { phase: e.target.value as SurveyPick['phase'] })}
-                    >
-                      <option value="before">活动前</option>
-                      <option value="onsite">现场</option>
-                      <option value="after">活动后</option>
-                    </select>
+                    {template.role_scope && template.role_scope !== 'both' ? (
+                      <span className="admin-muted">问卷阶段：活动后</span>
+                    ) : (
+                      <select
+                        className="admin-select"
+                        aria-label={`${template.name} 问卷阶段`}
+                        value={pick.phase}
+                        onChange={(e) => patchSurveyPick(template.id, { phase: e.target.value as SurveyPick['phase'] })}
+                      >
+                        <option value="before">活动前</option>
+                        <option value="onsite">现场</option>
+                        <option value="after">活动后</option>
+                      </select>
+                    )}
                     <Input
                       label={`${template.name} 预计开放时间`}
                       type="datetime-local"

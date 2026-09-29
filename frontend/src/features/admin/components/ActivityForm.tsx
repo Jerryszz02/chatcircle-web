@@ -88,7 +88,7 @@ export function ActivityForm({ mode, initial, approvedCounts, onSaved, onCancel 
         setFieldDefs(ordered);
         setFieldConfigs(
           mergeFormConfig(
-            ordered.map((d) => ({ id: d.id, required_default: d.required_default })),
+            ordered.map((d) => ({ id: d.id, required_default: d.required_default, config_json: d.config_json })),
             parseFormConfig(initial?.form_config_json),
           ),
         );

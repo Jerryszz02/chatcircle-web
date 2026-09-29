@@ -108,7 +108,16 @@ export function SurveyQuestionField({
 
   const handleChange = (opt: string, checked: boolean) => {
     if (model.questionType === 'multi_choice') {
-      onChange(checked ? [...selectedMulti, opt] : selectedMulti.filter((v) => v !== opt));
+      if (!checked) {
+        onChange(selectedMulti.filter((v) => v !== opt));
+      } else if (model.validation?.exclusiveValues?.includes(opt)) {
+        onChange([opt]);
+      } else {
+        onChange([
+          ...selectedMulti.filter((v) => !model.validation?.exclusiveValues?.includes(v)),
+          opt,
+        ]);
+      }
     } else if (model.questionType === 'scale_1_5' || model.questionType === 'scale_0_10') {
       onChange(Number(opt));
     } else {
@@ -147,6 +156,9 @@ export function SurveyQuestionField({
                   onChange={(e) => handleChange(opt.value, e.target.checked)}
                 />
                 <span>{opt.label}</span>
+                {model.validation?.labels?.[opt.value] ? (
+                  <span className="cc-hint-inline">{model.validation.labels[opt.value]}</span>
+                ) : null}
               </label>
             );
           })}

@@ -136,6 +136,29 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/draft', (e) => {
   questions.forEach((q) => {
     byCode[q.get('question_code')] = q;
   });
+  // Conditional answers are evaluated against the merged draft, so changing a
+  // parent selection also removes a formerly visible follow-up answer.
+  const answerMap = {};
+  try {
+    const prior = $app.findFirstRecordByFilter(
+      'submissions', 'activity_survey_id = {:sid} && participant_id = {:pid}',
+      { sid: survey.id, pid: auth.id });
+    if (prior.get('status') === 'draft') {
+      $app.findRecordsByFilter('answers', 'submission_id = {:sid}', '', 500, 0, { sid: prior.id })
+        .forEach((row) => { answerMap[row.get('question_code')] = decodeJson(row.get('value_json')); });
+    }
+  } catch (_) { /* First draft has no prior answers. */ }
+  answersInput.forEach((a) => { answerMap[a.question_code] = a.value; });
+  const hidden = {};
+  for (const q of questions) {
+    const rule = decodeJson(q.get('validation_json')) || {};
+    const condition = rule.show_when;
+    if (!condition || !condition.question_code) continue;
+    const parent = answerMap[condition.question_code];
+    const shown = Array.isArray(parent) ? parent.indexOf(condition.value) >= 0 : parent === condition.value;
+    if (!shown) { hidden[q.get('question_code')] = true; delete answerMap[q.get('question_code')]; }
+  }
+  const visibleInputs = answersInput.filter((a) => !hidden[a.question_code]);
   // 答案值形态校验：选择题须为选项成员、scale_1_5 须 1-5 整数、scale_0_10 须 0-10 整数、
   // 文本 ≤2000 字符；空值跳过（未作答项由提交侧必填校验兜底）
   const answerValueError = (q, value) => {
@@ -168,17 +191,29 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/draft', (e) => {
     if (type === 'text_short' || type === 'text_long') {
       if (typeof value !== 'string') return '题目 ' + code + ' 须为文本';
       if (value.length > 2000) return '题目 ' + code + ' 文本长度不可超过 2000 字符';
+      const validation = decodeJson(q.get('validation_json')) || {};
+      if (validation.pattern === '^C[0-9]+$' && !/^C[0-9]+$/.test(value)) {
+        return '题目 ' + code + ' 须为 C 加数字的 Chatter 编号（如 C07）';
+      }
       return null;
     }
     return null; // info / 其他类型不校验
   };
-  for (const a of answersInput) {
+  for (const a of visibleInputs) {
     if (!byCode[a.question_code]) {
       return jsonError(e, 400, 'validation_failed', '答案包含不属于本问卷的 question_code：' + a.question_code);
     }
     const valueError = answerValueError(byCode[a.question_code], a.value);
     if (valueError) {
       return jsonError(e, 400, 'validation_failed', valueError);
+    }
+  }
+  for (const q of questions) {
+    const rule = decodeJson(q.get('validation_json')) || {};
+    const values = answerMap[q.get('question_code')];
+    if (Array.isArray(values) && Array.isArray(rule.exclusive_values)
+      && values.length > 1 && rule.exclusive_values.some((v) => values.indexOf(v) >= 0)) {
+      return jsonError(e, 400, 'validation_failed', '题目 ' + q.get('question_code') + ' 的“暂时没有”不能与其他选项同时选择');
     }
   }
 
@@ -213,7 +248,7 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/draft', (e) => {
 
       // 按 (submission_id, question_code) upsert 答案行；草稿可反复修改
       const answersCol = txApp.findCollectionByNameOrId('answers');
-      for (const a of answersInput) {
+      for (const a of visibleInputs) {
         let row = null;
         try {
           row = txApp.findFirstRecordByFilter(
@@ -231,6 +266,15 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/draft', (e) => {
         }
         row.set('value_json', a.value);
         txApp.save(row);
+      }
+      for (const code of Object.keys(hidden)) {
+        let row = null;
+        try {
+          row = txApp.findFirstRecordByFilter(
+            'answers', 'submission_id = {:sid} && question_code = {:qc}',
+            { sid: sub.id, qc: code });
+        } catch (_) { row = null; }
+        if (row) txApp.delete(row);
       }
       result = sub;
     });
@@ -413,19 +457,14 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/submit', (e) => {
     if (type === 'text_short' || type === 'text_long') {
       if (typeof value !== 'string') return '题目 ' + code + ' 须为文本';
       if (value.length > 2000) return '题目 ' + code + ' 文本长度不可超过 2000 字符';
+      const validation = decodeJson(q.get('validation_json')) || {};
+      if (validation.pattern === '^C[0-9]+$' && !/^C[0-9]+$/.test(value)) {
+        return '题目 ' + code + ' 须为 C 加数字的 Chatter 编号（如 C07）';
+      }
       return null;
     }
     return null; // info / 其他类型不校验
   };
-  for (const a of answersInput) {
-    if (!byCode[a.question_code]) {
-      return jsonError(e, 400, 'validation_failed', '答案包含不属于本问卷的 question_code：' + a.question_code);
-    }
-    const valueError = answerValueError(byCode[a.question_code], a.value);
-    if (valueError) {
-      return jsonError(e, 400, 'validation_failed', valueError);
-    }
-  }
   // 必填校验合并服务端已有草稿答案（本次请求未覆盖的必填题沿用草稿值，非只看请求体）
   const answerMap = {};
   let draftSub = null;
@@ -447,8 +486,33 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/submit', (e) => {
   answersInput.forEach((a) => {
     answerMap[a.question_code] = a.value;
   });
+  const hidden = {};
+  for (const q of questions) {
+    const rule = decodeJson(q.get('validation_json')) || {};
+    const condition = rule.show_when;
+    if (!condition || !condition.question_code) continue;
+    const parent = answerMap[condition.question_code];
+    const shown = Array.isArray(parent) ? parent.indexOf(condition.value) >= 0 : parent === condition.value;
+    if (!shown) { hidden[q.get('question_code')] = true; delete answerMap[q.get('question_code')]; }
+  }
+  const visibleInputs = answersInput.filter((a) => !hidden[a.question_code]);
+  for (const a of visibleInputs) {
+    if (!byCode[a.question_code]) {
+      return jsonError(e, 400, 'validation_failed', '答案包含不属于本问卷的 question_code：' + a.question_code);
+    }
+    const valueError = answerValueError(byCode[a.question_code], a.value);
+    if (valueError) return jsonError(e, 400, 'validation_failed', valueError);
+  }
+  for (const q of questions) {
+    const rule = decodeJson(q.get('validation_json')) || {};
+    const values = answerMap[q.get('question_code')];
+    if (Array.isArray(values) && Array.isArray(rule.exclusive_values)
+      && values.length > 1 && rule.exclusive_values.some((v) => values.indexOf(v) >= 0)) {
+      return jsonError(e, 400, 'validation_failed', '题目 ' + q.get('question_code') + ' 的“暂时没有”不能与其他选项同时选择');
+    }
+  }
   const missing = questions
-    .filter((q) => q.get('required') && q.get('question_type') !== 'info')
+    .filter((q) => q.get('required') && q.get('question_type') !== 'info' && !hidden[q.get('question_code')])
     .filter((q) => {
       const v = answerMap[q.get('question_code')];
       return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
@@ -493,7 +557,7 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/submit', (e) => {
       txApp.save(sub);
 
       const answersCol = txApp.findCollectionByNameOrId('answers');
-      for (const a of answersInput) {
+      for (const a of visibleInputs) {
         let row = null;
         try {
           row = txApp.findFirstRecordByFilter(
@@ -511,6 +575,15 @@ routerAdd('POST', '/api/cc/activity-surveys/{id}/submit', (e) => {
         }
         row.set('value_json', a.value);
         txApp.save(row);
+      }
+      for (const code of Object.keys(hidden)) {
+        let row = null;
+        try {
+          row = txApp.findFirstRecordByFilter(
+            'answers', 'submission_id = {:sid} && question_code = {:qc}',
+            { sid: sub.id, qc: code });
+        } catch (_) { row = null; }
+        if (row) txApp.delete(row);
       }
       result = sub;
     });

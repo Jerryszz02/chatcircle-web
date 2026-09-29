@@ -144,6 +144,12 @@ routerAdd('POST', '/api/cc/activities/{id}/surveys', (e) => {
     return jsonError(e, 400, 'validation_failed', 'template_version_id 无效');
   }
 
+  const template = $app.findRecordById('survey_templates', version.get('template_id'));
+  if (template.get('status') !== 'active') return jsonError(e, 400, 'validation_failed', '模板已停用');
+  if (template.get('kind') === 'registration') return jsonError(e, 400, 'validation_failed', '报名表用于报名流程，不能创建为活动问卷');
+  const templateRole = template.get('role_scope') || 'both';
+  if (templateRole !== 'both' && roleScope !== templateRole) return jsonError(e, 400, 'validation_failed', '问卷角色须与模板一致');
+
   // 模板题目快照（复制物化，之后模板升级不影响本问卷，FR-SUR-011、AC-13）
   const schema = decodeJson(version.get('schema_json')) || {};
   const tplQuestions = Array.isArray(schema.questions) ? schema.questions : [];
@@ -177,7 +183,7 @@ routerAdd('POST', '/api/cc/activities/{id}/surveys', (e) => {
       survey.set('survey_code', surveyCode);
       survey.set('title', title);
       survey.set('role_scope', roleScope);
-      survey.set('phase', phase);
+      survey.set('phase', templateRole === 'both' ? phase : 'after');
       survey.set('planned_open_at', plannedOpen);
       survey.set('status', 'draft');
       survey.set('qr_token', qrToken);

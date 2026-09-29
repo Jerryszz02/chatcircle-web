@@ -17,6 +17,8 @@ from cc_client import call
 PASSWORD = 'cc_it_pass_123'
 _SUPER_TOKEN = ''
 _FULL_NAME_ID = ''
+_REGISTRATION_TEMPLATE_IDS = []
+_REGISTRATION_TEMPLATE_CONFIGS = {}
 
 
 def configure_super_token(token):
@@ -61,14 +63,34 @@ def ensure_standard_fields(base, st):
                      'required_default': reqd, 'status': 'active'}, st)
         assert s == 200, '创建标准字段 %s 失败：%s' % (code, r)
         out[code] = r['id']
-    global _FULL_NAME_ID
+    global _FULL_NAME_ID, _REGISTRATION_TEMPLATE_IDS
+    _REGISTRATION_TEMPLATE_IDS = [r['id'] for r in res.get('items', []) if r.get('field_code', '').startswith(('C24_', 'L24_'))]
     _FULL_NAME_ID = out['FULL_NAME']
+    # Legacy suites predate the approved registration catalogue, and some create
+    # records directly. Isolate their legacy defaults; restore exact seeded configs
+    # before the new catalogue suites exercise the real post-migration defaults.
+    for record in res.get('items', []):
+        if record['id'] not in _REGISTRATION_TEMPLATE_IDS:
+            continue
+        config = record.get('config_json') or {}
+        _REGISTRATION_TEMPLATE_CONFIGS[record['id']] = config
+        status, response = call(base, 'PATCH', '/api/collections/registration_field_defs/records/' + record['id'],
+                                {'config_json': dict(config, default_disabled=True)}, st)
+        assert status == 200, response
     return out
+
+
+def restore_registration_template_defaults(base, st):
+    for field_id, config in _REGISTRATION_TEMPLATE_CONFIGS.items():
+        status, response = call(base, 'PATCH', '/api/collections/registration_field_defs/records/' + field_id,
+                                {'config_json': config}, st)
+        assert status == 200, response
+
 
 
 def template_version_id(base, st):
     """查询 SQL 预注入模板的首个版本。返回 (template_id, version_id)。"""
-    _, tpls = call(base, 'GET', '/api/collections/survey_templates/records?perPage=10', token=st)
+    _, tpls = call(base, 'GET', "/api/collections/survey_templates/records?filter=template_code='PARTICIPANT_POST_V1'", token=st)
     items = tpls.get('items') or []
     assert items, '模板不存在：run.py --sql-fixture 未在 serve 前执行？'
     tpl = items[0]

@@ -5,6 +5,8 @@ import {
   buildRegistrationAnswersPayload,
   buildRegistrationFormModel,
   isFieldApplicable,
+  isRegistrationFieldVisible,
+  pruneHiddenRegistrationValues,
   validateFieldValue,
   validateRegistrationForm,
   type RegistrationFieldModel,
@@ -154,6 +156,13 @@ describe('validateFieldValue 各题型校验', () => {
     expect(validateFieldValue(modelOf({}), '内容')).toBeNull();
   });
 
+  it('email 控件校验格式，普通 text 保持自由文本', () => {
+    const email = modelOf({ config: { input_type: 'email' } });
+    expect(validateFieldValue(email, 'invalid')).toContain('邮箱格式');
+    expect(validateFieldValue(email, 'person@example.com')).toBeNull();
+    expect(validateFieldValue(modelOf({}), 'invalid')).toBeNull();
+  });
+
   it('number：非数字拒绝', () => {
     const m = modelOf({ fieldType: 'number' });
     expect(validateFieldValue(m, 'abc')).toContain('数字');
@@ -192,6 +201,35 @@ describe('validateFieldValue 各题型校验', () => {
     expect(validateFieldValue(m, ['a', 'c'])).toContain('选项无效');
     expect(validateFieldValue(m, ['a', 'b'])).toBeNull();
     expect(validateFieldValue(modelOf({ fieldType: 'multi_choice', required: false, options: [] }), [])).toBeNull();
+  });
+});
+
+describe('条件字段显示、校验与提交', () => {
+  const models = buildRegistrationFormModel([
+    field({
+      id: 'parent', field_code: 'gender', field_type: 'single_choice',
+      options_json: [{ value: 'other', label: '自我描述' }, { value: 'Man', label: '男' }],
+      config_json: { section: '基本信息', order_index: 1 },
+    }),
+    field({
+      id: 'detail', field_code: 'gender_other', label: '请填写性别', required: true,
+      config_json: { section: '基本信息', order_index: 2, show_when: { field_code: 'gender', value: 'other' } },
+    }),
+  ], 'speaker');
+
+  it('保留字段配置，未选 other 时隐藏并跳过必填', () => {
+    expect(models[1].config?.show_when).toEqual({ field_code: 'gender', value: 'other' });
+    expect(isRegistrationFieldVisible(models[1], models, { parent: 'Man' })).toBe(false);
+    expect(validateRegistrationForm(models, { parent: 'Man' }, 'speaker').ok).toBe(true);
+    expect(buildRegistrationAnswersPayload(models, { parent: 'Man', detail: '旧值' }, 'speaker')).toEqual([
+      { field_def_id: 'parent', value: 'Man' },
+    ]);
+  });
+
+  it('选 other 时必填；切回普通选项清除旧值', () => {
+    expect(isRegistrationFieldVisible(models[1], models, { parent: 'other' })).toBe(true);
+    expect(validateRegistrationForm(models, { parent: 'other' }, 'speaker').fieldErrors.detail).toContain('请填写');
+    expect(pruneHiddenRegistrationValues(models, { parent: 'Man', detail: '旧值' })).toEqual({ parent: 'Man' });
   });
 });
 

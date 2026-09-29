@@ -211,4 +211,39 @@ describe('SurveyPage 问卷填写', () => {
     expect(screen.getByText('4')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '保存草稿' })).not.toBeInTheDocument();
   });
+
+  it('后测 Q21 的其他补充项随选项出现、清值，草稿不带隐藏答案', async () => {
+    const questions = [
+      question({ id: 'q21', question_code: 'CPOST_Q21', question_type: 'multi_choice', title: '接下来想探索什么？', required: true,
+        options_json: [{ value: 'other', label: '其他' }, { value: 'community', label: '社区活动' }, { value: 'nothing_for_now', label: '暂时没有' }],
+        validation_json: { exclusive_values: ['nothing_for_now'] }, order_index: 1 }),
+      question({ id: 'q21other', question_code: 'CPOST_Q21_OTHER', question_type: 'text_long', title: '其他（请注明）', required: true,
+        validation_json: { show_when: { question_code: 'CPOST_Q21', value: 'other' } }, order_index: 2 }),
+      question({ id: 'scale', question_code: 'CPOST_Q13', question_type: 'scale_0_10', title: '当前压力', required: false,
+        validation_json: { labels: { 0: '没有压力', 10: '压力极大' } }, order_index: 3 }),
+    ];
+    const mock = stubApi({
+      'GET /api/cc/surveys/': { body: metaBody({ questions }) },
+      'POST /api/cc/activity-surveys/': { body: { submission: { id: 'sub1', status: 'draft' } } },
+    });
+    renderSurvey();
+    expect(await screen.findByText('没有压力')).toBeInTheDocument();
+    expect(screen.getByText('压力极大')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '其他（请注明）' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '其他' }));
+    fireEvent.click(screen.getByRole('button', { name: '正式提交' }));
+    expect(await screen.findByText('本题为必答题')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: '其他（请注明）' }), { target: { value: '想了解其它资源' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '暂时没有' }));
+    expect(screen.getByRole('checkbox', { name: '其他' })).not.toBeChecked();
+    expect(screen.queryByRole('textbox', { name: '其他（请注明）' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '社区活动' }));
+    expect(screen.getByRole('checkbox', { name: '暂时没有' })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await waitFor(() => expect(callsTo(mock, '/draft')).toHaveLength(1));
+    const draftCallIndex = mock.calls.findIndex((c) => c.url.includes('/draft'));
+    expect(mock.bodyOf(draftCallIndex)).toEqual({ answers: [{ question_code: 'CPOST_Q21', value: ['community'] }] });
+    fireEvent.click(screen.getByRole('checkbox', { name: '其他' }));
+    expect(screen.getByRole('textbox', { name: '其他（请注明）' })).toHaveValue('');
+  });
 });

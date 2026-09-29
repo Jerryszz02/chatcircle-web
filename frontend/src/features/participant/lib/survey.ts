@@ -20,11 +20,50 @@ export interface SurveyQuestionModel {
   isSensitive: boolean;
   orderIndex: number;
   options: ChoiceOption[];
+  validation?: SurveyQuestionValidation;
+}
+
+export interface SurveyQuestionValidation {
+  labels?: Record<string, string>;
+  pattern?: '^C[0-9]+$';
+  showWhen?: { questionCode: string; value: string };
+  exclusiveValues?: string[];
 }
 
 /** 答卷表单值（key = question_code）：单选/文本为 string，多选为 string[]，量表为 number。 */
 export type SurveyAnswerValue = string | number | string[];
 export type SurveyAnswerMap = Record<string, SurveyAnswerValue>;
+
+function parseQuestionValidation(raw: unknown): SurveyQuestionValidation | undefined {
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  const validation: SurveyQuestionValidation = {};
+  if (input.labels && typeof input.labels === 'object' && !Array.isArray(input.labels)) {
+    validation.labels = Object.fromEntries(
+      Object.entries(input.labels).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+    );
+  }
+  if (input.pattern === '^C[0-9]+$') validation.pattern = input.pattern;
+  const showWhen = input.show_when;
+  if (showWhen && typeof showWhen === 'object' && !Array.isArray(showWhen)) {
+    const condition = showWhen as Record<string, unknown>;
+    if (typeof condition.question_code === 'string' && typeof condition.value === 'string') {
+      validation.showWhen = { questionCode: condition.question_code, value: condition.value };
+    }
+  }
+  if (Array.isArray(input.exclusive_values)) {
+    validation.exclusiveValues = input.exclusive_values.filter((item): item is string => typeof item === 'string');
+  }
+  return validation;
+}
 
 /** 由题目记录构建渲染模型，按 order_index 升序（服务端通常已排序，此处兜底）。 */
 export function buildSurveyFormModel(questions: PublicSurveyQuestion[]): SurveyQuestionModel[] {
@@ -39,11 +78,40 @@ export function buildSurveyFormModel(questions: PublicSurveyQuestion[]): SurveyQ
       locked: q.locked,
       isSensitive: q.is_sensitive,
       orderIndex: q.order_index,
+      validation: parseQuestionValidation(q.validation_json),
       options:
         q.question_type === 'single_choice' || q.question_type === 'multi_choice'
           ? parseChoiceOptions(q.options_json)
           : [],
     }));
+}
+
+/** 条件题仅在父题可见且选中指定值时出现。 */
+export function isSurveyQuestionVisible(
+  model: SurveyQuestionModel,
+  models: SurveyQuestionModel[],
+  answers: SurveyAnswerMap,
+  seen: Set<string> = new Set(),
+): boolean {
+  const condition = model.validation?.showWhen;
+  if (!condition) return true;
+  if (seen.has(model.questionCode)) return false;
+  const parent = models.find((item) => item.questionCode === condition.questionCode);
+  if (!parent) return false;
+  const parentAnswer = answers[parent.questionCode];
+  const matches = Array.isArray(parentAnswer)
+    ? parentAnswer.includes(condition.value)
+    : parentAnswer === condition.value;
+  return matches && isSurveyQuestionVisible(parent, models, answers, new Set([...seen, model.questionCode]));
+}
+
+export function pruneHiddenSurveyAnswers(models: SurveyQuestionModel[], answers: SurveyAnswerMap): SurveyAnswerMap {
+  return Object.fromEntries(
+    Object.entries(answers).filter(([code]) => {
+      const model = models.find((item) => item.questionCode === code);
+      return model && isSurveyQuestionVisible(model, models, answers);
+    }),
+  );
 }
 
 /** 量表题型取值范围（FR-SUR-007：1-5 / 0-10 两种固定量表）。 */
@@ -80,7 +148,11 @@ export function validateQuestionAnswer(
       return model.options.some((o) => o.value === value) ? null : '选项无效';
     case 'multi_choice': {
       if (!Array.isArray(value)) return '选项无效';
-      return value.every((v) => model.options.some((o) => o.value === v)) ? null : '选项无效';
+      if (!value.every((v) => model.options.some((o) => o.value === v))) return '选项无效';
+      if (value.length > 1 && value.some((v) => model.validation?.exclusiveValues?.includes(v))) {
+        return '互斥选项不能与其他选项同时选择';
+      }
+      return null;
     }
     case 'scale_1_5':
     case 'scale_0_10': {
@@ -94,7 +166,11 @@ export function validateQuestionAnswer(
     }
     case 'text_short':
     case 'text_long':
-      return typeof value === 'string' ? null : '答案格式不正确';
+      if (typeof value !== 'string') return '答案格式不正确';
+      if (model.validation?.pattern === '^C[0-9]+$' && !/^C[0-9]+$/.test(value)) {
+        return '请输入 C 开头、后接数字的编号（如 C07）';
+      }
+      return null;
     case 'info':
       return null;
   }
@@ -107,6 +183,7 @@ export function validateSurveyAnswers(
 ): Record<string, string> {
   const errors: Record<string, string> = {};
   for (const model of models) {
+    if (!isSurveyQuestionVisible(model, models, answers)) continue;
     const err = validateQuestionAnswer(model, answers[model.questionCode]);
     if (err) errors[model.questionCode] = err;
   }
@@ -124,6 +201,7 @@ export function buildSurveyAnswersPayload(
   const payload: SurveyAnswerInput[] = [];
   for (const model of models) {
     if (!isAnswerable(model.questionType)) continue;
+    if (!isSurveyQuestionVisible(model, models, answers)) continue;
     const value = answers[model.questionCode];
     if (isAnswerEmpty(value)) continue;
     payload.push({ question_code: model.questionCode, value });

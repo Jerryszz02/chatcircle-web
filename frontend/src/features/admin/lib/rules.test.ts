@@ -287,3 +287,17 @@ describe('报名表配置（form_config_json）', () => {
     expect(reenabled).toEqual([{ field_def_id: 'a', enabled: true, required: true }]);
   });
 });
+
+
+describe('报名模板默认字段迁移', () => {
+  it('新活动停用旧默认字段，显式启用的历史配置保持不变', () => {
+    const defs = [{ id: 'old', required_default: true, config_json: { default_disabled: true } },
+      { id: 'new', required_default: true }];
+    expect(mergeFormConfig(defs, { fields: [] })).toEqual([
+      { field_def_id: 'old', enabled: false, required: false },
+      { field_def_id: 'new', enabled: true, required: true },
+    ]);
+    expect(mergeFormConfig(defs, { fields: [{ field_def_id: 'old', enabled: true, required: true }] })[0])
+      .toEqual({ field_def_id: 'old', enabled: true, required: true });
+  });
+});

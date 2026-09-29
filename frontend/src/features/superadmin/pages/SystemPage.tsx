@@ -42,6 +42,7 @@ export function SuperSystemPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newTemplate, setNewTemplate] = useState({ template_code: '', name: '', description: '' });
   const [saving, setSaving] = useState(false);
+  const [showDisabled, setShowDisabled] = useState(false);
 
   const loadTemplates = useCallback(async () => {
     const [templateList, versionList] = await Promise.all([
@@ -203,13 +204,18 @@ export function SuperSystemPage() {
       </Card>
 
       <Card
-        title="标准问卷模板"
+        title="标准表单模板"
         actions={
           <Button variant="secondary" onClick={() => setCreateOpen(true)}>
             新建模板
           </Button>
         }
       >
+        <p className="sa-muted">两份报名表用于活动报名；两份后测用于活动结束后的反馈。停用模板保留历史版本和答卷。</p>
+        <label className="admin-checkbox-row">
+          <input type="checkbox" checked={showDisabled} onChange={(e) => setShowDisabled(e.target.checked)} />
+          显示已停用的历史模板
+        </label>
         {templates === null ? (
           <Loading />
         ) : templates.length === 0 ? (
@@ -221,6 +227,7 @@ export function SuperSystemPage() {
                 <tr>
                   <th>模板代码</th>
                   <th>名称</th>
+                  <th>用途</th>
                   <th>状态</th>
                   <th>当前版本</th>
                   <th>版本数</th>
@@ -228,7 +235,7 @@ export function SuperSystemPage() {
                 </tr>
               </thead>
               <tbody>
-                {templates.map((tpl) => {
+                {templates.filter((tpl) => showDisabled || tpl.status === 'active').map((tpl) => {
                   const current = currentVersionOf(tpl);
                   return (
                     <tr key={tpl.id}>
@@ -236,6 +243,7 @@ export function SuperSystemPage() {
                         <code>{tpl.template_code}</code>
                       </td>
                       <td className="sa-cell-wrap">{tpl.name}</td>
+                      <td>{tpl.kind === 'registration' ? '报名表' : '活动问卷'}</td>
                       <td>
                         <span
                           className={`sa-badge ${tpl.status === 'active' ? 'sa-badge-success' : 'sa-badge-danger'}`}
@@ -266,14 +274,14 @@ export function SuperSystemPage() {
                           </Button>
                           <Button
                             variant="secondary"
-                            disabled={tpl.status !== 'active'}
+                            disabled={tpl.status !== 'active' || tpl.kind === 'registration'}
                             onClick={() => setPublishTemplate(tpl)}
                           >
                             发布新版本
                           </Button>
                           <Button
                             variant={tpl.status === 'active' ? 'danger' : 'secondary'}
-                            disabled={saving}
+                            disabled={saving || tpl.kind === 'registration'}
                             onClick={() => void onToggleTemplateStatus(tpl)}
                           >
                             {tpl.status === 'active' ? '停用' : '启用'}
@@ -288,6 +296,7 @@ export function SuperSystemPage() {
           </div>
         )}
 
+        <p className="sa-muted">报名模板与标准报名字段一同维护，当前版本仅供预览。活动管理员可在报名表配置中调整启用与必填。</p>
         {selectedTemplate ? (
           <div style={{ marginTop: '1rem' }}>
             <h3 className="cc-card-title">
@@ -316,7 +325,7 @@ export function SuperSystemPage() {
                       <td>v{v.version}</td>
                       <td>{formatDateTime(v.published_at)}</td>
                       <td>{v.published_by}</td>
-                      <td>{extractTemplateQuestions(v.schema_json).length}</td>
+                      <td>{v.schema_json && typeof v.schema_json === 'object' && Array.isArray((v.schema_json as { fields?: unknown[] }).fields) ? (v.schema_json as { fields: unknown[] }).fields.length : extractTemplateQuestions(v.schema_json).length}</td>
                       <td>{countLockedQuestions(v.schema_json)}</td>
                       <td>
                         {selectedTemplate.current_version_id === v.id ? (

@@ -18,6 +18,8 @@ import {
   answersToMap,
   buildSurveyAnswersPayload,
   buildSurveyFormModel,
+  isSurveyQuestionVisible,
+  pruneHiddenSurveyAnswers,
   validateSurveyAnswers,
   type SurveyAnswerMap,
 } from '../lib/survey';
@@ -54,6 +56,17 @@ export function SurveyPage() {
     () => (meta ? buildSurveyFormModel(meta.questions) : []),
     [meta],
   );
+  const visibleModels = models.filter((model) => isSurveyQuestionVisible(model, models, answers));
+
+  function handleAnswerChange(questionCode: string, value: SurveyAnswerMap[string]) {
+    const nextAnswers = pruneHiddenSurveyAnswers(models, { ...answers, [questionCode]: value });
+    setAnswers(nextAnswers);
+    setErrors((prev) => Object.fromEntries(
+      Object.entries(prev).filter(([code]) =>
+        code !== questionCode && models.some((model) => model.questionCode === code && isSurveyQuestionVisible(model, models, nextAnswers)),
+      ),
+    ));
+  }
 
   const load = useCallback(() => {
     if (!qrToken) {
@@ -194,15 +207,13 @@ export function SurveyPage() {
             }}
             noValidate
           >
-            {models.map((model) => (
+            {visibleModels.map((model) => (
               <SurveyQuestionField
                 key={model.questionCode}
                 model={model}
                 value={answers[model.questionCode]}
                 error={errors[model.questionCode]}
-                onChange={(v) =>
-                  setAnswers((prev) => ({ ...prev, [model.questionCode]: v }))
-                }
+                onChange={(v) => handleAnswerChange(model.questionCode, v)}
               />
             ))}
             <div className="cc-actions">

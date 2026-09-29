@@ -8,6 +8,8 @@ import {
   buildRegistrationAnswersPayload,
   buildRegistrationFormModel,
   isFieldApplicable,
+  isRegistrationFieldVisible,
+  pruneHiddenRegistrationValues,
   validateRegistrationForm,
   type RegistrationFieldModel,
   type RegistrationFormValues,
@@ -54,6 +56,51 @@ function FieldInput({
   onChange: (value: string | string[]) => void;
 }) {
   const sensitiveHint = model.isSensitive ? '敏感信息：仅经授权的范围可见，普通分析不展示' : undefined;
+  const hint = [model.config?.hint, sensitiveHint].filter(Boolean).join(' ') || undefined;
+
+  if (model.config?.input_type === 'ack' && model.fieldType === 'single_choice') {
+    const id = `f-${model.id}-agree`;
+    return (
+      <div className={`cc-field${error ? ' cc-field-error' : ''}`}>
+        <label className="cc-choice" htmlFor={id}>
+          <input
+            id={id}
+            type="checkbox"
+            name={`f-${model.id}`}
+            value="agree"
+            checked={value === 'agree'}
+            onChange={(e) => onChange(e.target.checked ? 'agree' : '')}
+            aria-invalid={error ? true : undefined}
+          />
+          <span>{model.label}{model.required ? <span className="cc-required" aria-hidden="true"> *</span> : null}</span>
+        </label>
+        {hint ? <p className="cc-hint">{hint}</p> : null}
+        {error ? <p className="cc-error" role="alert">{error}</p> : null}
+      </div>
+    );
+  }
+
+  if (model.config?.input_type === 'textarea' && model.fieldType === 'text') {
+    const id = `f-${model.id}`;
+    return (
+      <div className={`cc-field${error ? ' cc-field-error' : ''}`}>
+        <label className="cc-label" htmlFor={id}>
+          {model.label}{model.required ? <span className="cc-required" aria-hidden="true">*</span> : null}
+        </label>
+        <textarea
+          id={id}
+          className="cc-input cc-textarea"
+          value={typeof value === 'string' ? value : ''}
+          onChange={(e) => onChange(e.target.value)}
+          required={model.required}
+          maxLength={REG_ANSWER_TEXT_MAX}
+          aria-invalid={error ? true : undefined}
+        />
+        {hint ? <p className="cc-hint">{hint}</p> : null}
+        {error ? <p className="cc-error" role="alert">{error}</p> : null}
+      </div>
+    );
+  }
 
   if (model.fieldType === 'single_choice' || model.fieldType === 'multi_choice') {
     const multi = model.fieldType === 'multi_choice';
@@ -103,7 +150,7 @@ function FieldInput({
             })}
           </div>
         )}
-        {sensitiveHint ? <p className="cc-hint cc-hint-sensitive">{sensitiveHint}</p> : null}
+        {hint ? <p className="cc-hint">{hint}</p> : null}
         {error ? (
           <p className="cc-error" role="alert">
             {error}
@@ -113,8 +160,9 @@ function FieldInput({
     );
   }
 
-  const inputType =
-    model.fieldType === 'number' ? 'number' : model.fieldType === 'date' ? 'date' : 'text';
+  const inputType = model.config?.input_type === 'email' || model.config?.input_type === 'tel'
+    ? model.config.input_type
+    : model.fieldType === 'number' ? 'number' : model.fieldType === 'date' ? 'date' : 'text';
   return (
     <Input
       label={model.label}
@@ -123,7 +171,7 @@ function FieldInput({
       onChange={(e) => onChange(e.target.value)}
       required={model.required}
       error={error}
-      hint={sensitiveHint}
+      hint={hint}
       maxLength={model.fieldType === 'text' ? REG_ANSWER_TEXT_MAX : undefined}
     />
   );
@@ -134,17 +182,23 @@ export function RegistrationForm({
   remaining,
   submitRegistration,
   onSubmitted,
+  initialRole,
+  preview = false,
 }: {
   fields: PublicRegistrationField[];
   remaining: RoleRemaining;
   /** 提交动作（由页面注入 API 调用，便于组件测试替换）。 */
-  submitRegistration: (input: {
+  submitRegistration?: (input: {
     activity_role: ActivityRole;
     answers: RegistrationAnswerInput[];
   }) => Promise<RegistrationRecord>;
-  onSubmitted: (registration: RegistrationRecord) => void;
+  onSubmitted?: (registration: RegistrationRecord) => void;
+  /** 超管预览时锁定所选角色。 */
+  initialRole?: ActivityRole;
+  /** 仅在本地校验，不发起报名请求。 */
+  preview?: boolean;
 }) {
-  const [role, setRole] = useState<ActivityRole | ''>('');
+  const [role, setRole] = useState<ActivityRole | ''>(initialRole ?? '');
   // 按当前角色过滤后的适用字段（未选角色时只含 both 字段）
   const models = useMemo(() => buildRegistrationFormModel(fields, role), [fields, role]);
   const [values, setValues] = useState<RegistrationFormValues>({});
@@ -152,6 +206,7 @@ export function RegistrationForm({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
+  const [previewValid, setPreviewValid] = useState(false);
 
   const roles: ActivityRole[] = ['speaker', 'listener'];
 
@@ -164,6 +219,7 @@ export function RegistrationForm({
     );
     setValues((prev) => keepKeys(prev, applicableIds));
     setFieldErrors((prev) => keepKeys(prev, applicableIds));
+    setPreviewValid(false);
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -172,7 +228,18 @@ export function RegistrationForm({
     setRoleError(result.roleError ?? undefined);
     setFieldErrors(result.fieldErrors);
     setFormError(undefined);
+    setPreviewValid(false);
     if (!result.ok) return;
+
+    if (preview) {
+      setPreviewValid(true);
+      return;
+    }
+
+    if (!submitRegistration) {
+      setFormError('报名服务暂不可用');
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -180,7 +247,7 @@ export function RegistrationForm({
         activity_role: role as ActivityRole,
         answers: buildRegistrationAnswersPayload(models, values, role),
       });
-      onSubmitted(registration);
+      onSubmitted?.(registration);
     } catch (err) {
       setFormError(normalizeApiError(err).message);
     } finally {
@@ -189,8 +256,17 @@ export function RegistrationForm({
   }
 
   // both 字段始终显示；角色专属字段（选定角色后才存在）分组显示并附小标题
-  const commonModels = models.filter((m) => m.roleScope === 'both');
-  const roleModels = models.filter((m) => m.roleScope !== 'both');
+  const visibleModels = models.filter((m) => isRegistrationFieldVisible(m, models, values));
+  const commonModels = visibleModels.filter((m) => !m.config?.section && m.roleScope === 'both');
+  const roleModels = visibleModels.filter((m) => !m.config?.section && m.roleScope !== 'both');
+  const sections = new Map<string, RegistrationFieldModel[]>();
+  for (const model of visibleModels) {
+    const section = model.config?.section;
+    if (!section) continue;
+    const group = sections.get(section) ?? [];
+    group.push(model);
+    sections.set(section, group);
+  }
 
   const renderField = (model: RegistrationFieldModel) => (
     <FieldInput
@@ -198,13 +274,22 @@ export function RegistrationForm({
       model={model}
       value={values[model.id]}
       error={fieldErrors[model.id]}
-      onChange={(v) => setValues((prev) => ({ ...prev, [model.id]: v }))}
+      onChange={(v) => {
+        const nextValues = pruneHiddenRegistrationValues(models, { ...values, [model.id]: v });
+        setValues(nextValues);
+        setFieldErrors((prev) => {
+          const visibleIds = new Set(models.filter((item) => isRegistrationFieldVisible(item, models, nextValues)).map((item) => item.id));
+          visibleIds.delete(model.id);
+          return keepKeys(prev, visibleIds);
+        });
+        setPreviewValid(false);
+      }}
     />
   );
 
   return (
     <form onSubmit={handleSubmit} noValidate>
-      <fieldset
+      {!preview ? <fieldset
         className={`cc-field cc-fieldset${roleError ? ' cc-field-error' : ''}`}
         aria-invalid={roleError ? true : undefined}
       >
@@ -247,7 +332,7 @@ export function RegistrationForm({
             {roleError}
           </p>
         ) : null}
-      </fieldset>
+      </fieldset> : null}
 
       {commonModels.map(renderField)}
 
@@ -258,16 +343,26 @@ export function RegistrationForm({
         </>
       ) : null}
 
+      {[...sections].map(([section, group]) => (
+        <section key={section} aria-label={section}>
+          <p className="cc-group-title">{section}</p>
+          {[...group].sort((a, b) => (a.config?.order_index ?? 0) - (b.config?.order_index ?? 0)).map(renderField)}
+        </section>
+      ))}
+
       {formError ? (
         <p className="cc-error" role="alert">
           {formError}
         </p>
       ) : null}
       <Button type="submit" block loading={submitting}>
-        提交报名
+        {preview ? '检查填写' : '提交报名'}
       </Button>
-      <p className="cc-hint">提交后进入待审核，不能自行修改或取消（FR-REG-004）。</p>
-    <p className="cc-hint">个人信息用途与保存期限见 <a href="/privacy" target="_blank" rel="noopener noreferrer">隐私政策</a>。必要活动通知不代表营销同意。</p>
+      {previewValid ? <p role="status">填写检查通过；预览不会提交报名。</p> : null}
+      {!preview ? <>
+        <p className="cc-hint">提交后进入待审核，不能自行修改或取消（FR-REG-004）。</p>
+        <p className="cc-hint">个人信息用途与保存期限见 <a href="/privacy" target="_blank" rel="noopener noreferrer">隐私政策</a>。必要活动通知不代表营销同意。</p>
+      </> : null}
     </form>
   );
 }

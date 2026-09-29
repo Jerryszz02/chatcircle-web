@@ -64,7 +64,7 @@ export function SurveyPanel({ activity }: { activity: ActivityRecord }) {
         cc.surveyTemplates.getFullList({ filter: 'status = "active"' }),
       ]);
       setSurveys(surveyList);
-      setTemplates(templateList);
+      setTemplates(templateList.filter((template) => template.kind !== 'registration'));
     } catch (err) {
       setError(normalizeApiError(err).message);
     }
@@ -90,7 +90,8 @@ export function SurveyPanel({ activity }: { activity: ActivityRecord }) {
       await createActivitySurvey(activity.id, {
         template_version_id: template.current_version_id,
         title: createTitle.trim(),
-        role_scope: createRoleScope,
+        role_scope: template.role_scope && template.role_scope !== 'both' ? template.role_scope : createRoleScope,
+        phase: template.role_scope && template.role_scope !== 'both' ? 'after' : undefined,
       });
       setShowCreate(false);
       setCreateTitle('');
@@ -159,7 +160,12 @@ export function SurveyPanel({ activity }: { activity: ActivityRecord }) {
             id="survey-template"
             className="admin-select"
             value={createTemplateId}
-            onChange={(e) => setCreateTemplateId(e.target.value)}
+            onChange={(e) => {
+              setCreateTemplateId(e.target.value);
+              const template = templates.find((item) => item.id === e.target.value);
+              setCreateRoleScope(template?.role_scope || 'both');
+              if (template) setCreateTitle(template.name);
+            }}
           >
             <option value="">请选择模板（复制其当前版本，FR-SUR-011）</option>
             {templates.map((t) => (
@@ -177,6 +183,7 @@ export function SurveyPanel({ activity }: { activity: ActivityRecord }) {
           </label>
           <select
             id="survey-role-scope"
+            disabled={!!templates.find((item) => item.id === createTemplateId)?.role_scope && templates.find((item) => item.id === createTemplateId)?.role_scope !== 'both'}
             className="admin-select"
             value={createRoleScope}
             onChange={(e) => setCreateRoleScope(e.target.value as RoleScope)}

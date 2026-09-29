@@ -183,7 +183,8 @@ routerAdd('GET', '/api/cc/public/activities/{id}', (e) => {
   for (const def of defs) {
     const cfg = def.get('field_code') === 'FULL_NAME' && !def.get('organization_id')
       ? { enabled: true, required: true } : fieldConfig[def.id] || {};
-    if (cfg.enabled === false) continue;
+    const config = ccJson(def.get('config_json'), {});
+    if (cfg.enabled === false || (cfg.enabled == null && config.default_disabled === true)) continue;
     formFields.push({
       id: def.id,
       field_code: def.get('field_code'),
@@ -193,10 +194,13 @@ routerAdd('GET', '/api/cc/public/activities/{id}', (e) => {
       is_sensitive: !!def.get('is_sensitive'),
       required: cfg.required != null ? !!cfg.required : !!def.get('required_default'),
       options_json: ccJson(def.get('options_json'), null),
+      config_json: config,
       // 字段适用角色（both/speaker/listener，分角色报名问卷）；存量缺省按 both 归一
       role_scope: def.get('role_scope') || 'both',
     });
   }
+
+  formFields.sort((a, b) => (a.config_json.order_index || 0) - (b.config_json.order_index || 0));
 
   // 报名开放状态与未开放原因（参与者端分因展示，FR-ACT-005/007）：
   // closed=活动已关闭或手动开关关闭；not_started=未到报名开始；ended=已过报名截止或活动已结束；full=总名额已满

@@ -178,6 +178,7 @@ export interface RegistrationFieldDefRecord extends BaseRecord {
   is_sensitive: boolean;
   options_json?: unknown;
   required_default: boolean;
+  config_json?: { default_disabled?: boolean; [key: string]: unknown };
   /** 适用角色：both=两角色均适用；speaker/listener=仅对应角色报名时需要作答。 */
   role_scope: RoleScope;
   status: ActiveStatus;
@@ -238,6 +239,8 @@ export interface CheckinRecord extends BaseRecord {
 // ---------- 5.2.12 survey_templates — 标准模板索引 ----------
 
 export interface SurveyTemplateRecord extends BaseRecord {
+  kind?: 'survey' | 'registration';
+  role_scope?: RoleScope;
   /** 大写下划线，如 PARTICIPANT_PRE_V1（PRD 附录 B）。 */
   template_code: string;
   name: string;
