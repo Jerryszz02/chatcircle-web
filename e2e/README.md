@@ -1,7 +1,7 @@
 # Chat Circles E2E 测试（L4 层）
 
-Playwright + Chromium，移动端 viewport 360×740（PRD §13 手机优先）。
-覆盖 test-plan §5 主链路（PRD §1.3 端到端成功定义）：
+Playwright + Chromium，移动端 viewport 360×740（手机优先）。
+覆盖以下主链路：
 
 ```
 公开详情 → 手机号验证码登录 → 姓名必填报名 → 管理员审核通过 → 开放签到
@@ -13,7 +13,7 @@ Playwright + Chromium，移动端 viewport 360×740（PRD §13 手机优先）�
 
 ```bash
 cd e2e
-npm install
+npm ci
 npx playwright install chromium   # 首次
 npm test                          # 环境自举：迁移+fixture+PocketBase+vite preview，跑完自动停止
 ```
@@ -42,7 +42,7 @@ npm run report      # 查看 HTML 报告
   → 构建前端 → vite preview），与本地开发库完全隔离，可重复跑。
 - `scripts/seed.mjs`：最小 fixture。模板+版本因必填循环引用（迁移 12 注释）经 SQL 直插，
   其余（机构/报名字段/邀请码/管理员/已发布活动）全部走真实 API。
-  TODO(待统一)：`backend/scripts/` 标准种子脚本就绪后改调之。
+  E2E 使用专用最小 fixture，与日常演示种子分开维护。
 - `tests/main-flow.spec.ts`：主链路串行执行；双参与者独立会话验证现场编号、工作台配对与
   Realtime 参与者卡更新；导出 ZIP 解包断言选中数据域 CSV、manifest/字典、报名/签到/配对/答卷数据，
   并确认姓名、MOOD、wechat_id 与用户名均被普通导出过滤。
@@ -55,5 +55,5 @@ npm run report      # 查看 HTML 报告
 
 ## 与测试金字塔的关系
 
-本层只贯通核心链路（test-plan §1「少而精」）；名额并发、越权、状态矩阵等规则断言一律在
+本层只贯通核心链路；名额并发、越权、状态矩阵等规则断言一律在
 L3 服务端集成层，不在此重复。

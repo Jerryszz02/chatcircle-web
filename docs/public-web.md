@@ -1,10 +1,6 @@
-# 公开页 SSR / GEO 部署接入计划（public-web）
+# 公开页 SSR 架构与维护
 
-> 状态：`进行中`。阶段 A–C（公开渲染核心：`src/public/` 数据层/视图/元信息、`server/` node:http 渲染服务、`build:public` 构建）已在分支 `feat/public-ssr-geo-20260926` 完成并可用；阶段 D（本文，部署接入：镜像、compose、Caddy 路由、CI/deploy 门禁、文档）随本文件落地。
->
-> 规划日期：2026-09-27
->
-> 用途：记录公开页 SSR 的架构决策、边界与否决方案，作为后续路由/权限变更的评审依据。
+当前采用独立 `public-web` 服务，本文保留架构选择、路由和权限边界。运行配置见[部署手册](../deploy/README.md)，本地命令见[开发指南](developer-guide.md)。
 
 ## 1. 目标
 
@@ -22,7 +18,7 @@
 - Caddy 按路径精确分发（单一 `route` 块固定求值顺序，handle 互斥）：公开页/静态资源/爬虫入口 → `public-web:3100`；`/api/*`、`/assets/*` 与功能 SPA 路径 → `app:8090`；`/_/*` 403 保持在路由最前；兜底未知路径 → public-web 回真实 404。
 - `/a/:id/register` 是功能页（报名），在 route 内先于公开详情 `/a/*` 命中；Caddy path matcher 无通配符即精确匹配，`/activities` 与 `/activities/past` 并列互不遮蔽。
 - 渲染服务与 SPA 共用视图组件（`*View.tsx` 纯展示 + SPA 页面包数据获取），SSR HTML 内嵌 `<script type="application/json" id="__CC_PUBLIC_DATA__">` 首帧数据供 hydrate 复用；该 script 非可执行脚本，CSP 无需放行 inline script。
-- 部署接入沿用既有结构：镜像按 `CC_RELEASE_SHA` 标记、预检构建 + 无网络 smoke（`deploy/smoke-public-web-runtime.sh`）、容器健康门禁、OCI revision 绑定；回滚 = 重放上一 SHA，不为 public-web 发明新机制。
+- 部署接入沿用既有结构：镜像按 `CC_RELEASE_SHA` 标记、预检构建 + 无网络 smoke（`deploy/smoke-public-web-runtime.sh`）、容器健康门禁、OCI revision 绑定；发布和恢复必须匹配 app、public-web、Caddy 与数据版本；流程只允许快进，旧 SHA 不能直接重放回滚。
 
 ## 3. 边界（不得突破）
 
@@ -37,8 +33,8 @@
 | 否决方案 | 原因 |
 |---|---|
 | 一次性静态快照（构建期 SSG 导出 HTML） | 活动/推文是运营期持续变更的数据：构建期快照会在数据变更后长期失真，且需要额外的「变更→重建→发布」通道（当前没有）。SSR 每次渲染实时取数，配合 no-store 与错误降级，口径永远新鲜。 |
-| 整站换框架（Next.js/Remix 等 SSR 框架重写） | 现有 SPA（三端路由守卫、PB SDK 会话、Realtime 失效化、看板/导出/配对等）体量大且刚完成上线整改；整站重写风险与工期不可接受，也违反「需求口径以 PRD 为基线」的变更纪律。独立渲染服务只接管公开页，功能页零改动。 |
-| 在 PocketBase 进程内做 SSR（pb_hooks 渲染） | JSVM 是隔离作用域的 JS 子集，无 Node API、无 React SSR 生态，hooks 契约禁止引入这种复杂度（见 developer-guide §4/§11）。 |
+| 整站换框架（Next.js/Remix 等 SSR 框架重写） | 现有 SPA（三端路由守卫、PB SDK 会话、Realtime 失效化、看板/导出/配对等）体量大且刚完成上线整改；整站重写风险与工期不可接受，也超出仅改善公开可读性的需求范围。独立渲染服务只接管公开页，功能页零改动。 |
+| 在 PocketBase 进程内做 SSR（pb_hooks 渲染） | JSVM 是隔离作用域的 JS 子集，无 Node API、无 React SSR 生态，hooks 契约禁止引入这种复杂度（见开发指南 §4/§11）。 |
 | prerender 爬虫中间件（检测 UA 回快照） | UA 嗅探双轨服务同 URL 不同内容，既有 SEO 风险也有维护双份渲染路径的负担；SSR 单一口径更稳。 |
 
 ## 5. 验证口径

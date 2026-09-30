@@ -1,7 +1,7 @@
 /// <reference path="../pb_data/types.d.ts" />
 
 // 迁移 20：启用 trusted proxy headers（信任 X-Forwarded-For）
-// 依据：docs/security-hardening-2026-08.md §4-1；security-privacy §5.2。
+// 依据：deploy/README.md 的 Caddy / HTTPS 安全边界。
 // 背景：生产拓扑中 PB 只被 Caddy 反代访问（compose 中 8090 仅绑回环 +
 // 容器内网），Caddyfile 已用 header_up 覆盖客户端伪造的 XFF，因此信任
 // XFF 是安全的。不启用时 e.realIP() 恒为 Caddy 容器地址，全部 per-IP

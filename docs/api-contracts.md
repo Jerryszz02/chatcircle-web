@@ -1,65 +1,39 @@
-# 手机号账号与活动现场 API 契约
+# 账号、现场与导出 API 契约
 
-> 状态：T0–T6 契约与端点已在默认分支实现；T7 自动化验收于 2026-09-02 `已验证`。真实阿里云与生产状态仍待外部验收。
->
-> 契约版本：`2026-08-28.t0-v1`
->
-> 适用范围：[account-event-workflow-prd.md](account-event-workflow-prd.md) 的手机号账号、现场编号/配对、实时工作台与细粒度导出
->
-> 当前实现差距：本文 T1–T6 的仓库契约均已落地；T7 双角色 E2E 已验证手机号登录、签到、配对、两端 Realtime 更新与导出。剩余差距是真实阿里云账号/测试号码和生产放行，见 [release-checklist.md](../release-checklist.md)。实际代码现状以 [developer-guide.md](../developer-guide.md) 和 `backend/pb_hooks/` 为准。
+本文说明维护时必须保持的权限与业务语义。类型、枚举和端点构造器以 `frontend/src/shared/api/accountEvent.ts` 为代码源；具体行为以 `backend/pb_hooks/` 及对应集成测试为准。业务目的见 [业务规则](business-rules.md)，数据库概览见 [开发指南](developer-guide.md)。
 
 ## 1. 权威边界
 
-- 机器名、枚举、请求/响应 TypeScript 类型与端点构造器的唯一代码源是 `frontend/src/shared/api/accountEvent.ts`。后续任务不得在 feature 目录内重新定义同义类型。
-- 本文定义权限、幂等、敏感性与兼容语义；数据字段、索引与迁移顺序见 [database-design.md](database-design.md) 「6. T0 冻结契约」。
-- PocketBase hooks 的 JSVM 不能直接 import 前端 TypeScript。服务端落地时必须按本契约复制机器值，并在同一 PR 用集成测试和 `accountEvent.test.ts` 防止漂移；不引入第二份手写前端类型。
-- 本契约只冻结 T0 范围。新增业务端点、改枚举或改隐私语义时，必须同 PR 更新代码契约、本文、相关 migration/hook 与越权测试。
+- 前端 feature 不另写一份同义请求/响应类型。hooks 无法直接 import TypeScript，机器值变更须同步服务端、共享类型及测试。
+- 当前契约版本为 `2026-08-28.t0-v1`，不因为文档整理而改变 HTTP 契约。
+- 新增端点、枚举或隐私语义时，同 PR 更新本文、migration/hook 和越权测试。
 
 ## 2. 通用约定
 
-### 2.1 身份与范围
+- 管理员的机构范围由服务端身份与资源关系决定；跨机构资源与不存在资源统一返回 `404 not_found`。参与者只读自己的现场状态，不能枚举其他参与者或配对记录。
+- 时间使用 ISO 8601 UTC；导出记录 IANA timezone，默认 `Asia/Shanghai`。
+- 业务错误形状为 `{code: <HTTP status>, message, data: {code: <business_code>}}`；不把手机号、姓名、答案或验证码写入错误信息。
+- 幂等和并发由各端点的唯一约束、事务内重读与状态机保证。不要假定发送 `Idempotency-Key` 就获得全局请求去重。
 
-| 身份 | 允许范围 |
-| --- | --- |
-| 未登录 | 仅可请求/验证登录验证码；响应不泄露手机号是否已注册 |
-| participant | 绑定/换绑本人手机号；只读本人签到与配对状态 |
-| admin | 仅所属机构的活动快照、现场锁定、配对和导出 |
-| super | 任意机构的活动快照、配对与导出；不因角色而放宽审计和二次确认 |
+## 3. 参与者认证
 
-服务端从 auth record 与 activity relation 注入 `organization_id`，忽略客户端试图扩大范围的参数。管理员访问其他机构的活动、配对、快照、现场锁定或导出资源，与不存在的资源统一返回 `404 not_found`；参与者访问他人配对同样返回 `404 not_found`，禁止用 `403` 暴露资源存在性。
+主入口是用户名/手机号与密码；注册需要用户名、密码和已验证手机号。手机验证码可登录已有账号，首次验证不自动建号。数字用户名与手机号冲突时通过密码端点的 `identity_type`（auto/username/phone）消歧，显式类型不回退尝试另一种账号。
 
-### 2.2 响应、时间与错误
+`phone_e164` 是 hidden 字段；查找和防重使用服务端计算的 `HMAC-SHA256(CC_PHONE_HASH_KEY, phone_e164)`，不接受客户端自报 hash。密钥须稳定保存，恢复数据库时一并恢复匹配配置。手机认证响应仅给掩码和绑定状态，不返回完整手机号、HMAC 或密码。
 
-- 新响应带 `contract_version: "2026-08-28.t0-v1"`；旧导出响应为保持兼容可不带。
-- 时间均为 ISO 8601 UTC；导出另保存用户选择的 IANA timezone，默认 `Asia/Shanghai`。
-- 错误延续现有形状：`{ code: <http status>, message, data: { code: <business_code> } }`。无业务字段的失败不把手机号、姓名、问卷答案或短信验证码写入 `message/data`。
-- 所有改变状态的端点接受 `Idempotency-Key` header。服务端以唯一索引 + 事务内状态重读作最终保障，不仅依赖 header。
+| `POST /api/cc/auth/participant` 下的路径 | 权限 | 当前行为 |
+| --- | --- | --- |
+| 无后缀 | 匿名 | 用户名/手机号 + 密码登录，不存在或错密码同形拒绝，不建号 |
+| `/request-code` | 登录/注册/重置匿名；绑定/换绑须本人 | 号码、IP、设备会话限流；发码响应不区分账号是否存在 |
+| `/verify-code` | 匿名 | 消费验证码并登录已有账号；未注册返回 `phone_not_registered`，停用账号不签发 token |
+| `/register` | 匿名 | 用户名、密码、手机号验证码与隐私告知版本；建号、消费 challenge、审计同事务 |
+| `/reset-password` | 匿名 | 手机验证码验证后重置密码，返回会话；未注册号码不能借此建号 |
+| `/bind-phone` | participant | 绑定本人账号，保留 participant_id；冲突拒绝，不自动覆盖或合并 |
+| `/change-phone` | participant | 旧号和新号双验证码原子换绑；无法验证旧号返回 `support_required`，没有人工单号绕过接口 |
 
-## 3. 手机号认证
+错误码以 `phoneauth.pb.js` 为准，包含 `invalid_phone`、`privacy_notice_required`、`code_throttled`、`code_invalid`、`code_expired`、`challenge_consumed`、`account_disabled`、`phone_conflict`、`support_required`、`provider_unavailable`。发码响应收敛不表示验证后所有错误都同形。
 
-### 3.1 T0 技术结论
-
-2026-08-27 对 PocketBase 0.28.4 做了隔离临时库实测：给 auth collection 增加唯一 `phone_e164` text field 并写入 `passwordAuth.identityFields` 后，手机号+密码登录返回 200，重复手机号被唯一索引以 400 拒绝。
-
-但目标产品是阿里云短信验证码，不是手机号+密码。因此 T0 决定：
-
-1. `phone_e164` 是经验证的账号属性，不加入 `passwordAuth.identityFields`。
-2. 精确查找和防重使用 `phone_lookup_hash = HMAC-SHA256(CC_PHONE_HASH_KEY, phone_e164)`，由服务端计算，客户端不上传。不使用可枚举的无密钥 SHA-256。T1 可直接使用 PocketBase JSVM 官方提供的 [`$security.hs256(message, secret)`](https://pocketbase.io/jsvm/interfaces/security.hs256.html)，密钥只从部署环境读取。
-3. 阿里云验证成功后，hook 按 hash 查找/创建 record，检查 `status=active`，再调用 PocketBase record token 签发能力返回会话。
-4. `username` 和当前 username+密码通道在存量迁移期保留；新手机号账号由服务端生成不向用户展示的高熵唯一 username 和随机密码。
-
-手机号 auth 响应使用 `ParticipantPhoneAuthRecord`，不返回内部 `username/password`；手机号相关字段只返回 `phone_masked` 与绑定状态，不返回 `phone_e164` 或 `phone_lookup_hash`。完整号码只在本人主动查看/换绑和有权敏感导出流程中按需返回。
-
-### 3.2 端点
-
-| Method / path | Auth | 请求/响应 | 核心语义 |
-| --- | --- | --- | --- |
-| `POST /api/cc/auth/participant/request-code` | 匿名；bind/change 须 participant | `RequestPhoneCodeInput` → `RequestPhoneCodeResponse` | 同手机号/IP/设备会话限流；已注册与未注册响应同形 |
-| `POST /api/cc/auth/participant/verify-code` | 匿名 | `VerifyPhoneCodeInput` → `ParticipantPhoneAuthResponse` | 验证码一次性消费；按 hash 幂等登录/建号；停用账号不签 token |
-| `POST /api/cc/auth/participant/bind-phone` | participant | `BindPhoneInput` → `BindPhoneResponse` | 只绑当前 `participant_id`；号码已占用则停止并进入人工合并，不覆盖 |
-| `POST /api/cc/auth/participant/change-phone` | participant | `ChangePhoneInput` → `BindPhoneResponse` | 新号验证成功后，经旧号验证码或人工支持单号证明后原子换绑；记录前后号码的掩码/hash，不记完整号码 |
-
-统一业务错误码：`invalid_phone`、`privacy_notice_required`、`code_throttled`、`code_invalid`、`code_expired`、`challenge_consumed`、`account_disabled`、`phone_conflict`、`support_required`、`provider_unavailable`。`request-code` 的限流/服务商失败不得变成账号存在性 oracle。
+管理员通过邀请码注册（用户名、邮箱、密码），邮箱验证/OTP/找回依赖受控 SMTP 配置；见[隐私运营手册](privacy-operations.md)。
 
 ## 4. 现场快照、编号与配对
 
@@ -76,7 +50,7 @@
 
 `onsite_code` 由服务端按 `onsite_role + onsite_sequence` 派生：`speaker → S01`，`listener → L01`；`pair_code` 由 `pair_sequence` 派生为 `P01`。代码只用于展示，数据库唯一约束使用数值字段。
 
-### 4.1.1 2026-09-06 向导与模板补充
+### 4.1.1 向导与模板约束
 
 - activities create/update 接受 `planned_checkin_at`、`pairing_enabled`；计划时间仅提示。`is_template=true` 只允许 draft/archived，不可直接发布。
 - duplicate 请求可带 `{as_template:true}` 另存机构模板，缺省复制为普通活动；复制重置预计签到/问卷时间和现场历史，保留配对开关与问卷 phase。
@@ -141,21 +115,10 @@ preview 返回归一化 selection、分数据域预估行数、`requires_sensiti
 3. `export_jobs.scope_json` 写归一化后的 `StoredExportSelectionV2`；v2 请求带 `source_schema_version:2`，旧请求带 `source_schema_version:1`。`include_pii` 保留作兼容索引，值由服务端判敏结果派生。
 4. 旧响应字段和 ZIP/CSV 文件清单保持不变。在所有已知客户端切换 v2 且完成一个发布窗口前，不删除 v1 parser。
 
-## 7. 迁移与发布门禁
+## 7. 迁移、兼容与发布
 
-本 T0 不创建空集合、不启用新字段，避免默认分支出现无消费者的半实现。后续顺序必须是：
+追加迁移，保留历史账号 ID、报名/问卷数据与同意版本，不伪造缺失姓名或旧签到编号。新增 schema 先保证服务端兼容，再更新 UI；不能仅下线前端按钮而放任集合 API 绕过业务规则。
 
-1. **Additive schema**：手机号字段可空、现场字段可空，新集合 rules 默认最小权限；标准字段先以 disabled 注册。
-2. **Backfill**：存量账号标记 `legacy_unbound`；现有报名/签到/导出语义不变。
-3. **Dual-read/write**：先上服务端归一化与旧请求兼容，再上新 UI/Realtime；所有新业务写入只走 hooks 事务。
-4. **Activate**：T1/T2/T3 验收后再启用 `FULL_NAME`、手机号登录与现场配对；不要因标准字段的 global default 突然阻断旧活动报名。
-5. **Cleanup**：观察一个发布窗口并确认无旧客户端后，才能单独 PR 评估下线 username 登录或 v1 导出 parser；不删历史字段/记录。
+标准 `FULL_NAME` 已由服务端强制启用、必填和敏感；用户名密码是现行登录方式。MCP 仍使用 v1 CSV 导出，未迁移所有消费者前保留 v1 parser。迁移 down 不等于完整生产回滚，发布前按[发布清单](release-checklist.md)核对。
 
-每一阶段必须通过迁移 up/down/up、身份/越权矩阵、幂等/并发、敏感导出、旧客户端兼容与 360px E2E 后才能进入下一步。
-
-## 8. 非目标与待确认
-
-- T0 不接入真实阿里云账号、不配置 secret、不创建 production migration，也不声称端点可用。
-- `phone_conflict` 的人工合并后台产品流程仍 `待确认`；未确认前只停止自动绑定并审计，不作自动合并。
-- 阿里云短信认证的实际请求/响应字段、价格、测试号码和错误码映射需 T1 在有权账号中联调确认；不改变本文的内部 API 形状。
-- 短信模板按业务场景选择（登录/注册、首次绑定与换绑新号、换绑旧号验证）为服务端内部实现，不改变本文的手机号认证 HTTP API 请求/响应形状。
+人工账号合并与丢失旧手机号恢复尚无完整后台流程；其他待维护事项集中在 [maintenance.md](maintenance.md)。

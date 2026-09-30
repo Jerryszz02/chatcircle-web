@@ -1,6 +1,6 @@
 // Chat Circles — T3 单活动实时快照与 Realtime 最小权限守卫
 //
-// 冻结契约：docs/planning/api-design.md §4/§5、frontend/src/shared/api/accountEvent.ts。
+// 冻结契约：docs/api-contracts.md §4/§5、frontend/src/shared/api/accountEvent.ts。
 // - GET /api/cc/activities/{id}/live-summary：admin 仅本机构，super 可跨机构；跨机构与不存在统一 404。
 // - 快照是指标唯一事实来源；Realtime record/custom message 只作为“数据已变更”信号。
 // - T3 与 T2 并行：activity_pairs/现场字段尚未迁入时返回兼容的 0/空状态；T2 合入后自动纳入。

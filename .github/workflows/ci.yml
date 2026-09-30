@@ -111,7 +111,7 @@ jobs:
         run: CC_PB_BINARY=/tmp/pocketbase/pocketbase bash backend/tests/run_integration.sh
 
   dependency-audit:
-    # production dependency 安全门禁（test-plan §8 / production-readiness-batch-1-plan §7.4）。
+    # production dependency 安全门禁（docs/release-checklist.md）。
     # npm registry 的 legacy Quick Audit endpoint 在 2026 年已进入退役/不稳定阶段，且 npm 在
     # Bulk Advisory 响应异常时会 fallback 到该端点，造成与代码无关的 400/503 CI 假失败。
     # 因此改用官方 OSV-Scanner 直接扫描两个 npm lockfile；.github/osv-production.toml

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Chat Circles 公开页渲染服务镜像：公开页 SSR + /public-assets 静态资源 + robots/sitemap。
 #
-# 职责边界（安全口径见 docs/planning/public-web-ssr-plan.md）：
+# 职责边界（安全口径见 docs/public-web.md）：
 #   只渲染「已公开」的数据（活动广场/详情、公开推文、静态介绍页），上游仅调用匿名可读的
 #   /api/cc/public/* 与 posts 集合（服务端 API rules 已收窄）；镜像内没有任何密钥、
 #   不挂 pb_data 卷、不接触业务数据库。运行配置仅 PORT / CC_SITE_ORIGIN /

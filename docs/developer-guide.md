@@ -1,29 +1,6 @@
 # Chat Circles 开发者指南
 
-> **这份文档是什么**：写给第一次接触本项目的开发者。读完后你应该能：
->
-> 1. 说清楚系统每一块逻辑在哪里、怎么运转；
-> 2. 独立完成常见修改（加字段、加接口、加页面、改业务规则），并知道要补哪些测试、会踩哪些坑。
->
-> **这份文档不是什么**：它不是设计文档。`docs/planning/` 下的文档（技术设计、数据库设计、测试计划、安全隐私、UI 设计）是开发前编写的**设计与需求基线**，描述"当初打算怎么建"；本文描述**代码现状**——"系统现在实际是怎么实现的、怎么改"。两边不一致时以代码为准，并请顺手修正本文。需求口径的权威来源仍是 `docs/` 下的 PRD v0.3 docx。
->
-> 各子目录另有聚焦手册，本文会引用而不是复制它们：`backend/README.md`（后端操作）、`deploy/README.md`（生产部署）、`mcp/README.md`（MCP 数据取送）、`e2e/`（端到端测试）。
->
-> **专项升级边界（2026-09-02）**：T0–T6 已在默认分支实现。T7 增加双角色签到/配对/Realtime/细粒度导出全链路 E2E、无密钥发布配置检查和统一发布验收入口；自动化已通过，生产放行仍按 [`release-checklist.md`](release-checklist.md) 执行。
-
----
-
-## 2026-09-06 上线整改
-
-本轮基于 `origin/main@7b95d9a`，实现与部署分开验收，结果以 [发布清单](release-checklist.md) 为准。
-
-- `release.pb.js` 与迁移 `1788600000_cc_release_completion.js` 保证标准 `FULL_NAME` 存在、启用、必填、敏感且适用于两种角色；创建/更新活动不能关闭该字段，报名端拒绝缺失或全空白姓名，不伪造历史答案。
-- 向导与活动设置写 `planned_checkin_at/pairing_enabled`，问卷写 `phase/planned_open_at`；计划时间只作提示，现场仍手动开放。关闭配对时 start/reassign 服务端拒绝；首次开始后不能反转开关。
-- 机构模板复用 activities 的 `is_template` 草稿与既有复制事务，保留配置/问卷但不带人员历史；模板不能直接发布。复制清空签到/问卷预计开放时间，原活动开始/结束及报名窗口仍复制，使用者须调整。
-- 工作台历史次数以本机构其他活动有效签到去重，截止本场开始与快照时间的较早值；没有签到的 approved 报名不算参加。该辅助聚合独立于 live-summary 的主快照请求，拉取失败明确提示不可用，小样本仍抑制。
-- `/posts/:postId` 阅读完整 Markdown，忽略原始 HTML，远程 Markdown 图片仅显示替代文字；`/privacy` 展示完整政策。公开文章沿用 posts 的可见性规则。
-- `/admin/email-login`、`/admin/verify-email`、`/admin/reset-password` 补齐邮箱登录/验证/找回；邮箱 token 使用 fragment，页面读取后移除。OTP 限流仍返回 `200 + otpId`，与正常/不存在邮箱同形；验证/找回静默 `204`。SMTP 和 APP_URL 配置见 [运营手册](privacy-operations.md)。
-- 备份接续脚本与实际服务器启用步骤见 [异地备份](../deploy/offsite-backup.md)。业务个人信息到期处置是运营流程，尚无自动清理任务。
+面向首次接手仓库的开发者与 agent。先按本文启动本地环境，再按修改领域阅读[文档索引](README.md)。业务规则见 [business-rules.md](business-rules.md)，现有维护缺口见 [maintenance.md](maintenance.md)。实现以当前代码、迁移和测试为准；文档变更与相关代码同 PR 维护。
 
 ## 1. 项目一页纸
 
@@ -39,13 +16,13 @@
 
 | 角色 | 后端身份 | 数据范围 |
 |---|---|---|
-| 超级管理员（全平台唯一） | PocketBase `_superusers` | 全平台 |
+| 超级管理员 | PocketBase `_superusers` | 全平台 |
 | 机构管理员 | `admin_accounts`（auth 集合，带 `organization_id`） | 仅本机构 |
 | 参与者 | `participant_accounts`（auth 集合，不绑机构；用户名/手机号+密码为 T2 主登录身份，手机验证码登录为备选） | 仅本人 |
 
 「倾诉者 speaker / 聆听者 listener」**不是平台角色**，而是每条报名记录上的 `activity_role`；同一参与者可在不同活动选不同角色。聆听者培训是与活动解绑的独立体系：签到资格 = 该账号在全平台任一活动有 approved 的 listener 报名。
 
-技术形态一句话：**React 18 + Vite + TypeScript 单 SPA（手机优先，按角色分 `/`、`/admin`、`/super` 三区）+ PocketBase 0.28.4（认证 / API rules / pb_hooks 业务规则 / SQLite）+ Docker Compose 一体化部署（前端产物由 PocketBase 从 `pb_public/` 同源伺服）**。
+技术形态一句话：**React 18 + Vite + TypeScript 单 SPA（手机优先，按角色分 `/`、`/admin`、`/super` 三区）+ PocketBase 0.39.7（认证 / API rules / pb_hooks 业务规则 / SQLite）+ Docker Compose 四服务部署（功能 SPA 由 PocketBase 从 `pb_public/` 同源伺服，公开页由独立 public-web 做 SSR）**。
 
 ## 2. 仓库地图
 
@@ -54,8 +31,8 @@
 │                        #   详见 frontend 各节；操作手册级内容不在这里，全在本文 §6
 │                        #   另有 src/public/ + server/（公开页 SSR，见 §6.8），构建产物 dist-public/
 ├── backend/             # PocketBase 后端
-│   ├── pb_migrations/   #   版本化 schema（28 个迁移文件 / 26 个业务或内部集合），schema 变更的唯一入口
-│   ├── pb_hooks/        #   服务端业务规则（JSVM *.pb.js）：54 个自定义路由 + Realtime 守卫 + 写守卫 + 审计
+│   ├── pb_migrations/   #   版本化 schema、索引与访问规则，schema 变更的唯一入口
+│   ├── pb_hooks/        #   服务端业务规则（JSVM *.pb.js）：自定义路由 + Realtime 守卫 + 写守卫 + 审计
 │   ├── tests/           #   L3 集成套件 + 迁移冒烟（CI 必过），仅用 bash/curl/python3 标准库
 │   ├── scripts/         #   种子数据、历史数据补录
 │   ├── pb_data/         #   本地开发数据（SQLite），【不入库】
@@ -66,8 +43,8 @@
 ├── deploy/              # backup.sh 每日备份、Caddy 反代配置、public-web 镜像与 smoke、生产部署手册
 ├── docs/
 │   ├── developer-guide.md      # 本文：代码现状与修改指南
-│   ├── planning/               # 设计与需求基线文档（非现状描述），索引见 planning/README.md
-│   └── security-hardening-2026-08.md  # 2026-08 安全加固专项记录
+│   ├── README.md               # 接手阅读顺序与专题索引
+│   └── maintenance.md          # 尚未完成的维护事项与验收边界
 ├── .github/workflows/   # ci.yml（PR 必过）/ deploy.yml（推 main 自动部署）/ e2e.yml
 ├── Dockerfile           # 多阶段：前端 build → PocketBase 运行时（一体化镜像）
 ├── docker-compose.yml   # app + public-web + backup + caddy 四服务
@@ -76,24 +53,35 @@
 
 ## 3. 本地开发环境
 
-前置：**Node 22+**、**python3**（后端测试与种子脚本，仅用标准库）、PocketBase 二进制（版本锁定 **0.28.4**，下载与校验见 `backend/README.md`；测试脚本缺失时会自动下载）。
+前置：Node.js 22、npm、Python 3、curl/unzip，以及与 `.env.example` / CI 一致的 PocketBase **0.39.7**。下载和目录参数见 [backend/README.md](../backend/README.md)。不要把旧的本地二进制或生产数据当作新环境。
+
+以下均从仓库根目录开始；命令使用本地测试配置，mock 验证码只用于开发：
 
 ```sh
-# 后端（终端 1）——三个目录参数必须显式传，否则 hooks 不生效 / 用错数据目录
+# 终端 1：后端
 cd backend
+export CC_ENVIRONMENT=development
+export CC_SMS_PROVIDER=mock
+export CC_SMS_MOCK_CODE=246810
+export CC_PHONE_HASH_KEY=local-development-only-phone-hash-key
 ./pocketbase migrate up --dir pb_data --migrationsDir pb_migrations --hooksDir pb_hooks
-./pocketbase superuser create admin@cc.local '换成你自己的强密码' --dir pb_data   # 首次
-bash scripts/seed_demo.sh    # 可选：幂等演示种子（机构/管理员/活动/问卷/参与者，见输出末尾的邀请码）
+# 首次按 backend/README.md 创建本地超级管理员
 ./pocketbase serve --dir pb_data --migrationsDir pb_migrations --hooksDir pb_hooks
-# 健康检查 http://127.0.0.1:8090/api/cc/health → {"ok":true}；PB 管理台 http://127.0.0.1:8090/_/
-
-# 前端（终端 2）——dev server 把 /api 代理到 127.0.0.1:8090（可用 VITE_PB_URL 覆盖）
-cd frontend
-npm install
-npm run dev
 ```
 
-Docker 一键启动（生产同构）：`cp .env.example .env` → **先填好 `.env`** → `docker compose up --build`。当前 compose 只对三个变量使用 `${VAR:?}` 启动前必填校验：`CC_PHONE_HASH_KEY`（手机号 HMAC 密钥）、`PB_SUPERUSER_EMAIL` / `PB_SUPERUSER_PASSWORD`（backup 服务登录用超管）。生产环境使用 `CC_SMS_PROVIDER=aliyun` 时，Deploy workflow 还会在更新生产版本前校验 `ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET`、`CC_SMS_SIGN_NAME` 和三个场景短信模板 CODE；这些短信凭据与 Caddy 无关。ICP备案完成后的 Caddy 使用标准 80/443 Automatic HTTPS，不再需要 `ALIYUN_ACCESS_KEY_ID` / `ALIYUN_ACCESS_KEY_SECRET` 或 DNS-01。**生产基础 compose 默认不向 host 发布 app 的 `8090`**——要本机直连调试，需显式叠加 `docker compose -f docker-compose.yml -f deploy/docker-compose.debug.yml up -d` 发布回环 `127.0.0.1:8090`（该 override 存在「本地伪造 XFF」风险，见 deploy/README.md，仅限知悉下使用）。日常本地开发更推荐上面的原生启动方式。
+```sh
+# 终端 2：前端；/api 代理到 127.0.0.1:8090
+npm ci --prefix frontend
+npm run dev --prefix frontend
+```
+
+后端健康检查：`http://127.0.0.1:8090/api/cc/health`；开发管理台：`http://127.0.0.1:8090/_/`。前端地址以 Vite 输出为准。
+
+可选演示数据见后端手册：种子脚本会自行启动临时实例，必须先停止使用同一数据库的服务；已有超管时通过 `SEED_SU_EMAIL` / `SEED_SU_PASS` 传入本地账号，不能混用脚本默认密码。日常开发不需要生产短信或 SMTP 凭据。
+
+公开页 SSR 另行执行 `npm run build:public --prefix frontend` 和 `npm run start:public --prefix frontend`（默认 3100，上游默认本地 8090），见 [public-web.md](public-web.md)。Vite 开发服务只覆盖 SPA。
+
+生产 Compose 的必填变量是 `CC_PHONE_HASH_KEY` 和 `CC_BACKUP_KEY`；backup 不再使用超管凭据。生产短信还需要阿里云场景模板与 RAM 凭据。完整配置和四服务启动见 [部署手册](../deploy/README.md)，日常本地开发优先使用上述原生方式。基础 Compose 不开放宿主机 8090，调试时才显式叠加 `deploy/docker-compose.debug.yml`，不要把调试覆盖带到生产。
 
 常用端口约定：开发后端 8090 / 种子脚本临时实例 8096 / 集成测试 8097 / 迁移冒烟 8099 / e2e 18090+14173。
 
@@ -102,14 +90,14 @@ Docker 一键启动（生产同构）：`cp .env.example .env` → **先填好 `
 1. **写入收口**。几乎所有业务写操作（报名、审核、签到、问卷、导出、邀请码……）都只走 `pb_hooks` 里的自定义端点（`POST /api/cc/*`），在服务端事务内完成；集合的直连 create/update 被 `guards.pb.js` 等守卫封堵，直连 delete 全部集合关闭。前端集合 API 主要用于**读**。
 2. **读路径分两路**。管理端读集合走 PocketBase 原生 API + API rules（机构隔离靠 rule 里的 `@request.auth.organization_id` 链式反查）；参与者读公开/聚合信息走 hooks 白名单端点（`/api/cc/public/*`、`/api/cc/me/*`），不直连集合。
 3. **机构隔离在服务端强制**。写路径分两种：**自定义端点**内 `organization_id` 一律由 hooks 从登录身份注入，客户端传入的会被忽略；少数放行的**集合直连 create**（活动、培训、机构自定义报名字段）则由前端显式传本机构 `organization_id`（取自登录管理员身份，如 `ActivityForm.tsx`），由 API rules 校验 `@request.auth.organization_id = organization_id`，且 guards 禁止 update 再改它。读路径靠 rules 按身份过滤。跨机构访问返回 **404 而非 403**（不泄露资源存在性）。
-4. **无硬删除**。全部 26 个业务/内部集合 `deleteRule: null`；停用/归档/作废/撤销/释放一律用状态字段表达（FR-AUD-001）。改代码时不要引入任何删除语义。
-5. **pb_hooks 是隔离作用域的 JS，不是 Node 项目**。PocketBase 0.28 JSVM 中各 `*.pb.js` 文件作用域完全隔离，没有 import/全局共享。`pb_hooks/lib/` 下三个文件（http/ratelimit/audit）是**契约标准源，运行时不会被加载**；每个领域文件把所需工具函数**原样内联**在自己闭包里。**改 lib 语义后必须同步所有内联副本**——这是本仓库最大的维护陷阱（文件头部有"勿手工改副本"警告）。
+4. **无硬删除**。业务集合对普通用户关闭 delete；停用/归档/作废/撤销/释放一律用状态字段表达（FR-AUD-001）。日常操作不引入硬删除；依法处理个人信息删除请求按[隐私运营手册](privacy-operations.md)执行。
+5. **pb_hooks 是隔离作用域的 JS，不是 Node 项目**。PocketBase JSVM 中各 `*.pb.js` 文件作用域完全隔离，没有 import/全局共享。`pb_hooks/lib/` 下的 http/ratelimit/audit 等文件是**契约标准源，运行时不会被加载**；每个领域文件把所需工具函数**原样内联**在自己闭包里。**改 lib 语义后必须同步所有内联副本**——这是本仓库最大的维护陷阱（文件头部有"勿手工改副本"警告）。
 
 整体请求路径（生产）：浏览器 → Caddy（TLS、安全头、封 `/_/*`、按路径分发）→ 公开路由走 public-web:3100（SSR），`/api/*` 与功能 SPA 走 PocketBase（`pb_public/` 静态前端 + 集合 API + `/api/cc/*` hooks）→ SQLite。public-web 的上游也只有 PocketBase（匿名公开端点）。
 
 ## 5. 后端详解
 
-### 5.1 数据模型（26 个业务/内部集合）
+### 5.1 数据模型概览
 
 schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域（命名 `<Unix时间戳>_cc_<域名>.js`，按时间戳排序执行）。按域分组：
 
@@ -137,7 +125,7 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 | 集合 | 用途与关键字段 |
 |---|---|
-| `checkin_sessions` | 签到开放窗口："未开放"不建行，每次开放新建一行、关闭置 `closed`；"同时至多一条 open"由 hooks 事务保证（SQLite 无法部分唯一） |
+| `checkin_sessions` | 签到开放窗口："未开放"不建行，每次开放新建一行、关闭置 `closed`；"同时至多一条 open"由 hooks 事务保证（当前由应用层维护） |
 | `checkins` | 签到记录：撤销保留原行；T2 在创建 valid 签到的同一事务中写 `onsite_role/onsite_sequence/numbered_at` 并递增活动角色计数器，撤销后号码不复用、存量签到不补号 |
 | `activity_pairs` | T2 配对记录：活动内单调递增 `pair_sequence`，双方 registration/checkin，`active/released/completed` 状态与调整/释放留痕；参与者不能直读，写入全部走配对 hooks |
 
@@ -197,127 +185,52 @@ schema 定义全部在 `backend/pb_migrations/`，一个迁移文件建一个域
 
 **培训 `trainings.status`（3 态）**：draft→published→closed；培训签到资格 = 全平台任一 approved listener 报名（否则 `listener_not_approved`）。
 
-### 5.4 自定义端点全集（55 个 `routerAdd`，统一 `/api/cc/*` 前缀）
+### 5.4 接口与代码入口
 
-鉴权标记：`anon` 无需登录 / `participant` / `admin`（机构管理员，requireAuth 同时校验账号与所属机构均 active）/ `super` / `admin|super`。
+请求/响应机器类型见 `frontend/src/shared/api/accountEvent.ts`，关键权限、幂等、实时与导出语义见 [API 契约](api-contracts.md)。完整路由直接查看各文件的 `routerAdd`，避免维护第二份易过时的端点全集。
 
-**健康与认证**（`main.pb.js`、`auth.pb.js`、`authguard.pb.js`）
+| 领域 | `backend/pb_hooks/` 中的入口 |
+| --- | --- |
+| 账号密码、邀请码、短信、管理员邮件 | `auth.pb.js`、`authguard.pb.js`、`phoneauth.pb.js`、`mailguard.pb.js` |
+| 活动、报名、签到、现场配对与快照 | `activities.pb.js`、`registrations.pb.js`、`checkins.pb.js`、`pairings.pb.js`、`live.pb.js` |
+| 问卷、答卷、培训 | `surveys.pb.js`、`submissions.pb.js`、`trainings.pb.js` |
+| 看板、导出、报告、推文 | `metrics.pb.js`、`exports.pb.js`、`exports_v2.pb.js`、`reports.pb.js`、`posts.pb.js` |
+| 超管、写守卫、姓名/模板约束 | `super.pb.js`、`guards.pb.js`、`release.pb.js` |
+| 内部备份、公开健康检查 | `backup.pb.js`、`main.pb.js` |
 
-| 端点 | 鉴权 | 说明 |
-|---|---|---|
-| GET `/api/cc/health` | anon | 存活探针 |
-| POST `/api/cc/auth/participant` | anon | 参与者账号密码登录：`username`（小写归一）或 `phone`（+86 手机号 HMAC 查找）二选一；未知身份与错误密码同形拒绝且不建号、不签发 token；双层限流（同人+IP 5 次/10min、同 IP 跨身份 30 次/10min 防喷洒） |
-| POST `/api/cc/auth/participant/request-code` `/verify-code` | anon | 手机号验证码请求与登录；响应不区分号码是否已注册，成功响应不含内部 username/完整手机号/HMAC；verify-code 仅登录已注册账号，不再自动建号（未注册 → 400 `phone_not_registered`） |
-| POST `/api/cc/auth/participant/register` | anon | 用户名+密码+手机号（验证码）注册，事务内建号+消费 challenge+审计；用户名重复 → 409 `username_taken`、手机号已注册 → 409 `phone_conflict` |
-| POST `/api/cc/auth/participant/reset-password` | anon | 手机号验证码重置密码并直接返回会话；未注册手机号 → 400 `phone_not_registered` |
-| POST `/api/cc/auth/participant/bind-phone` `/change-phone` | participant | 存量账号绑定保留 participant_id；换绑需旧号和新号双验证码，冲突不自动覆盖 |
-| POST `/api/cc/auth/admin-register` | anon | 一次性邀请码注册管理员（邀请码 + 用户名 + 必填邮箱 + 密码），事务内消费邀请码+建号+审计 |
-| （非路由）PB 内置 auth-with-password | — | `authguard.pb.js` 补限流：per-IP 20 次/10min + per-身份+IP 5 次失败/10min |
-
-**活动生命周期**（`activities.pb.js`，另挂模型钩子：创建时强制 `checkin_qr_token = 24 位随机串`、名额不变量校验）
-
-| 端点 | 鉴权 | 说明 |
-|---|---|---|
-| GET `/api/cc/public/activities` `/{id}` | anon | 活动广场/公开详情（仅 published/closed，其余 404），含报名开放状态与剩余名额；列表支持 `?scope=current`（未结束）/`past`（已结束或已关闭）服务端过滤，报名开放判定含活动 `end_time`（已结束即截止，reason=ended） |
-| POST `/api/cc/activities/{id}/submit-review` | admin | draft/rejected → pending_review |
-| POST `/api/cc/activities/{id}/publish` `/close` `/archive` | admin | 直发（机构开审核则拒绝）/ 关闭 / 归档 |
-| POST `/api/cc/activities/{id}/duplicate` | admin | T4 复制活动：配置与问卷/题目物化行复制为新草稿，活动代码、签到 token、问卷入口 token 重新生成，历史报名/签到/配对/答卷/审计不复制；写 `activity.duplicate` 审计 |
-| POST `/api/cc/activities/{id}/approve` `/reject` `/unpublish` | super | 审批 / 驳回（reason 必填）/ 下架（不走 approvals） |
-
-**报名**（`registrations.pb.js`）
-
-| 端点 | 鉴权 | 说明 |
-|---|---|---|
-| POST `/api/cc/activities/{id}/register` | participant | 幂等（同人同活动返回现有）、开放窗口校验、名额预检、role_scope 答案校验，事务建 registrations+answers |
-| POST `/api/cc/registrations/{id}/transition` | admin | 状态机迁移（矩阵见 §5.3），事务内名额硬校验 `ccAssertCapacity`，重读防并发漂移（409） |
-
-**签到**（`checkins.pb.js`；培训镜像在 `trainings.pb.js`，路径把 checkin 换成 training 对应形态）
-
-| 端点 | 鉴权 | 说明 |
-|---|---|---|
-| POST `/api/cc/activities/{id}/checkin/open` `/close` | admin | 开放/关闭签到场次，单 open 约束，幂等 |
-| POST `/api/cc/checkin/self` | participant | 扫码自助签到：按 `checkin_qr_token` 定位活动；校验链=登录→活动状态→事务内（报名 approved→已有 valid 幂等返回→有 open 场次） |
-| POST `/api/cc/checkins/manual` | admin | 补签（reason 必填+审计） |
-| GET `/api/cc/activities/{id}/checkin/manual-candidates` | admin | 补签候选人名单（服务端注入本活动已通过报名者） |
-| POST `/api/cc/checkins/{id}/revoke` | admin | 撤销（只改状态不删行，reason 必填+审计） |
-| POST `/api/cc/trainings/{id}/publish` `/close`、`/checkin/open` `/close` | admin | 培训生命周期与签到场次 |
-| POST `/api/cc/training-checkin/self` | participant | 培训自助签到（资格=全平台任一 approved listener 报名） |
-| POST `/api/cc/training-checkins/manual`、`GET /api/cc/trainings/{id}/checkin/manual-candidates`、`POST /api/cc/training-checkins/{id}/revoke` | admin | 培训补签/候选人/撤销 |
-| GET `/api/cc/me/trainings` | participant | 培训页聚合：{eligible, trained, trainings[]}，不下发 qr token |
-
-**现场编号与配对**（`pairings.pb.js`）
-
-| 端点 | 鉴权 | 说明 |
-|---|---|---|
-| POST `/api/cc/activities/{id}/pairings/start` | admin\|super | 首次记录开始事实并按两侧现场序号批量配对；重复调用只补等待队列，不重排旧组 |
-| POST `/api/cc/activities/{id}/pairings/reassign` | admin\|super | 原子释放涉及的 active pair 并建立指定新组；reason 必填，同一目标重复调用幂等 |
-| GET `/api/cc/activities/{id}/my-pairing` | participant | 只返本人现场号/组号/搭档现场号与该场 `FULL_NAME`，不暴露 pair record 或手机号 |
-| POST `/api/cc/activities/{id}/onsite/lock` | admin\|super | 幂等锁定“活动已开始”事实；锁定后撤销只释放，后续改组须人工调整 |
-
-**问卷与答卷**（`surveys.pb.js`、`submissions.pb.js`）
-
-| 端点 | 鉴权 | 说明 |
-|---|---|---|
-| POST `/api/cc/activities/{id}/surveys` | admin | 从模板版本复制建卷，题目物化到 survey_questions |
-| POST `/api/cc/activity-surveys/{id}/open` `/close` | admin | 开放/结束问卷 |
-| GET `/api/cc/surveys/{qrToken}` | participant | 问卷元信息+四条件资格结果+题目（资格过或本人有答卷才下发）+本人答案预填 |
-| POST `/api/cc/activity-surveys/{id}/draft` `/submit` | participant | 草稿同行 upsert；提交=必填校验+锁定+幂等 |
-| GET `/api/cc/submissions/{id}` | participant | 本人答卷只读（participant_id 强校验） |
-| POST `/api/cc/submissions/{id}/void` | admin | 作废（reason 必填+审计） |
-| GET `/api/cc/me/overview` | participant | 「我的」聚合：报名+可填问卷+已提交答卷+listener 资格标记 |
-
-**导出、看板与单活动实时数据**（`exports.pb.js`、`metrics.pb.js`、`live.pb.js`）
-
-| 端点 | 鉴权 | 说明 |
-|---|---|---|
-| POST `/api/cc/exports/preview` | admin\|super | T6 v2 预览：归一化范围/行列、预估数据域行数、服务端判敏与权限结果；不返回实际数据 |
-| POST `/api/cc/exports` | admin\|super | v2 生成 XLSX/CSV ZIP，create 重算判敏并写 job/审计；旧 v1 形状归一化后保留固定 13 CSV 兼容一个发布窗口 |
-| GET `/api/cc/exports/{id}/download` | admin\|super | 鉴权下载 XLSX/ZIP（admin 仅本机构 job），记 export.download 审计 |
-| GET `/api/cc/metrics/{metricKey}` | admin\|super | 看板指标，8 个 key 注册表分发（口径注释在文件头，改口径前先读） |
-| GET `/api/cc/activities/{id}/live-summary` | admin\|super | T3 单活动同快照汇总：报名、签到、配对、问卷、匿名人口统计与最近签到；机构管理员仅本机构，跨机构 404 |
-
-**超管**（`super.pb.js`）
-
-| 端点 | 说明 |
-|---|---|
-| POST `/api/cc/super/invites`、`POST /api/cc/super/invites/{id}/revoke` | 邀请码生成（`cc_inv_`+24 随机，只存 sha256，明文仅本次响应）/ 撤销 |
-| GET `/api/cc/super/backup-status` | 最近备份审计 + 三态告警（无记录/失败/超 36h 视为 cron 中断） |
-| POST `/api/cc/super/backup/run` | **已下线，恒 410**（真备份走 deploy/backup.sh + PB 自带 `/api/backups`） |
-| POST `/api/cc/super/templates`、`POST /api/cc/super/templates/{id}/publish` | 问卷模板创建（事务解循环引用）/ 发新版本（已发布版本不可变） |
-
-**直连写守卫**（`guards.pb.js` + surveys/submissions/reports 内模型钩子）：activities/trainings 创建强制 draft、禁改 status/organization_id/checkin_qr_token；registrations/answers/checkins/sessions/attendances 禁直连写；accounts 禁改 status/org；survey_questions 的 locked 题禁改、question_code 不可变；reports 创建强制归因+审计。所有守卫对 `_superusers` 放行（运维/测试）。
+```sh
+rg -n 'routerAdd' backend/pb_hooks
+```
 
 ### 5.5 横切机制
 
 - **审计**：`writeAudit(app, entry)`，约定与业务写**同事务**（事务内传 txApp）。动作代码分布见各域文件；改业务动作时别忘了补审计。
-- **限流**：滑动窗口，状态存 `$app.store()`（Go 侧共享 KV，**单实例部署前提**），键前缀 `cc_rl|`。生产经 Caddy 反代必须启用 trusted proxy headers（迁移 `1785889200` 已设 `X-Forwarded-For`），否则 per-IP 限流退化为全平台共享桶。
+- **限流**：部分窗口存在 `$app.store()`，部分认证/导出额度通过数据库事务持久化；分别查看 `authguard.pb.js`、`phoneauth.pb.js` 与导出实现，不假定所有限流重启即清空。生产经 Caddy 反代必须启用 trusted proxy headers（迁移 `1785889200` 已设 `X-Forwarded-For`），否则 per-IP 限流退化为全平台共享桶。
 - **敏感导出过滤**：普通导出按 `registration_field_defs.is_sensitive` 与 `survey_questions.is_sensitive` 两个标记位排除（**禁止按字段名启发式判断**），participants.csv 不含 username；敏感导出需机构开关 + `confirm:true` 二次确认 + 独立审计动作。CSV 公式注入防护（`= + - @ Tab` 前置单引号）。导出文件落 `pb_data/exports`（0700/0600），文件名随机，下载有路径前缀防护。
 - **名额并发**：报名创建端点只是预检，**硬校验在 transition 到 approved 的事务内**（总名额+角色名额双查）；SQLite busy 类错误重试 2 次后 409。
 - **错误形态**：统一 `{code, message, data:{code}}`；handler 抛 `ccError` 由顶层 catch 转换，事务内抛出即回滚。部分文件（surveys/submissions/exports/super/metrics）混用 `jsonError` 直接 return 形态——改代码时跟随本文件既有风格。
 - **Realtime 只做失效通知**：管理端订阅 activities/registrations/checkins/activity_surveys/submissions/activity_pairs 后统一防抖重取 `live-summary`，不从事件 payload 推导指标；参与者只能订阅自己的 `cc.participant.pairing.<participantId>` 主题，且消息发送前再次按当前认证清洗。人口统计任一桶小于 5 时，该维度全部桶一起抑制，防止结合已通过总数做减法反推。
-- **配置**：hooks 内**没有任何环境变量**，阈值都是代码内常量（登录 5 次/10min、邀请码默认 7 天、签到 token 24 位……）。运行时持久状态只有 `$app.store()` 和 `pb_data/exports`。
+- **配置**：hooks 通过 `$os.getenv()` 读取手机号 HMAC、短信 provider、备份密钥等环境变量；清单见 `.env.example` 与 Compose 的透传配置。新增配置须同步示例、运行时校验和发布门禁，不打印值。
 
 ### 5.6 迁移编写约定
 
-- 结构 `migrate((app) => {up}, (app) => {down})`，**down 必须真实可回滚**（冒烟脚本做 up→down→up 往返验证）。
-- PocketBase 0.28 **不自动附加 `created`/`updated`**：每个集合显式声明两个 autodate 字段。
-- `bool` 一律 `required: false`（0.28 中 required bool 会强制取 true）。
+- 结构 `migrate((app) => {up}, (app) => {down})`，为 down 写明可逆范围（冒烟脚本做 up→down→up 往返验证）；保留业务数据的迁移不保证恢复旧业务行为，不能将 schema down 等同生产回滚。
+- 沿用仓库迁移约定：每个集合显式声明两个 autodate 字段。
+- `bool` 一律 `required: false`（避免 required bool 强制取 true）。
 - 空 relation 存 `''` 而非 NULL（"平台级 vs 机构级"用 `organization_id = ''` 表达，空串可参与唯一索引）。
 - relation 一律 `cascadeDelete: false`（配合无硬删除）。
-- SQLite 无法表达"部分唯一"（如"每活动至多一条 open 会话"）：**不建全量唯一索引，由 hooks 事务保证**。
+- 当前开放场次等条件唯一性由 hooks 事务保证；新增约束先核对迁移与并发测试，不用全量唯一索引误伤历史记录。
 - 注意 `migrate` 失败退出码也可能为 0：脚本都要 grep 输出中的 `Error`（测试脚本已这么处理）。
 
-### 5.7 后端测试体系（`backend/tests/`）
+### 5.7 后端测试体系
 
-- `run_integration.sh`（L3 集成套件，**CI 必过**）：自举临时实例（mktemp 目录，不污染本地 pb_data）→ 空库 migrate → 建临时超管 → SQL 直插模板 fixture → 跑 `integration/` 下 全部 suite（2026-09-07 本轮 636 断言）：越权矩阵、名额/配对并发、状态机、手机号认证（含注册/找回）、Realtime ACL、复制活动、问卷资格、v1/v2 导出准确性与敏感门禁、限流、备份告警、无硬删除和安全加固等。
-- `migration_smoke.sh`：seed 及后续迁移局部回滚 → 全量 down → sqlite3 直查 26 个业务/内部集合清零 → 再 up，随后 serve 抽查，共 62 项。
-- **两条强制规则**：① authguard 对内置 auth-with-password 按 IP 限 25 次/10min，一轮全量当前使用 22 次（余量 3）——新增套件仍应避免消耗这项预算，管理员登录态用 impersonate，参与者走 `/api/cc/auth/participant`；② 新增带 `organization_id` 的接口，**必须同 PR 补机构越权用例**（通用端点放 `suite_acl.py`，领域聚合端点可放对应 suite）。
+[后端测试手册](../backend/tests/README.md)说明隔离数据库、fixture、端口和升级测试。新增可关联 `organization_id` 的接口必须同 PR 补越权用例。避免新增不必要的内置 `auth-with-password` 调用耗尽 IP 限流预算，使用 fixture 的 impersonate 工厂；保留 runner 对限流套件的顺序约束。
 
 ## 6. 前端详解（`frontend/`）
 
 ### 6.1 技术选型
 
-极简依赖：react/react-dom 18、react-router-dom 6、pocketbase SDK 0.21（既是 HTTP client 也是 auth 存储）、qrcode（管理端本地生成二维码 dataURL）。**没有**状态库、UI 库、CSS 框架、图表库（看板是纯数字卡片）。状态管理 = useState/useEffect + PB authStore 订阅。构建脚本 `build = tsc --noEmit && vite build`（先类型检查）。
+极简依赖：react/react-dom 18、react-router-dom 7、pocketbase SDK 0.21（既是 HTTP client 也是 auth 存储）、qrcode（管理端本地生成二维码 dataURL）。**没有**状态库、UI 库、CSS 框架、图表库（看板是纯数字卡片）。状态管理 = useState/useEffect + PB authStore 订阅。构建脚本 `build = tsc --noEmit && vite build`（先类型检查）。
 
 ### 6.2 目录与分层
 
@@ -353,7 +266,7 @@ src/
 
 ### 6.4 数据获取与错误处理约定
 
-无请求库，两种模式：集合数据用 `collectionsForRole(role).xxx.getList(...)` 直接调 SDK；业务动作用各 feature 的 api 模块封装走 `shared/api/http.ts` 的 `apiGet/apiPost`（错误规范化为 `ApiError{status, code, details}`，业务错误码从 `details.code` 读）。页面级统一手写 `useState(data/error/loading) + useEffect(cancelled 标志) + useCallback(reload)`。导出下载是特例：原生 fetch + Authorization + blob。T3 的 `features/admin/lib/activityLive.ts` 先建立 Realtime 订阅再首取快照，事件仅触发防抖重取，并在断线/重连时更新连接状态与刷新快照。T5 的 `features/participant/lib/myPairingLive.ts` + `lib/useMyPairing.ts` 把同一模式用于参与者本人配对状态（订阅本人 `checkins` + `cc.participant.pairing.<participantId>` topic，重拉 `my-pairing`；订阅失败降级为一次性快照 + 离线提示；后台刷新失败保留旧快照并经 error 标记陈旧）：签到成功页/活动详情页用单活动容器 `components/MyPairingCard.tsx`（PRD §5.3 五态，文字 + 状态图标 + 颜色共同表达），「我的」中心用页面级 `useMyPairingMap` 单订阅多活动 + 纯展示 `MyPairingCardView`，且仅已通过审核的报名条目挂载配对卡。
+无请求库，两种模式：集合数据用 `collectionsForRole(role).xxx.getList(...)` 直接调 SDK；业务动作用各 feature 的 api 模块封装走 `shared/api/http.ts` 的 `apiGet/apiPost`（错误规范化为 `ApiError{status, code, details}`，业务错误码从 `details.code` 读）。页面级统一手写 `useState(data/error/loading) + useEffect(cancelled 标志) + useCallback(reload)`。导出下载是特例：原生 fetch + Authorization + blob。T3 的 `features/admin/lib/activityLive.ts` 先建立 Realtime 订阅再首取快照，事件仅触发防抖重取，并在断线/重连时更新连接状态与刷新快照。T5 的 `features/participant/lib/myPairingLive.ts` + `lib/useMyPairing.ts` 把同一模式用于参与者本人配对状态（订阅本人 `checkins` + `cc.participant.pairing.<participantId>` topic，重拉 `my-pairing`；订阅失败降级为一次性快照 + 离线提示；后台刷新失败保留旧快照并经 error 标记陈旧）：签到成功页/活动详情页用单活动容器 `components/MyPairingCard.tsx`（文字 + 状态图标 + 颜色共同表达），「我的」中心用页面级 `useMyPairingMap` 单订阅多活动 + 纯展示 `MyPairingCardView`，且仅已通过审核的报名条目挂载配对卡。
 
 ### 6.5 路由清单
 
@@ -365,15 +278,15 @@ src/
 
 ### 6.6 样式体系
 
-纯手写 CSS，三个文件：`shared/styles/global.css`（`:root` 设计 token——`--cc-brand/neutral/success/...` 色系、圆角阴影动效，**组件不写死 hex**；`.cc-*` 共享类），分区样式 `participant.css`(`.ccp-*`)、`admin.css`(`.admin-*`)、`superadmin.css`(`.sa-*`) 由各端 barrel 引入只随本端加载。视觉规范见 `docs/planning/ui-design.md`。
+纯手写 CSS，三个文件：`shared/styles/global.css`（`:root` 设计 token——`--cc-brand/neutral/success/...` 色系、圆角阴影动效，**组件不写死 hex**；`.cc-*` 共享类），分区样式 `participant.css`(`.ccp-*`)、`admin.css`(`.admin-*`)、`superadmin.css`(`.sa-*`) 由各端 barrel 引入只随本端加载。公开端同时有首页样式覆盖；以现有 CSS 与实际页面为准，移动端可用性要求见 [业务规则](business-rules.md)。
 
 ### 6.7 前端测试
 
-Vitest + jsdom + Testing Library，51 个测试文件与源码 colocate，主力打**纯函数 lib**（状态机、文案、表单校验）与页面行为（`src/test/mockApi.ts` 的 `stubApi()` 按"METHOD 路径片段"stub fetch，`makeTestToken/saveParticipantSession` 注入登录态）；`router.test.tsx` 用 MemoryRouter 验证三分区守卫。运行 `npm test`。
+Vitest + jsdom + Testing Library，测试文件与源码 colocate，主力打**纯函数 lib**（状态机、文案、表单校验）与页面行为（`src/test/mockApi.ts` 的 `stubApi()` 按"METHOD 路径片段"stub fetch，`makeTestToken/saveParticipantSession` 注入登录态）；`router.test.tsx` 用 MemoryRouter 验证三分区守卫。运行 `npm test`。
 
 ### 6.8 公开页 SSR / GEO
 
-公开页（`/`、`/about`、`/privacy`、`/activities`、`/activities/past`、`/a/:id`、`/posts/:id`）由独立的渲染服务 `public-web` 做服务端渲染，让搜索引擎与无 JS 抓取方直接读到正文与元信息；功能页（登录后的业务界面）仍是原 SPA。设计决策与否决方案见 [planning/public-web-ssr-plan.md](planning/public-web-ssr-plan.md)。
+公开页（`/`、`/about`、`/privacy`、`/activities`、`/activities/past`、`/a/:id`、`/posts/:id`）由独立的渲染服务 `public-web` 做服务端渲染，让搜索引擎与无 JS 抓取方直接读到正文与元信息；功能页（登录后的业务界面）仍是原 SPA。设计决策与否决方案见 [public-web.md](public-web.md)。
 
 ```text
 浏览器/爬虫
@@ -406,15 +319,14 @@ curl -s http://127.0.0.1:3100/robots.txt                          # Disallow 与
 
 **参与者主链路**：广场/详情（`GET /api/cc/public/activities*`）→ 登录/注册（用户名/手机号+密码，或手机号验证码；新用户须在 `/login` 或报名链路用「用户名+密码+手机号」注册，首次验证不再自动建号）→ 提交报名（`POST .../register`，按所选角色的 role_scope 字段渲染表单）→ 在 `/me`（`GET /api/cc/me/overview`）看审核状态和绑定/换绑手机号 → 到场扫固定二维码 → `POST /api/cc/checkin/self`（幂等）→ 活动后问卷草稿/提交。
 
-**机构管理员日常**：建活动（draft）→ （如机构开审核则提交审批）→ 发布 → 审核报名（transition，事务内名额硬校验）→ 现场工作台开放签到、配对与问卷 → 用五步向导按范围/数据域/行列生成 XLSX 或 CSV ZIP → 培训同理。旧 v1 固定 13 CSV 仅作一个发布窗口的兼容入口。
+**机构管理员日常**：建活动（draft）→ （如机构开审核则提交审批）→ 发布 → 审核报名（transition，事务内名额硬校验）→ 现场工作台开放签到、配对与问卷 → 用五步向导按范围/数据域/行列生成 XLSX 或 CSV ZIP → 培训同理。旧 v1 固定 13 CSV 仍供 MCP 使用，不得仅因旧计划写过过渡期就下线。
 
 **超管**：建机构、生成一次性邀请码（明文只展示一次）、机构开关（发布审核/敏感导出）、活动审批/下架、内容推文管理（`/super/posts`，置顶/显隐，无硬删除）、问卷模板版本管理、全局看板/导出/审计、备份告警（`/super/system`）。
 
 **数据出口**：导出 ZIP → 外部分析 agent 经 `mcp/` MCP server 取数（`export_activity_data` 恒 `include_pii:false`，只回文件路径不回正文）→ 报告经 `upload_report` 回传 `reports` 集合（强制 draft，人工审核发布，钩子记 `report.upload` 审计）。
 
 MCP 是由 WorkBuddy、Kimi、Claude、Codex 等本地客户端启动的 STDIO 进程，Chat Circles 后端 URL
-只是它访问 PocketBase 的地址，不是远程 MCP 端点。不同客户端的完整配置、未备案期间安全接入与 SSH
-隧道、首次验收、云端 agent 限制见 [`mcp/README.md`](../mcp/README.md)。
+只是它访问 PocketBase 的地址，不是远程 MCP 端点。不同客户端的完整配置、首次登录与验收、云端 agent 限制见 [`mcp/README.md`](../mcp/README.md)。
 
 ## 8. 常见修改食谱
 
@@ -425,7 +337,7 @@ MCP 是由 WorkBuddy、Kimi、Claude、Codex 等本地客户端启动的 STDIO �
 4. 集合若带 `organization_id`：**同 PR 在 `suite_acl.py` 补越权用例**（强制）。
 
 **加一个业务端点（写操作）**
-1. 若属于手机号/现场配对/活动快照/细粒度导出，先对照 `docs/planning/api-design.md` 与 `shared/api/accountEvent.ts`，禁止在 feature 内改机器名或重定义同义类型；T3 快照还必须保持“Realtime 只失效、服务端重算”的边界。
+1. 若属于手机号/现场配对/活动快照/细粒度导出，先对照 [API 契约](api-contracts.md) 与 `shared/api/accountEvent.ts`，禁止在 feature 内改机器名或重定义同义类型；T3 快照还必须保持“Realtime 只失效、服务端重算”的边界。
 2. 在对应域的 `pb_hooks/*.pb.js` 加 `routerAdd`：用本文件内联的 `requireAuth`/`ccError`/`writeAudit` 等工具；机构资源一律服务端注入 organization_id，跨机构 404；写操作放事务内并写审计。
 3. 需要封堵直连写时同步 `guards.pb.js`。
 4. 集成测试：对应 suite 补断言；新机构资源必须同 PR 补 `suite_acl.py`；注意 auth 预算（§5.7）。
@@ -443,25 +355,28 @@ MCP 是由 WorkBuddy、Kimi、Claude、Codex 等本地客户端启动的 STDIO �
 
 ## 9. 测试与 CI
 
-三层测试：
+按修改范围运行最小有意义的检查，发布前再按[发布清单](release-checklist.md)验收。不在文档固定测试总数，以本次输出为准。
 
-| 层 | 位置 | 运行 | 覆盖 |
-|---|---|---|---|
-| 前端单元/组件 | `frontend/src/**/*.test.*` | `cd frontend && npm test` | 随功能变更运行并读取实际通过数：页面/组件行为、路由守卫、手机号交互、Realtime 失效化、工作台口径、配对卡五态与导出向导 |
-| 后端集成 + 迁移冒烟 | `backend/tests/` | `bash backend/tests/run_integration.sh`、`migration_smoke.sh` | 越权矩阵、状态机、并发名额、导出、限流、无硬删除……（AC-01~23 映射见 docs/planning/test-plan.md） |
-| E2E 主链路 | `e2e/` | `cd e2e && npm test`（环境全自动自举，与本地库隔离） | 手机号登录→报名→审核→双角色签到/配对/Realtime→问卷→细粒度导出，外加培训链路 |
-| T7 发布验收 | `scripts/t7-release-acceptance.sh` | `bash scripts/t7-release-acceptance.sh` | 串联配置 15 项、hooks/备份语法、前端、迁移、后端集成与 E2E；不部署、不读真实 `.env` |
+| 修改范围 | 从仓库根目录运行 |
+| --- | --- |
+| 前端 | `npm run lint --prefix frontend`、`npm run typecheck --prefix frontend`、`npm test --prefix frontend`、`npm run build --prefix frontend` |
+| 公开 SSR | `npm run test:public --prefix frontend`、`npm run build:public --prefix frontend` |
+| 后端业务/权限 | `bash backend/tests/run_integration.sh` |
+| 数据迁移 | `bash backend/tests/migration_smoke.sh`；PB 版本升级另跑 `pocketbase_upgrade.sh`，见后端测试手册 |
+| 端到端 | `npm test --prefix e2e`，首次准备见 [E2E 手册](../e2e/README.md) |
+| MCP | `npm ci --prefix mcp`、`npm test --prefix mcp` |
+| 部署配置/备份 | `node deploy/verify-release-config.mjs`、`node --test deploy/*.test.mjs backend/tests/*.test.mjs`、`python3 -m unittest discover -s deploy -p 'test_*.py'`；镜像变更另跑相应 Docker smoke |
+| 文档 | 相对链接/锚点、命令与当前配置核对、`git diff --check` |
 
-CI（`.github/workflows/ci.yml`，push 到 main 与全部 PR 触发，三 job 均为 PR 必过）：`frontend`（lint→typecheck→test→build）、`backend-migrations`（空目录 migrate up + `node --check` 全部 hooks）、`backend-integration`（全量集成套件）。另有 `e2e.yml`（PR + 每日 cron）与 `deploy.yml`（push main 自动部署）。
+CI 的实际 jobs 见 `.github/workflows/ci.yml`（前端、迁移/部署配置、后端集成、依赖审计、MCP 安装、backup/public-web Docker smoke），E2E 单独在 `e2e.yml`。`scripts/t7-release-acceptance.sh` 是部分检查的统一入口，需要已安装依赖及 OSV-Scanner；它不替代全部 CI jobs。
 
-## 10. 部署与运维速览
+## 10. 部署与运维入口
 
-- **一体化镜像**（根 `Dockerfile`）：stage1 构建前端 → stage2 alpine 下载 PB 0.28.4（sha256 硬校验）+ 拷入 `pb_public`/`pb_migrations`/`pb_hooks`；`VOLUME /pb/pb_data`；容器启动时 `serve` 自动应用迁移（与本地需手动 `migrate up` 不同）。
-- **compose 四服务**：`app`（生产基础 compose 默认不向 host 发布端口，只在 Docker 私网供 Caddy/backup/public-web 以 app:8090 访问；显式叠加 `deploy/docker-compose.debug.yml` 才发布回环 `127.0.0.1:8090`）、`public-web`（公开页 SSR，见 §6.8；无密钥、不挂 pb_data、不发布 host 端口）、`backup`（crond 每日北京时间 02:00 跑 `deploy/backup.sh`：PB `/api/backups` 一致性快照 → 下载 ZIP → 校验 → 删服务端副本 → 本机保留最近 2 份（定时与部署前备份合计） → 写 `last_backup.json` 标记并直写 `audit_logs` 驱动超管告警）、`caddy`（标准 80/443 Automatic HTTPS，安全响应头，封 `/_/*` 管理台，按路径分发到 public-web/app 并覆写 XFF）。
-- **部署流水线**：push main → `deploy.yml` SSH 到 ECS `/opt/chatcircle` → `git merge --ff-only origin/main` → `docker compose up --build -d`。
-- **恢复**：stop app → 用 `cc_daily_*.zip` 覆盖 pb_data → start（compose 文件尾注释）。
-- **环境变量**：全部见 `.env.example`（PB 版本、备份保留份数、超管与 agent 服务账号凭据、阿里云密钥；真实 .env 不入库）。
-- 细节与已知未验证项（Docker 构建/备份脚本在真实容器环境的验证状态、服务器上待删的 override 文件）以 `deploy/README.md` 为准。
+[部署手册](../deploy/README.md)负责配置、固定 SHA 发布、四服务拓扑及排障；[备份恢复手册](../deploy/backup-recovery.md)负责一致性副本、隔离恢复和告警。不要在本地拿真实库执行测试。
+
+Deploy 只接受同一完整 SHA 的成功 main push CI，先构建和预检、执行旧运行时一致性备份与卷权限准备，才快进生产目录并切换镜像，随后核对 revision、健康和公开网页。它不自动等待单独 E2E，也不自动回滚；旧 SHA 通常不满足快进约束，不能直接重放旧 SHA 当作回滚。故障处理须匹配代码、数据库、HMAC key 与网关配置。
+
+本机默认仅保留最近 2 份成功备份，调度器每天北京时间 02:00 执行，部署前后也可能生成备份；份数不是天数。异地备份暂缓，待明确目的地后按 [offsite-backup.md](../deploy/offsite-backup.md)配置和实际恢复验收。
 
 ## 11. 红线速查（改代码前必读）
 
@@ -471,11 +386,11 @@ CI（`.github/workflows/ci.yml`，push 到 main 与全部 PR 触发，三 job �
 4. 机构隔离在服务端强制：自定义端点内 organization_id 由服务端注入，放行的直连 create 由客户端传本机构值并经 API rules 校验；跨机构 404；新增带 organization_id 的接口必须同 PR 补越权测试。
 5. 敏感数据导出只看 `is_sensitive` 标记位，禁止字段名启发式。
 6. 审计与业务写同事务；metadata 不含密码/完整敏感答案。
-7. hooks 无环境变量、无跨文件共享；改 `lib/` 契约必须同步全部内联副本。
-8. 集成测试的内置认证预算仅余 3 次（§5.7）；`suite_hardening.py` 必须是 runner 中最后一个使用内置认证的 suite。
+7. hooks 使用 JSVM 与 `$os.getenv()`；改 `lib/` 契约必须同步全部内联副本。
+8. 集成测试避免耗尽内置认证限流预算；新增套件保留 runner 的隔离与执行顺序约束。
 9. Realtime payload 不承载权威指标；事件只使快照失效，最终数值必须重新读取服务端同快照汇总。
 10. 环境差异走环境变量：`.env.example` 入库，真实 `.env` 与 secrets 不入库。
-11. 需求口径以 PRD v0.3 为基线；业务口径变更先回 `docs/planning/` 评审，再改代码。
+11. 业务口径见 [business-rules.md](business-rules.md)；改变已确认规则时先确认需求，再同 PR 更新契约与测试。
 
 ---
 
