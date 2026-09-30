@@ -1,5 +1,7 @@
 # Chat Circles 开发者指南
 
+中文 | [English](developer-guide.en.md)
+
 面向首次接手仓库的开发者与 agent。先按本文启动本地环境，再按修改领域阅读[文档索引](README.md)。业务规则见 [business-rules.md](business-rules.md)，现有维护缺口见 [maintenance.md](maintenance.md)。实现以当前代码、迁移和测试为准；文档变更与相关代码同 PR 维护。
 
 ## 1. 项目一页纸

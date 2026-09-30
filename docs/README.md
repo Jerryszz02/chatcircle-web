@@ -2,6 +2,20 @@
 
 新开发者或 agent 从这里接手。本文索引当前仍需维护的资料；代码与测试说明实现，需求规则说明边界，生产结果必须另行核验。
 
+Agent 开始任务前先读根目录 [AGENTS.md](../AGENTS.md)，其中只维护协作与交付规则；技术与业务细节仍按本文索引查阅。
+
+## 中英文入口
+
+| 读者与用途 | 中文 | English |
+| --- | --- | --- |
+| 项目总介绍 | [README](../README.md) | [README](../README.en.md) |
+| Agent 交接与工作规则 | [AGENTS](../AGENTS.md) | [AGENTS](../AGENTS.en.md) |
+| 开发者上手 | [开发者指南](developer-guide.md) | [Developer guide](developer-guide.en.md) |
+| 机构工作人员 | [机构管理员教程](org-admin-guide.md) | [Organization administrator guide](org-admin-guide.en.md) |
+| 平台运营负责人 | [超级管理员教程](super-admin-guide.md) | [Super administrator guide](super-admin-guide.en.md) |
+
+以上五份提供中英文对照；其他专题手册仍使用现有版本。
+
 ## 第一次接手
 
 1. 读根目录 [README](../README.md)，了解参与者、机构与平台三类角色。
