@@ -1,6 +1,6 @@
 // pairings.pb.js — T2 现场编号、队列、配对、调整与本人配对快照
 //
-// 冻结契约：docs/planning/api-design.md §4、database-design.md §6.3/§6.4。
+// 冻结契约：docs/api-contracts.md §4；数据模型见 docs/developer-guide.md §5.1。
 // - POST /api/cc/activities/{id}/pairings/start
 // - POST /api/cc/activities/{id}/pairings/reassign
 // - GET  /api/cc/activities/{id}/my-pairing

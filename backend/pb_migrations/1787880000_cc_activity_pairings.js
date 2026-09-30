@@ -1,7 +1,7 @@
 /// <reference path="../pb_data/types.d.ts" />
 
 // T2：现场编号与活动配对
-// 契约：docs/planning/api-design.md §4、database-design.md §6.3/§6.4。
+// 契约：docs/api-contracts.md §4；数据模型见 docs/developer-guide.md §5.1。
 // - activities 保存配对开始/现场锁定事实与两个角色的单调递增编号计数器；
 // - checkins 保存签到时的角色快照与不可复用现场序号；
 // - activity_pairs 只允许 hooks 写入，参与者不能直读或订阅记录；

@@ -212,7 +212,7 @@ export function hasManualShaCiValidation(workflow) {
     && /SHA 必须是 40 位/.test(active);
 }
 
-// —— 公开页 SSR 渲染服务（public-web，见 docs/planning/public-web-ssr-plan.md）——
+// —— 公开页 SSR 渲染服务（public-web，见 docs/public-web.md）——
 
 /** 取 compose 中某服务的配置块（两空格缩进的服务键到下一个同级/顶层键为止）。 */
 function getComposeServiceBlock(compose, serviceName) {

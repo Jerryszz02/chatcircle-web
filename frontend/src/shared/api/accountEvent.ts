@@ -12,7 +12,7 @@ import type {
  *
  * 这些类型描述冻结契约；T3 的 live-summary 与管理端 Realtime 失效化已落地，
  * 其余 T1/T2/T6 schema 与端点仍须先复用本文件再实现，禁止在 feature 内另造同义字段。
- * 权威语义与迁移顺序见 docs/planning/api-design.md 与 database-design.md。
+ * 权威语义与迁移顺序见 docs/api-contracts.md 与 docs/developer-guide.md。
  */
 
 export const ACCOUNT_EVENT_CONTRACT_VERSION = '2026-08-28.t0-v1' as const;

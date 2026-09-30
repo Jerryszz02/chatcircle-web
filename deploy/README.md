@@ -1,4 +1,4 @@
-# Chat Circles 生产部署手册（M5）
+# Chat Circles 生产部署手册
 
 > 当前生产基线：`chatcircle.empact.cn` 已完成 ICP 备案，正式入口使用标准 TCP 80/443。
 > Caddy 负责 Automatic HTTPS 与反向代理；未备案时期的 `:8443 + DNS-01 + ALIYUN_ACCESS_KEY_*` 已退出正式架构。
@@ -57,7 +57,7 @@ CC_BACKUP_KEY=<至少32字符的随机专用备份密钥>
 
 旧 `CC_SMS_TEMPLATE_CODE` 仅为迁移兼容变量，新后端不再读取。
 
-首次创建全新 `pb_data` 卷时，环境变量本身不会自动创建 PocketBase `_superusers` 账号。应用启动后必须执行一次：
+首次创建全新 `pb_data` 卷时，环境变量本身不会自动创建 PocketBase `_superusers` 账号。应用启动后必须执行一次。以下 `PB_SUPERUSER_EMAIL` / `PB_SUPERUSER_PASSWORD` 须先在受控运维终端通过环境变量安全注入；Compose 读取 `.env` 不会自动把值导出到宿主 shell，不要把密码直接写在命令文本或日志中：
 
 ```bash
 docker compose up --build -d
@@ -77,36 +77,20 @@ ALIYUN_ACCESS_KEY_SECRET=...
 
 这两个变量只服务于未备案时期 Caddy DNS-01 临时方案。完成本次 443 切换并验证成功后可从生产 `.env` 删除。
 
-## 3. ICP 备案完成后的 8443 → 80/443 切换
+## 3. 发布与验收
 
-### 3.1 合并正式 443 配置前必须完成
+### 3.1 发布前提
 
-1. `chatcircle.empact.cn` 的 DNS A/AAAA 记录必须指向目标 ECS。
-2. 阿里云 ECS 安全组放行入方向 TCP **80** 和 **443**。
-3. 如主机启用了 firewalld/iptables，同样允许 80/443。
-4. 确认宿主机没有其他进程占用 80/443：
-
-```bash
-ss -lntp | grep -E ':(80|443)\s' || true
-```
-
-5. 删除未备案时期遗留的服务器侧 Compose override。先备份：
-
-```bash
-cd /opt/chatcircle
-if [ -f docker-compose.override.yml ]; then
-  cp docker-compose.override.yml ~/docker-compose.override.yml.pre-443
-  rm docker-compose.override.yml
-fi
-```
-
-新的 Deploy workflow 对 `/opt/chatcircle/docker-compose.override.yml` **fail-closed**；该文件仍存在时不会修改生产版本。
+1. DNS 指向目标 ECS，安全组/主机防火墙允许 TCP 80/443；共享 Caddy 正在承载 Empact，改网关前须核对其他站点与在途运维任务。
+2. 服务器 `/opt/chatcircle` 无未处理的本地修改，保留并审查现场配置；不存在遗留 `docker-compose.override.yml`。流水线对该文件直接拒绝部署，不要未经备份就覆盖或删除未知配置。
+3. GitHub 配置 `ECS_HOST`、`ECS_USER`、`ECS_SSH_PRIVATE_KEY`，应用凭据仅在服务器 `.env`；已有生产实例具备可成功执行的备份运行时。
+4. 完整目标 SHA 的 main push CI 成功，独立 E2E 检查也应通过。不要用历史通过记录代替本次结果。
 
 ### 3.2 正式部署
 
-PR 合并到 `main` 后 GitHub Actions 自动：
+PR 合并到 `main` 后，Deploy 在对应 main push CI 成功后自动触发；手动 `workflow_dispatch` 同样校验完整目标 SHA 的成功 CI。它不自动等待独立 E2E workflow。发布过程：
 
-1. SSH 到 ECS，只执行 `git fetch`；
+1. SSH 到 ECS，刷新目标提交并检查现场状态；
 2. 在临时 detached worktree 复制生产 `.env`；
 3. `docker compose config -q`；
 4. 只预拉取 Caddy；backup 与 public-web 使用本提交的构建上下文；
@@ -115,9 +99,9 @@ PR 合并到 `main` 后 GitHub Actions 自动：
 7. 同样以无网络、无上游 smoke 验证候选 public-web 镜像（降级 200/503、robots、真实 404）；
 8. 检查 `CC_PHONE_HASH_KEY >= 32` 和 production+aliyun 短信必填变量；
 9. 等待当前 backup runtime 就绪并执行一次成功备份；
-10. 上述门禁全部通过后才 fast-forward `/opt/chatcircle/main`；
+10. 确认生产 HEAD 是目标提交祖先，成功备份并准备命名卷 UID/GID 后，才快进 `/opt/chatcircle` 的 `main`；
 11. `docker compose up --no-build --pull never -d`，只使用预检构建的候选镜像；随后 `caddy reload` 让按提交绑定的 Caddyfile 立即生效（bind mount 的纯内容变更不会触发容器重建）；
-12. 轮询 app、backup 与 public-web 容器 healthcheck，90 秒内必须进入 `healthy`，并核对镜像 revision；
+12. 轮询 app、backup 与 public-web 容器 healthcheck，90 秒内必须进入 `healthy`，并核对镜像 revision；新 backup 再生成一次备份并通过 `check-backup.py`；
 13. 线上门禁：`/api/cc/health` 200；首页原始 HTML 含 `rel="canonical"` 与 `__CC_PUBLIC_DATA__`（证明经 public-web SSR 而非 SPA 空壳）；`/robots.txt` 200 且含 Sitemap 行。
 
 缺 Secret、Compose 配置错误、镜像拉取失败或 build 失败都会发生在生产工作区更新之前。
@@ -187,14 +171,14 @@ chatcircle.empact.cn
 
 ## 5. 公开页渲染服务（public-web）
 
-公开页（首页、关于、隐私、活动广场、活动详情、公开推文）由独立的 `public-web` 服务做服务端渲染（SSR），让搜索引擎与无 JS 抓取方直接读到正文、canonical/OG 元信息与 robots/sitemap；功能页（登录后的业务界面）仍是 PocketBase 同源伺服的 SPA。设计决策与否决方案见 [docs/planning/public-web-ssr-plan.md](../docs/planning/public-web-ssr-plan.md)，路由分界以 `deploy/Caddyfile` 文件头注释为准。
+公开页（首页、关于、隐私、活动广场、活动详情、公开推文）由独立的 `public-web` 服务做服务端渲染（SSR），让搜索引擎与无 JS 抓取方直接读到正文、canonical/OG 元信息与 robots/sitemap；功能页（登录后的业务界面）仍是 PocketBase 同源伺服的 SPA。设计决策与否决方案见 [公开页 SSR 架构](../docs/public-web.md)，路由分界以 `deploy/Caddyfile` 文件头注释为准。
 
 - 镜像：`deploy/public-web.Dockerfile`（两阶段构建，运行时只带 `dist-public/`，无 node_modules 依赖）；与 app/backup 一样按 `CC_RELEASE_SHA` 标记，`docker compose build` 统一构建。
 - 职责：SSR HTML、`/public-assets/*`（hash 资源 immutable）、`/robots.txt`、`/sitemap.xml`、未知路径的真实 404。
 - 配置（全部非密钥，compose 已显式给出生产口径）：`PORT`（3100）、`CC_SITE_ORIGIN`（canonical/OG/sitemap 的对外 origin，默认 `https://chatcircle.empact.cn`）、`CC_PB_INTERNAL_URL`（上游 PocketBase，私网 `http://app:8090`）；可选 `CC_PUBLIC_FETCH_TIMEOUT_MS`（单请求上游超时，默认 5000）、`CC_PUBLIC_MAX_INFLIGHT`（在飞上游请求上限，默认 32）。
 - 健康检查：compose healthcheck 探 `/healthz`（浅活，不依赖上游）；`/readyz` 探上游 `/api/health`（2 秒超时），排障时用它区分「渲染服务挂」与「上游挂」。
 - 故障影响面：public-web 崩溃或未就绪只让公开路由在 Caddy 侧 502/503，功能 SPA 与 `/api/*` 不受影响（caddy 不 depends_on public-web，公开渲染故障不会锁死原业务）。上游 PocketBase 故障时首页降级为 200（静态介绍仍在，列表区显示错误态），其余公开页 503 + `Retry-After: 30`，任何情况下不得挂死连接。
-- 回滚：不单独发明机制——public-web 镜像与 Caddyfile 都随提交绑定，用 workflow_dispatch 重放上一个成功部署的 SHA 即整体回退。
+- 故障恢复：镜像和 Caddyfile 随提交绑定。Deploy 要求从当前 HEAD 快进到目标 SHA，通常拒绝旧 SHA；它没有自动回滚。优先通过修复或回退代码的后续 PR 继续快进发布。若必须恢复旧数据库，先停写、保留故障现场，在独立目录验证匹配旧镜像、数据库、HMAC key 与网关配置后再安排受控切换；不能让旧代码直接打开已迁移的新库。
 
 ## 6. 备份与恢复
 
@@ -202,7 +186,7 @@ chatcircle.empact.cn
 
 - app 通过内部专用接口调用 PocketBase 一致性备份，流式下载后删除本次服务端副本；不接受调用者传入文件路径，也不提供恢复接口。
 - backup 仅挂载 backups 卷，只有 `CC_BACKUP_KEY`，不能使用原生超管 API；网关拒绝 `/api/cc/internal/*`。
-- 下载后验证 ZIP CRC、data.db 和 auxiliary.db 的 SQLite quick_check，原子落盘；默认保留最新 `BACKUP_RETENTION_COUNT=2` 份，保持已合并 PR #79 的策略；按纳秒修改时间排序，先验证所有保留点再清理。每份归档附带版本/SHA-256 元数据，最近结果写 last_backup.json，并通过受限接口写固定备份审计。
+- 下载后验证 ZIP CRC、data.db 和 auxiliary.db 的 SQLite quick_check，原子落盘；默认保留最新 `BACKUP_RETENTION_COUNT=2` 份，按纳秒修改时间排序，先验证所有保留点再清理。每份归档附带版本/SHA-256 元数据，最近结果写 last_backup.json，并通过受限接口写固定备份审计。
 - runtime healthy 只证明调度器心跳；`check-backup.py` 独立检查失败、36 小时未更新、归档缺失/大小变化；宿主机监控也能发现 backup 容器停止。
 
 ```bash
@@ -212,7 +196,7 @@ docker compose exec -T backup python3 /usr/local/bin/check-backup.py
 
 **升级顺序**：先在受控 `.env` 中预置至少 32 字符的随机 `CC_BACKUP_KEY`，候选镜像验证通过后，使用旧服务生成成功备份，再运行 `prepare-runtime-volumes.sh` 将 app/backups/Caddy 的确切命名卷调整为 UID/GID 10001。旧 root 进程仍可读写；最后切换整个 Compose，app 和 backup 必须同时升级。部署流水线会执行卷迁移和新服务的首次实际备份。不再支持把新版 backup 单独连接到没有专用接口的旧 app。
 
-四个服务均非 root、只读根目录、no-new-privileges、cap_drop ALL；仅 Caddy 保留 NET_BIND_SERVICE。app 512 MiB/128 PIDs，其他服务各 192 MiB（backup 32、公开页和网关64 PIDs），合计运行内存上限1088 MiB；宿主机/Empact/构建另计。四条内部网络按业务连接拆分；app 单独出口，Caddy 保留现有 default 网桥，以保持 Empact 到宿主机的代理地址。Docker 网络不能替代接口鉴权。
+四个服务均非 root、只读根目录、no-new-privileges、cap_drop ALL；Caddy 额外授予 NET_BIND_SERVICE。app 512 MiB/128 PIDs，其他服务各 192 MiB（backup 32、公开页和网关64 PIDs），合计运行内存上限1088 MiB；宿主机/Empact/构建另计。四条内部网络按业务连接拆分；app 单独出口，Caddy 保留现有 default 网桥，以保持 Empact 到宿主机的代理地址。Docker 网络不能替代接口鉴权。
 
 真实恢复与邮件告警的操作、前置配置和验收边界见 [备份恢复与告警手册](backup-recovery.md)。恢复必须针对明确目标、匹配代码版本与 HMAC key；禁止直接用生产数据卷做演练。可复用的隔离演练命令（镜像已构建）：
 

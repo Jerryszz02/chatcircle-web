@@ -7,7 +7,7 @@ import { Button } from '../../../shared/ui';
 
 /**
  * 机构管理端布局（technical-design §5.3 /admin 分区）。
- * 极简公益科技风：左侧 240px 侧栏 + 顶部上下文栏（docs/planning/ui-design.md）。
+ * 极简公益科技风：左侧 240px 侧栏 + 顶部上下文栏（docs/developer-guide.md §6.6）。
  * 侧栏含品牌标识、主导航（活动 / 培训 / 看板 / 导出 / 审计日志）、当前管理员与主动退出
  * （管理后台不做无操作自动退出，但必须具备主动退出机制，PRD §12.4）。
  */
