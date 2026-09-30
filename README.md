@@ -1,5 +1,7 @@
 # Chat Circles
 
+中文 | [English](README.en.md)
+
 **「Chat Circles」青年心理健康公益项目的官方活动平台**，由 Empact 统一运营。
 
 🌐 **网站地址：[chatcircle.empact.cn](https://chatcircle.empact.cn)**
@@ -47,6 +49,7 @@
 
 从 **[接手文档索引](docs/README.md)** 开始，依次了解本地启动、业务规则和修改边界；再按任务查看 API、测试、部署、备份与运营手册。
 
+- [Agent 交接](AGENTS.md)：agent 的接手方式、协作边界与交付要求。
 - [开发者指南](docs/developer-guide.md)：目录结构、本地环境、架构与常见修改。
 - [维护待办](docs/maintenance.md)：尚未解决或需要重新验收的事项。
 
